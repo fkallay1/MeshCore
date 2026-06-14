@@ -10,8 +10,10 @@
 
 // Default OTA kanál PSK — MUSÍ sa zhodovať s ota_sender.py --psk.
 // Override cez build_flags:  -D OTA_CHANNEL_PSK='"moj-tajny-kluc"'
+// 16 alebo 32 bajtov (zhodné s ota_sender.py --psk, ktoré berie hex). Sender
+// posiela hex(OTA_CHANNEL_PSK); tu sú to surové bajty reťazca.
 #ifndef OTA_CHANNEL_PSK
-  #define OTA_CHANNEL_PSK "meshcore-ota"
+  #define OTA_CHANNEL_PSK "meshcore-ota-key"
 #endif
 
 // Postav OTA GroupChannel z PSK (hash = sha256(psk)[0], secret = psk doplnené

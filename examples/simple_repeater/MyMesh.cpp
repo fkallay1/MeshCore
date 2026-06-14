@@ -4,6 +4,12 @@
 #ifdef WITH_LORA_OTA
 #include "nrfota/OtaReceiver.h"
 #include "nrfota/OtaPatcher.h"
+#if __has_include("build_info.h")
+  #include "build_info.h"   // DOČASNÉ: test_nrf-ota/gen_build_info.py (pre-script)
+#endif
+#ifndef FW_BUILD_NUMBER
+  #define FW_BUILD_NUMBER 0
+#endif
 #endif
 
 /* ------------------------------ Config -------------------------------- */
@@ -1014,6 +1020,10 @@ void MyMesh::begin(FILESYSTEM *fs) {
   ota_build_channel(_ota_channel); // OTA GRP_DATA kanál z PSK
   _ota_ready = true;
   ota_print_flasher_debug();       // ak sa práve vrátil z flashera
+  Serial.print(F("[OTA] build #")); Serial.print(FW_BUILD_NUMBER);
+  Serial.print(F("  freq=")); Serial.print(_prefs.freq, 3);
+  Serial.print(F(" sf=")); Serial.print(_prefs.sf);
+  Serial.print(F(" bw=")); Serial.println(_prefs.bw, 1);
 #endif
 }
 
@@ -1350,6 +1360,15 @@ void MyMesh::loop() {
   uint32_t now = millis();
   uptime_millis += now - last_millis;
   last_millis = now;
+
+#ifdef WITH_LORA_OTA
+  // DOČASNÉ: heartbeat s build# (na detekciu verzie pri OTA teste cez Serial)
+  static unsigned long s_next_build_print = 0;
+  if (s_next_build_print == 0 || millisHasNowPassed(s_next_build_print)) {
+    s_next_build_print = futureMillis(5000);
+    Serial.print(F("[OTA] AALIVE build #")); Serial.println(FW_BUILD_NUMBER);
+  }
+#endif
 }
 
 // To check if there is pending work

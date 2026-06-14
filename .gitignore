@@ -17,3 +17,6 @@ compile_commands.json
 .venv/
 venv/
 platformio.local.ini
+
+# OTA test scaffolding (auto-generated)
+test_nrf-ota/build_info.h
