@@ -1,6 +1,11 @@
 #include "MyMesh.h"
 #include <algorithm>
 
+#ifdef WITH_LORA_OTA
+#include "nrfota/OtaReceiver.h"
+#include "nrfota/OtaPatcher.h"
+#endif
+
 /* ------------------------------ Config -------------------------------- */
 
 #ifndef LORA_FREQ
@@ -829,6 +834,29 @@ void MyMesh::onControlDataRecv(mesh::Packet* packet) {
   }
 }
 
+#ifdef WITH_LORA_OTA
+// Repeater "subscribne" jediný OTA kanál — keď sa channel_hash zhoduje,
+// MeshCore dešifruje GRP_DATA cez ota_channel.secret a zavolá onGroupDataRecv().
+int MyMesh::searchChannelsByHash(const uint8_t* hash, mesh::GroupChannel channels[], int max_matches) {
+  if (_ota_ready && max_matches > 0 && hash[0] == _ota_channel.hash[0]) {
+    channels[0] = _ota_channel;
+    return 1;
+  }
+  return 0;
+}
+
+// Dešifrovaný GRP_DATA payload: [ts 4B LE][ota_type 1B][...]. OTA payload
+// začína za 4B timestampom (zhodné s ota_sender.py meshcore_grp_data_packet).
+void MyMesh::onGroupDataRecv(mesh::Packet* packet, uint8_t type, const mesh::GroupChannel& channel,
+                             uint8_t* data, size_t len) {
+  if (type != PAYLOAD_TYPE_GRP_DATA) return;
+  if (channel.hash[0] != _ota_channel.hash[0]) return;   // nie náš OTA kanál
+  if (len < 5) return;                                   // ts(4) + aspoň typový bajt
+  ota_print_pkt(data + 4, (int)len - 4, (float)radio_driver.getLastRSSI(), packet->getSNR());
+  ota_process(data + 4, (int)len - 4);
+}
+#endif
+
 void MyMesh::sendNodeDiscoverReq() {
   uint8_t data[10];
   data[0] = CTL_TYPE_NODE_DISCOVER_REQ; // prefix_only=0
@@ -926,6 +954,10 @@ MyMesh::MyMesh(mesh::MainBoard &board, mesh::Radio &radio, mesh::MillisecondCloc
 }
 
 void MyMesh::begin(FILESYSTEM *fs) {
+#ifdef WITH_LORA_OTA
+  ota_check_flasher_debug();   // prečítaj GPREGRET2/RESETREAS čo najskôr po boote
+  _ota_ready = false;
+#endif
   mesh::Mesh::begin();
   _fs = fs;
   // load persisted prefs
@@ -975,6 +1007,13 @@ void MyMesh::begin(FILESYSTEM *fs) {
 
 #if ENV_INCLUDE_GPS == 1
   applyGpsPrefs();
+#endif
+
+#ifdef WITH_LORA_OTA
+  ota_init();                      // mount CustomLFS @ 0xD4000 + resume
+  ota_build_channel(_ota_channel); // OTA GRP_DATA kanál z PSK
+  _ota_ready = true;
+  ota_print_flasher_debug();       // ak sa práve vrátil z flashera
 #endif
 }
 
@@ -1259,6 +1298,10 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
       sendNodeDiscoverReq();
       strcpy(reply, "OK - Discover sent");
     }
+#ifdef WITH_LORA_OTA
+  } else if (memcmp(command, "ota", 3) == 0 && (command[3] == 0 || command[3] == ' ')) {
+    ota_handle_command(command + 3, reply);   // LoRa-OTA: status|verify|flash|clear|...
+#endif
   } else{
     _cli.handleCommand(sender_timestamp, command, reply);  // common CLI commands
   }
