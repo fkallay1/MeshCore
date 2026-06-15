@@ -169,3 +169,26 @@ nie pri blokujúcom `ota_apply`) → odstránený, nahradený varovným komentá
 3. **AGC auto-reset NEKOMBINOVAŤ s OTA flashom.**
 4. **Nemeniť radio config prijímača** kvôli jednému test-spoju — rozbije kompatibilitu so sieťou.
    Riešenie patrí na stranu test-nástroja (bridge), nie do produkčného FW.
+
+---
+
+## 7. Commit + spevnenie testu (po commite, na žiadosť)
+
+**Commity + push:**
+- MeshCore `12ca81c7` (features/nrf-ota): rawrx, ota agc, deferred OTA, docs, .gitignore.
+- FK_lora `0117492` (dev-stream): bridge LIVE heartbeat + preamble 32 + 22 dBm.
+- MeshCore `7cac5ce4`: spevnenie testu (nižšie).
+- Dokumenty: `readme_tech_nrf-ota.md`, `conv_claude_20260615.md`, `readme_verified_pooling.md`.
+
+**Spevnenie `ota_test_lora_repeater.py`** (detail: [readme_verified_pooling.md](readme_verified_pooling.md)):
+- **VERIFIED-polling**: `broadcast_until_verified()` — opakuje broadcast + poll `ota status` až
+  do VERIFIED / `--verify-wait` (60 s), viac pollov/kolo, sleduje rast recv/total, settle po
+  reboote. Nahradilo fixný `--cycles` loop, ktorý pri strate paketov na začiatku padol predčasne.
+- **Flash hardfault po dry-rune (NOVÝ FW nález)**: `ota verify` (malloc + streaming rekonštrukcia
+  442 kB) pokazí heap → následný `ota flash` hardfaultne na `malloc` (flasher stop po
+  "Komprimovany format" → OLD). Dôkaz: manuálny flash bez dry-runu PASS; automatický s dry-runom
+  FAIL. Fix v teste: dry-run je opt-in (`--verify-first`, default vyp). FW TODO: vyčistiť heap.
+- **Overené:** #34→#36 konzistentný **[PASS]**.
+
+> Pozn.: po DFU baseline sa raz prefs repeatera vrátili na SK preset (zostatok z SK testu) —
+> pred `run` treba `set radio 869.525,62.5,7,5` + reboot, nech CZ repeater počuje CZ bridge.
