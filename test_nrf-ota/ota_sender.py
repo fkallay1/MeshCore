@@ -449,7 +449,9 @@ def main():
               f'(drop={args.drop:.0%}) — fire-and-forget, prijímač kumuluje chunky')
     ok = False
     with serial.Serial(args.port, args.baud, timeout=0.05) as ser:
-        time.sleep(0.3)
+        # DTR pri otvorení resetne Adafruit nRF52 bridge → čerstvý boot rádia.
+        # Daj mu čas nabehnúť (radio.begin ~2s), inak sa stratí BEGIN.
+        time.sleep(2.5)
         ser.reset_input_buffer()
         for cyc in range(args.cycles):
             if args.cycles > 1:

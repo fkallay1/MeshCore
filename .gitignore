@@ -20,3 +20,10 @@ platformio.local.ini
 
 # OTA test scaffolding (auto-generated)
 test_nrf-ota/build_info.h
+test_nrf-ota/lora_old.bin
+test_nrf-ota/lora_new.bin
+test_nrf-ota/ota_patch.bin
+/ota_patch.bin
+
+# Claude Code agent/memory dir
+.claude/

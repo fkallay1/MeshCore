@@ -213,8 +213,12 @@ def phase_baseline(args):
     sz = extract_app_image(args.target_env, OLD_BIN)
     old_build = read_build_number()
     print(green(f"[OK] OLD app obraz ({sz}B)  build #{old_build}"))
-    print(cyan(">>> Krátky pohľad na boot repeatera (freq/sf/build#):"))
-    capture_serial(args.target_port, seconds=12)
+    # Po DFU: počkaj na port, vyčisti starú OTA session (CustomLFS @0xD4000 prežije
+    # reflash!) a spáľ čistý reboot — rádio RX po DFU/CLI býva v zaseknutom stave.
+    wait_port_back(args.target_port, timeout=30)
+    print(cyan(">>> ota clear + reboot (čistý štart rádia + bez stale session)"))
+    capture_serial(args.target_port, seconds=3, send_cmd="ota clear\r")
+    capture_serial(args.target_port, seconds=14, send_cmd="reboot\r")
     print(yellow("\n>>> Hotovo. Build# sa zvýši sám, potom:"))
     print(yellow(f"      {PY} test_nrf-ota/ota_test_lora_repeater.py run "
                  f"--bridge-port {args.bridge_port} --target-port {args.target_port}"
@@ -240,6 +244,11 @@ def phase_run(args):
               "--delay", str(args.delay)]
     if args.drop > 0.0:
         sender += ["--drop", str(args.drop)]
+
+    # Fresh reboot repeatera tesne pred broadcastom — rádio RX po nečinnosti/DFU
+    # býva zaseknuté; čerstvý boot dáva spoľahlivé RX okno (overené HW testom).
+    print(cyan(">>> reboot repeatera pre čisté RX okno (broadcast hneď po nábehu)"))
+    capture_serial(args.target_port, seconds=2, send_cmd="reboot\r")
 
     # 1) Broadcast chunkov (BEZ --reboot; flash spustíme cez CLI po VERIFIED).
     for cyc in range(1, args.cycles + 1):

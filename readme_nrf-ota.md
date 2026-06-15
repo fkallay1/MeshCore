@@ -18,6 +18,12 @@ z projektu **FK_lora-sniffer**. Toto je **iné** ako vstavané MeshCore „OTA"
 
 Detailný popis OTA modulu samotného: [examples/simple_repeater/nrfota/README.md](examples/simple_repeater/nrfota/README.md).
 
+**Súvisiace dokumenty:**
+- [readme_tech_nrf-ota.md](readme_tech_nrf-ota.md) — detailný technický popis (architektúra,
+  flasher, krypto, **vyriešené problémy** vrátane AGC-vs-flash interakcie) pre údržbu/budúcnosť.
+- [conv_claude_20260615.md](conv_claude_20260615.md) — záznam debugovacej cesty.
+- [readme_verified_pooling.md](readme_verified_pooling.md) — spevnenie VERIFIED-pollingu v teste.
+
 ---
 
 ## 2. Architektúra
@@ -139,6 +145,54 @@ Test:
 **Predpoklady:** COM5/COM3 voľné (zatvor Serial Monitor), `hdiffi.exe` + `pyserial` +
 `pycryptodome` v penv pythone (`pip install -r test_nrf-ota/requirements.txt`).
 
-### Stav testu
-> Implementácia + oba buildy (OTA aj stock repeater) overené ako SUCCESS.
-> HW end-to-end test pripravený; výsledok sa doplní po behu na COM3/COM5.
+### Stav testu — OVERENÉ NA HW (2026-06-14)
+
+**OTA cez LoRa funguje end-to-end — DOKÁZANÉ.** Build #11 → patch #11→#12 (488 B,
+hdiffi+zlib) odvysielaný cez XIAO bridge ako GRP_DATA → repeater prijal všetky 4 chunky
+→ assembly + SHA256 verify OK → dry-run (`ota verify`) potvrdil base aj nový SHA256 →
+`ota flash` → flasher@0xEB000 (HPatchLite in-place + NVMC) → reboot → **repeater nabehol
+na build #12**. ✅
+
+Overené aj bezpečnostné poistky:
+- **Base-FW check**: keď bežiaci FW != `old` z patchu (#11 vs starý #6 patch), flash
+  bol korektne ODMIETNUTÝ („BASE NESEDÍ — NEPREPISUJEM"). ✅
+- **Reboot-resilient FS**: OTA session (CustomLFS @0xD4000) prežije DFU reflash app flash. ✅
+
+#### Kľúčové nálezy z ladenia RF spoja (DÔLEŽITÉ)
+1. **Preamble**: MeshCore pre SF≤8 používa preamble **32** ([RadioLibWrappers.h:47](src/helpers/radiolib/RadioLibWrappers.h#L47)),
+   nie 16. Bridge (FK_lora) mal 16 → **obojstranná hluchota**. Fix: bridge `radio.begin(...,
+   (SF<=8?32:16), ...)`. Bez tohto sa zariadenia nepočujú.
+2. **TX výkon bridge**: zvýšený z 10 → 22 dBm (marginálny spoj).
+3. **Sync word/TCXO/freq/bw/cr**: zhodné (0x12 / 1.8V / 869.525 / 62.5 / 5).
+
+#### Ladenie príjmu (2026-06-15) — HW OK, finálny config = agc_reset 0 + štandardný preamble 32
+Mali sme epizódu trvalej hluchoty repeatera (`rawrx=0`). Postup ladenia a ZÁVER:
+
+1. **HW overené čistým FK_lora testom**: `ota_test_lora.py` (sniffer COM5 + bridge COM3, CZ,
+   direct) PREŠIEL (#115→#116) na tých istých doskách/anténe → **HW v poriadku** (RSSI -23,
+   SNR +11). Problém nebol v anténe ani RF spoji.
+2. **Trvalá hluchota (#21) = jednorazový zaseknutý stav rádia** ("stuck noise floor -120",
+   [RadioLibWrappers.cpp:78](src/helpers/radiolib/RadioLibWrappers.cpp#L78)) — vyčistil ho
+   power-cycle / DFU reflash. Pri agc_reset=0 potom príjem na **štandardných preamble 32**
+   funguje (overené #27/#28/#32: `rxpkts>0`, RSSI -23, dosiahnutý VERIFIED).
+   > Preamble 64 na bridge sa najprv javil ako "fix", ale bola to náhoda (reflash resetol
+   > rádio). Na repeateri sa **nič radio-config nemenilo** → plná kompatibilita s MeshCore.
+3. **AGC auto-reset (`set agc.reset.interval N>0`) NEKOMBINOVAŤ s OTA flashom!** Ak agc resety
+   (`radio.sleep`+`calibrate`) bežia počas OTA session, nasledujúci `ota flash` ZLYHÁ (flasher
+   sa zastaví po „Komprimovany format", repeater nabehne na OLD). Overené: agc=0 → #28→#29 aj
+   #32→#33 flash PASS; agc=8 → #28→#29 aj #30→#31 FAIL. **Nechať agc_reset=0 (MeshCore default).**
+
+**Diagnostika (gated `WITH_LORA_OTA`):**
+- `logRxRaw()` → `rawrx` v `[OTA] AALIVE` heartbeate = surové CRC-OK rámce PRED dekódom
+  (odlíši „rádio nepočuje nič" od „počuje, dekód zlyhá").
+- `ota agc` (serial/CLI) → SX1262 RxGain register (0x08AC: 0x96 boosted / 0x94 power-save),
+  okamžité RSSI, noise floor, `agc_reset_interval`. **Read-only — nemení config rádia.**
+- `onGroupDataRecv()` len buffruje, ťažké CustomLFS I/O sa robí v `loop()` po re-arme rádia.
+
+Postup testu (fire-and-forget, príjem niekedy potrebuje pár cyklov kvôli strate paketov):
+```bash
+PENV=~/.platformio/penv/Scripts/python.exe
+$PENV test_nrf-ota/ota_test_lora_repeater.py baseline --skip-bridge   # OLD + clear + reboot
+$PENV test_nrf-ota/ota_test_lora_repeater.py run --skip-bridge --cycles 4
+# ak run skončí pred VERIFIED: znova broadcast (ota_sender) a potom 'ota flash' manuálne
+```

@@ -4,6 +4,7 @@
 #ifdef WITH_LORA_OTA
 #include "nrfota/OtaReceiver.h"
 #include "nrfota/OtaPatcher.h"
+extern RADIO_CLASS radio;   // surový RadioLib SX1262 (z target.cpp) — pre AGC register read ('ota agc')
 #if __has_include("build_info.h")
   #include "build_info.h"   // DOČASNÉ: test_nrf-ota/gen_build_info.py (pre-script)
 #endif
@@ -475,6 +476,27 @@ const char *MyMesh::getLogDateTime() {
 }
 
 void MyMesh::logRxRaw(float snr, float rssi, const uint8_t raw[], int len) {
+#ifdef WITH_LORA_OTA
+  // RAW indikátor: každý surový (CRC-OK) rámec, ktorý rádio prijme, EŠTE PRED
+  // dekódovaním typu/route a dešifrovaním. Toto je odpoveď na otázku "prichádzajú
+  // na repeater hocijaké pakety?" — ak toto rastie ale GRP_DATA/onGroupDataRecv
+  // nie, chyba je v dekódovaní (typ/hash/krypto), nie v RF.
+  _ota_raw_rx++;
+  _ota_raw_last_len  = (uint32_t)len;
+  _ota_raw_last_rssi = rssi;
+  _ota_raw_last_snr  = snr;
+  Serial.print(F("[OTA] RAW #")); Serial.print(_ota_raw_rx);
+  Serial.print(F(" len="));  Serial.print(len);
+  Serial.print(F(" rssi=")); Serial.print((int)rssi);
+  Serial.print(F(" snr="));  Serial.print(snr, 1);
+  if (len > 0) {
+    Serial.print(F(" type=")); Serial.print(raw[0] & 0x0F);  // PAYLOAD_TYPE v dolných 4 bitoch
+    Serial.print(F(" hdr=0x")); Serial.print(raw[0], HEX);
+  }
+  Serial.print(F(" first="));
+  mesh::Utils::printHex(Serial, raw, len < 8 ? len : 8);
+  Serial.println();
+#endif
 #if MESH_PACKET_LOGGING
   Serial.print(getLogDateTime());
   Serial.print(" RAW: ");
@@ -858,8 +880,20 @@ void MyMesh::onGroupDataRecv(mesh::Packet* packet, uint8_t type, const mesh::Gro
   if (type != PAYLOAD_TYPE_GRP_DATA) return;
   if (channel.hash[0] != _ota_channel.hash[0]) return;   // nie náš OTA kanál
   if (len < 5) return;                                   // ts(4) + aspoň typový bajt
-  ota_print_pkt(data + 4, (int)len - 4, (float)radio_driver.getLastRSSI(), packet->getSNR());
-  ota_process(data + 4, (int)len - 4);
+  // Odlož payload — pomalé CustomLFS I/O sa spraví v loop() PO tom, čo dispatcher
+  // re-armne rádio do RX. FS zápis priamo tu oneskoroval re-arm a rádio po prvom
+  // pakete prestávalo prijímať. Ak ešte čaká predošlý, tento zahodíme (loop ho
+  // stihne spracovať skôr ako príde ďalší LoRa paket pri SF7).
+  if (_ota_pending_len == 0) {
+    int n = (int)len;
+    if (n > (int)sizeof(_ota_pending)) n = (int)sizeof(_ota_pending);
+    memcpy(_ota_pending, data, n);
+    _ota_pending_len  = n;
+    _ota_pending_rssi = (float)radio_driver.getLastRSSI();
+    _ota_pending_snr  = packet->getSNR();
+  } else {
+    Serial.println(F("[OTA] WARN pending busy, paket zahodený"));
+  }
 }
 #endif
 
@@ -963,6 +997,10 @@ void MyMesh::begin(FILESYSTEM *fs) {
 #ifdef WITH_LORA_OTA
   ota_check_flasher_debug();   // prečítaj GPREGRET2/RESETREAS čo najskôr po boote
   _ota_ready = false;
+  _ota_pending_len = 0;
+  _ota_raw_rx = 0;
+  _ota_raw_last_len = 0;
+  _ota_raw_last_rssi = _ota_raw_last_snr = 0;
 #endif
   mesh::Mesh::begin();
   _fs = fs;
@@ -1310,7 +1348,33 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
     }
 #ifdef WITH_LORA_OTA
   } else if (memcmp(command, "ota", 3) == 0 && (command[3] == 0 || command[3] == ' ')) {
-    ota_handle_command(command + 3, reply);   // LoRa-OTA: status|verify|flash|clear|...
+    if (strcmp(command + 3, " agc") == 0) {
+      // AGC/gain diagnostika rádia (READ-ONLY — nemení konfiguráciu rádia, žiadny
+      // dopad na kompatibilitu s inými MeshCore zariadeniami). Pri point-blank
+      // (RSSI ~-23) overuje či sa receiver nedesenzitizoval / aký má gain mód.
+      uint8_t rxgain = 0;
+      radio.readRegister(0x08AC, &rxgain, 1);   // RADIOLIB_SX126X_REG_RX_GAIN
+      float inst_rssi = radio.getRSSI(false);   // okamžité RSSI kanála (GetRssiInst)
+      const char* gm = (rxgain == 0x96) ? "boosted" : (rxgain == 0x94 ? "power-save" : "?");
+      Serial.print(F("[OTA] AGC rxgain_reg=0x")); Serial.print(rxgain, HEX);
+      Serial.print(F(" ")); Serial.print(gm);
+      Serial.print(F("  boost_pref=")); Serial.print(radio_driver.getRxBoostedGainMode() ? "on" : "off");
+      Serial.print(F("  inst_rssi=")); Serial.print(inst_rssi, 1);
+      Serial.print(F("dBm  nf=")); Serial.print(_radio->getNoiseFloor());
+      Serial.print(F("  agc_reset=")); Serial.print(((uint32_t)_prefs.agc_reset_interval) * 4);
+      Serial.println(F("s(0=vyp)"));
+      sprintf(reply, "AGC gain=0x%02X(%s) boost=%s rssi=%ddBm nf=%d agc_reset=%lus",
+              rxgain, gm, radio_driver.getRxBoostedGainMode() ? "on" : "off",
+              (int)inst_rssi, (int)_radio->getNoiseFloor(),
+              (unsigned long)(((uint32_t)_prefs.agc_reset_interval) * 4));
+    } else {
+      // POZOR: AGC auto-reset (set agc.reset.interval > 0) NEKOMBINOVAŤ s OTA flashom!
+      // Ak agc resety (radio.sleep+calibrate) bežia počas OTA session, nasledujúci
+      // 'ota flash' zlyhá (flasher sa zastaví po "Komprimovany format", repeater
+      // nabehne na OLD). Pri agc_reset=0 funguje príjem aj flash spoľahlivo.
+      // (Overené 2026-06-15: agc=0 #28→#29 PASS; agc=8 #28→#29 aj #30→#31 FAIL.)
+      ota_handle_command(command + 3, reply);   // LoRa-OTA: status|verify|flash|clear|...
+    }
 #endif
   } else{
     _cli.handleCommand(sender_timestamp, command, reply);  // common CLI commands
@@ -1362,11 +1426,26 @@ void MyMesh::loop() {
   last_millis = now;
 
 #ifdef WITH_LORA_OTA
+  // Odložené OTA spracovanie — mesh::Mesh::loop() vyššie už re-armol rádio do RX,
+  // takže pomalé CustomLFS I/O tu už nezablokuje príjem ďalšieho paketu.
+  if (_ota_pending_len > 0) {
+    int n = _ota_pending_len;
+    ota_print_pkt(_ota_pending + 4, n - 4, _ota_pending_rssi, _ota_pending_snr);
+    ota_process(_ota_pending + 4, n - 4);
+    _ota_pending_len = 0;   // uvoľni buffer až po spracovaní
+  }
+
   // DOČASNÉ: heartbeat s build# (na detekciu verzie pri OTA teste cez Serial)
   static unsigned long s_next_build_print = 0;
   if (s_next_build_print == 0 || millisHasNowPassed(s_next_build_print)) {
     s_next_build_print = futureMillis(5000);
-    Serial.print(F("[OTA] AALIVE build #")); Serial.println(FW_BUILD_NUMBER);
+    Serial.print(F("[OTA] AALIVE build #")); Serial.print(FW_BUILD_NUMBER);
+    Serial.print(F("  freq=")); Serial.print(_prefs.freq, 3);
+    Serial.print(F(" sf="));    Serial.print(_prefs.sf);
+    Serial.print(F(" rawrx=")); Serial.print(_ota_raw_rx);       // surové rámce (pred dekódom)
+    Serial.print(F(" rxpkts=")); Serial.print(radio_driver.getPacketsRecv());
+    Serial.print(F(" rxerr=")); Serial.print(radio_driver.getPacketsRecvErrors());
+    Serial.print(F(" nf=")); Serial.println((int)_radio->getNoiseFloor());
   }
 #endif
 }
