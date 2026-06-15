@@ -203,6 +203,12 @@ ota status | verify | flash | clear | decompress | nack | dbg | agc
 - **Reboot-resilient session** — bitmap sa ukladá každých 8 chunkov / pri complete; CustomLFS
   session prežije aj DFU reflash app flashu (overené).
 - **`ota_apply` stav pri zlyhaní** — pri base-mismatch obnoví predošlý status (neostane APPLYING).
+- **`ota verify` (dry-run) PRED `ota flash` → heap hardfault** — `ota_patch_to_file` spraví
+  `malloc` + streaming rekonštrukciu celého ~442 kB FW; následný `ota_apply` potom hardfaultne na
+  `malloc(patch_size)` (flasher sa zastaví hneď po `[FLASHER] Komprimovany format`, repeater
+  nabehne na OLD). Manuálny `ota flash` bez dry-runu je spoľahlivý. Workaround: test default
+  vynecháva dry-run (`--verify-first` je opt-in, viď [readme_verified_pooling.md](readme_verified_pooling.md)).
+  **TODO firmware:** vyčistiť alokácie v `ota_patch_to_file` / zresetovať heap medzi verify a flash.
 
 ### 8.3 Príjem na rádiu — DÔLEŽITÝ rozbor (2026-06)
 Symptóm: repeater po čase **prestal prijímať čokoľvek** (`rawrx=0`), dlhodobo hluchý.

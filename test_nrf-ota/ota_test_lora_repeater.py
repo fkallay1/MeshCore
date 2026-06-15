@@ -193,6 +193,40 @@ def find_ota_status(lines):
             res = (int(m.group(1)), int(m.group(2)), int(m.group(3), 16))
     return res
 
+def broadcast_until_verified(args, sender):
+    """Trpezlivý príjem: opakuj broadcast + poll 'ota status' kým nie je VERIFIED
+    alebo nevyprší --verify-wait. Fire-and-forget príjem niekedy stráca pakety na
+    začiatku (zaseknuté/nečinné RX okno), takže jeden-dva cykly nemusia stačiť —
+    kumulujeme chunky naprieč kolami a sledujeme rast recv/total, nie len VERIFIED.
+    Vracia True ak VERIFIED."""
+    deadline = time.time() + args.verify_wait
+    rnd, last, best_recv = 0, None, -1
+    while time.time() < deadline:
+        rnd += 1
+        remaining = int(deadline - time.time())
+        print(cyan(f"\n────── broadcast kolo {rnd} (drop={args.drop:.0%}, zostáva ~{remaining}s) ──────"))
+        run(sender, f"ota_sender broadcast #{rnd} cez {args.bridge_port}", check=False)
+        # po každom broadcaste niekoľko trpezlivých 'ota status' pollov
+        for _ in range(args.poll_tries):
+            lines = capture_serial(args.target_port, seconds=args.poll_secs, send_cmd="ota status\r")
+            st = find_ota_status(lines)
+            if st:
+                last = st
+                print(cyan(f"   OTA stav: {st[0]}/{st[1]} st=0x{st[2]:02X}"))
+                if st[0] > best_recv:           # vidíme rast → príjem žije, buď trpezlivý
+                    best_recv = st[0]
+                if st[2] & OTA_ST_ERROR:
+                    print(yellow("   [OTA ERROR flag] — pokračujem (ďalší broadcast môže doplniť)"))
+                if st[2] & OTA_ST_VERIFIED:
+                    print(green("   VERIFIED — všetky chunky prijaté a SHA256 OK"))
+                    return True
+            if time.time() >= deadline:
+                break
+        time.sleep(args.cycle_delay)
+    print(red(f"   VERIFIED nedosiahnuté za {args.verify_wait}s "
+              f"(najlepší stav: {best_recv}/{last[1] if last else '?'} chunkov)"))
+    return False
+
 # ── fázy ──
 def phase_baseline(args):
     print(green("\n══════ baseline — bridge (CZ) + OLD repeater (CZ) ══════"))
@@ -247,36 +281,30 @@ def phase_run(args):
 
     # Fresh reboot repeatera tesne pred broadcastom — rádio RX po nečinnosti/DFU
     # býva zaseknuté; čerstvý boot dáva spoľahlivé RX okno (overené HW testom).
-    print(cyan(">>> reboot repeatera pre čisté RX okno (broadcast hneď po nábehu)"))
-    capture_serial(args.target_port, seconds=2, send_cmd="reboot\r")
+    # Settle: po reboote daj rádiu čas armnúť RX, než pošleme prvý broadcast
+    # (inak sa prvé kolo často stratí).
+    print(cyan(f">>> reboot repeatera + settle {args.reboot_settle}s (RX arm)"))
+    capture_serial(args.target_port, seconds=args.reboot_settle, send_cmd="reboot\r")
 
-    # 1) Broadcast chunkov (BEZ --reboot; flash spustíme cez CLI po VERIFIED).
-    for cyc in range(1, args.cycles + 1):
-        print(cyan(f"\n────── broadcast {cyc}/{args.cycles} (drop={args.drop:.0%}) ──────"))
-        run(sender, f"ota_sender broadcast #{cyc} cez {args.bridge_port}", check=False)
-        time.sleep(1.0)
-        lines = capture_serial(args.target_port, seconds=6)
-        st = find_ota_status(lines)
-        if st:
-            print(cyan(f"   repeater OTA stav: {st[0]}/{st[1]} st=0x{st[2]:02X}"))
-            if st[2] & OTA_ST_VERIFIED:
-                print(green("   VERIFIED — všetky chunky prijaté a SHA256 OK"))
-                break
-        time.sleep(args.cycle_delay)
-
-    # 2) Over stav cez CLI 'ota status'
-    print(cyan("\n>>> Kontrola 'ota status' cez COM5..."))
-    lines = capture_serial(args.target_port, seconds=6, send_cmd="ota status\r")
-    st = find_ota_status(lines)
-    if not st or not (st[2] & OTA_ST_VERIFIED):
-        print(red(f"[FAIL] Repeater nie je VERIFIED ({st}). Skús viac --cycles / menší --drop."))
+    # 1) Trpezlivý príjem: broadcast + poll 'ota status' kým VERIFIED / --verify-wait.
+    #    (Nahradilo fixný --cycles loop, ktorý pri strate paketov na začiatku zlyhal
+    #    skôr, než sa session skumulovala — viď readme_verified_pooling.md.)
+    if not broadcast_until_verified(args, sender):
+        print(red("[FAIL] Repeater nedosiahol VERIFIED v --verify-wait okne. "
+                  "Skús väčší --verify-wait / menší --drop / over LoRa spoj."))
         print(yellow(">>> 'ota nack' (chýbajúce chunky):"))
         capture_serial(args.target_port, seconds=5, send_cmd="ota nack\r")
         sys.exit(1)
 
-    # 3) Dry-run (bezpečnostná kontrola pred ostrým flashom)
-    print(cyan("\n>>> Dry-run 'ota verify' (bez zápisu)..."))
-    capture_serial(args.target_port, seconds=12, send_cmd="ota verify\r")
+    # 3) Dry-run (opt-in cez --verify-first). DEFAULT VYPNUTÝ: 'ota verify' robí
+    #    malloc + streaming rekonštrukciu celého FW; po ňom nasledujúci 'ota flash'
+    #    občas hardfaultne na malloc (heap stav po dry-rune) → flasher sa zastaví po
+    #    "Komprimovany format" a repeater nabehne na OLD. Manuálny flash bez dry-runu
+    #    je spoľahlivý; bezpečnosť drží base-FW SHA256 check vnútri 'ota flash'.
+    #    (viď readme_verified_pooling.md)
+    if args.verify_first:
+        print(cyan("\n>>> Dry-run 'ota verify' (bez zápisu)..."))
+        capture_serial(args.target_port, seconds=12, send_cmd="ota verify\r")
 
     # 4) Ostrý flash + reboot, čítaj cez reboot
     print(cyan("\n>>> 'ota flash' — OSTRÝ flash + reboot..."))
@@ -319,11 +347,26 @@ def main():
                     help="Cesta k FK_lora-sniffer projektu (pre build bridge)")
     ap.add_argument("--skip-bridge", action="store_true",
                     help="Nereflashuj bridge (XIAO už beží ako CZ bridge)")
-    ap.add_argument("--cycles", type=int, default=4)
+    ap.add_argument("--cycles", type=int, default=4,
+                    help="(legacy) pôvodný fixný počet kôl; príjem teraz riadi --verify-wait")
     ap.add_argument("--drop", type=float, default=0.0)
     ap.add_argument("--delay", type=float, default=0.3)
-    ap.add_argument("--cycle-delay", type=float, default=2.0)
-    ap.add_argument("--capture", type=int, default=60)
+    ap.add_argument("--cycle-delay", type=float, default=2.0,
+                    help="Pauza medzi broadcast kolami [s]")
+    ap.add_argument("--capture", type=int, default=60,
+                    help="Sekundy čítania serialu pri 'ota flash' (pokrýva flash+reboot)")
+    # Spevnenie VERIFIED-pollingu (viď readme_verified_pooling.md)
+    ap.add_argument("--verify-wait", type=int, default=60,
+                    help="Max sekúnd opakovať broadcast+poll kým príjem dosiahne VERIFIED")
+    ap.add_argument("--poll-tries", type=int, default=2,
+                    help="Počet 'ota status' pollov po každom broadcast kole")
+    ap.add_argument("--poll-secs", type=int, default=5,
+                    help="Sekundy čítania serialu na jeden 'ota status' poll")
+    ap.add_argument("--reboot-settle", type=int, default=4,
+                    help="Sekundy po reboote pred prvým broadcastom (RX arm)")
+    ap.add_argument("--verify-first", action="store_true",
+                    help="Spustiť 'ota verify' (dry-run) pred ostrým flashom. DEFAULT vyp — "
+                         "dry-run pred flashom občas spôsobí hardfault flashera (heap).")
     args = ap.parse_args()
 
     try:
