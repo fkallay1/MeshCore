@@ -29,12 +29,14 @@
 #define OTA_ERR_CRC16     0x02   // chunk CRC chyba
 #define OTA_ERR_STORAGE   0x03   // LittleFS I/O
 #define OTA_ERR_PATCH     0x04   // hdiffpatch zlyhalo
-#define OTA_ERR_OVERFLOW  0x05   // chunk_idx out of range
+#define OTA_ERR_OVERFLOW    0x05   // chunk_idx out of range
+#define OTA_ERR_SIGNATURE   0x06   // Ed25519 podpis HEADER paket nie je validny
+#define OTA_ERR_BASEFW      0x07   // base FW nezhoda — chunk/HEADER pre iný FW
 
 // =====================================================================
 // Perzistentná hlavička  /ota/meta.bin  (114 B)
 //
-// Zapisuje sa len pri stavových prechodoch (BEGIN / COMPLETE / VERIFIED / DONE).
+// Zapisuje sa len pri stavových prechodoch (HEADER / COMPLETE / VERIFIED / DONE).
 // CRC16 pokrýva všetko okrem seba — ak CRC nesedí, zápis bol prerušený
 // a session sa zahodí.
 // =====================================================================
@@ -65,6 +67,10 @@ typedef struct {
     uint32_t old_fw_size;               // veľkosť starého fw (base patchu), 0 = neznáme
     uint8_t  old_sha256[32];            // SHA256 starého fw — overenie base pred prepisom
 
+    // Base FW cache — pre rýchlu validáciu bez reštartu SHA256 výpočtu
+    uint32_t base_fw_size;              // 0 = nevalidovaný
+    uint8_t  base_fw_sha256[32];        // SHA256 aktuálneho FW na zariadení
+
     uint16_t recv_count;               // prepočítané z bitmap pri resume
     uint8_t  status;                   // OTA_ST_*
     uint8_t  err_code;                 // OTA_ERR_*
@@ -83,7 +89,21 @@ typedef struct {
 #define OTA_FS_PATCH   "/ota/patch.bin"
 
 // =====================================================================
-// Bitmap makrá (bez runtime overhead)
+// Autorizacna tabulka pre Ed25519 overovanie (definovana v OtaReceiver_signkey.cpp)
+// =====================================================================
+#define OTA_MAX_AUTHORS  8
+
+typedef struct {
+    uint8_t  id;           // key_id
+    uint8_t  pub_key[32];  // Ed25519 public key
+} OtaAuthorEntry;
+
+// Externá deklarácia tabuľky autorov
+extern const OtaAuthorEntry s_authors[];
+extern const int s_author_count;
+
+// =====================================================================
+// Bitove makra (bez runtime overhead)
 // =====================================================================
 #define OTA_BIT_SET(bm, n)  ((bm)[(n) >> 3] |=  (uint8_t)(1u << ((n) & 7u)))
 #define OTA_BIT_CLR(bm, n)  ((bm)[(n) >> 3] &= (uint8_t)(~(1u << ((n) & 7u))))

@@ -14,7 +14,7 @@ PC (ota_sender.py)                     Repeater (nRF52840)
   hdiffi -inplaceB old new patch         onGroupDataRecv()  ← MeshCore GRP_DATA
   zlib(-9, wbits=-9) → staged            ota_process()
   GRP_DATA (AES-128-ECB + HMAC) ──LoRa──▶ chunky → CustomLFS append-log
-  BEGIN / CHUNK / APPLY                   COMPLETE → assemble patch.bin + SHA256
+  HEADER / CHUNK / APPLY                   COMPLETE → assemble patch.bin + SHA256
                                           'ota flash' → flasher@0xEB000:
                                             HPatchLite inplaceB (old=XIP, new=app flash)
                                             streaming DEFLATE (puff_stream)
@@ -75,7 +75,7 @@ Na Serial sa píšu priamo (`ota status`). Cez LoRa idú ako admin CLI príkazy
 ## Posielanie patchu z PC
 
 Pozri `FK_lora-sniffer/tools/ota_sender.py --mode meshcore --psk meshcore-ota`.
-Generuje patch (`hdiffi -inplaceB` + zlib) a vysiela BEGIN/CHUNK/APPLY ako GRP_DATA.
+Generuje patch (`hdiffi -inplaceB` + zlib) a vysiela HEADER/CHUNK/APPLY ako GRP_DATA.
 
 ## Bezpečnosť flashera
 

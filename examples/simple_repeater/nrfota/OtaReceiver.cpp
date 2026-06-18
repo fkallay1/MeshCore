@@ -9,9 +9,23 @@
 #include "OtaFs.h"
 #include <Arduino.h>
 #include <SHA256.h>          // rweather/Crypto — rovnaká dep ako mesh::Utils
+#include <Ed25519.h>         // rweather/Crypto —Ed25519::verify()
 
 // Globálna inštancia OtaFS — CustomLFS na 0xD4000 (92kB)
 CustomLFS OtaFS(OTA_FS_FLASH_ADDR, OTA_FS_FLASH_SIZE, OTA_FS_BLOCK_SIZE);
+
+static bool verify_header_signature(const uint8_t* sig,
+                                    const uint8_t* msg, size_t msg_len,
+                                    uint8_t key_id) {
+    for (int i = 0; i < s_author_count; i++) {
+        if (s_authors[i].id == key_id) {
+            return Ed25519::verify(sig, s_authors[i].pub_key, msg, msg_len);
+        }
+    }
+    Serial.print(F("[OTA] UNKNOWN key_id=0x"));
+    Serial.println(key_id, HEX);
+    return false;
+}
 
 // =====================================================================
 // RAM stav
@@ -22,6 +36,81 @@ static uint16_t   s_bitmap_dirty = 0;
 // Offset tabuľka pre assembly krok: byte offset DATA v recv.log pre každý chunk.
 // 4B × 1024 = 4KB BSS, acceptable pre nRF52840 (248KB RAM).
 static uint32_t s_log_data_offset[OTA_MAX_CHUNKS];
+
+// =====================================================================
+// Veľkosť bežiaceho FW image — z linker symbolov (žiadna zmena ld scriptu,
+// žiadny post-build). nrf52_common.ld exportuje __etext (= LMA .data, t.j.
+// koniec .text/.exidx vo flashi) a __data_start__/__data_end__ (VMA .data
+// v RAM). .data má v RAM rovnakú veľkosť ako jej flash LMA-obraz, takže:
+//   image_end = __etext + (__data_end__ - __data_start__)
+//   fw_size   = image_end - APP_FLASH_START
+// Zhoduje sa s firmware.bin z DFU zipu (= old_fw_size od sendera). Overené.
+// =====================================================================
+extern "C" {
+    extern char __etext;
+    extern char __data_start__;
+    extern char __data_end__;
+}
+
+static inline uint32_t fw_image_size(void) {
+    uint32_t data_size = (uint32_t)(uintptr_t)&__data_end__
+                       - (uint32_t)(uintptr_t)&__data_start__;
+    uint32_t image_end = (uint32_t)(uintptr_t)&__etext + data_size;
+    return image_end - APP_FLASH_START;
+}
+
+// Cross-check: zodpovedá deklarovaná old_fw_size reálne bežiacemu FW?
+// Lacná brána pred drahým SHA256 — ak veľkosť nesedí, base FW je iný.
+static bool ota_fw_size_matches(uint32_t fw_size) {
+    uint32_t self = fw_image_size();
+    if (fw_size == self) return true;
+    Serial.print(F("[OTA] base FW: old_fw_size ")); Serial.print(fw_size);
+    Serial.print(F(" != bežiace ")); Serial.println(self);
+    return false;
+}
+
+// =====================================================================
+// Base FW cache — rýchla validácia bez reštartu SHA256 výpočtu
+// =====================================================================
+static bool ota_base_fw_validated(uint32_t fw_size, const uint8_t* prefix) {
+    // Cross-check oproti bežiacemu FW (z linker symbolov) — odmietni hneď
+    // bez SHA256, ak patch cieli na iný base.
+    if (!ota_fw_size_matches(fw_size)) return false;
+    // Ak je cache plná a veľkosť sedí → porovnaj prefix
+    if (ota.base_fw_size == fw_size) {
+        return memcmp(ota.base_fw_sha256, prefix, 4) == 0;
+    }
+    // Veľkosť sa zmenila alebo cache prázdna → re-počítaj
+    if (fw_size > APP_FLASH_MAX) {
+        Serial.print(F("[OTA] base FW: fw_size ")); Serial.print(fw_size);
+        Serial.println(F(" > APP_FLASH_MAX"));
+        return false;
+    }
+    SHA256 sha;
+    sha.update((const void*)APP_FLASH_START, fw_size);
+    uint8_t h[32];
+    sha.finalize(h, sizeof(h));
+    ota.base_fw_size = fw_size;
+    memcpy(ota.base_fw_sha256, h, 32);
+    Serial.print(F("[OTA] base FW cached: size=")); Serial.print(fw_size);
+    Serial.print(F("B sha256="));
+    for (int i = 0; i < 4; i++) { if (h[i] < 0x10) Serial.print('0'); Serial.print(h[i], HEX); }
+    Serial.println(F("..."));
+    return memcmp(ota.base_fw_sha256, prefix, 4) == 0;
+}
+
+// Overenie base FW cez kompletný SHA256 (pre HEADER s full old_sha256)
+static bool ota_base_fw_check_full(uint32_t fw_size, const uint8_t* sha256_full) {
+    if (!ota_fw_size_matches(fw_size)) return false;
+    if (fw_size > APP_FLASH_MAX) return false;
+    SHA256 sha;
+    sha.update((const void*)APP_FLASH_START, fw_size);
+    uint8_t h[32];
+    sha.finalize(h, sizeof(h));
+    ota.base_fw_size = fw_size;
+    memcpy(ota.base_fw_sha256, h, 32);
+    return memcmp(h, sha256_full, 32) == 0;
+}
 
 // =====================================================================
 // Interné pomocné funkcie
@@ -302,47 +391,102 @@ int ota_build_nack(uint8_t* out) {
 }
 
 // =====================================================================
-// Spracovanie OTA_BEGIN
+// Spracovanie OTA_HEADER
 // =====================================================================
-static void handle_begin(const uint8_t* plain, int plen) {
-    if (plen < (int)sizeof(OtaBeginPkt)) { Serial.println(F("[OTA] BEGIN: krátky")); return; }
-    const OtaBeginPkt* pkt = (const OtaBeginPkt*)plain;
+static void handle_header(const uint8_t* plain, int plen) {
+    if (plen < (int)sizeof(OtaHeaderPkt)) { Serial.println(F("[OTA] HEADER: krátky")); return; }
+    const OtaHeaderPkt* pkt = (const OtaHeaderPkt*)plain;
 
-    if (pkt->total_chunks == 0 || pkt->total_chunks > OTA_MAX_CHUNKS) {
-        Serial.print(F("[OTA] BEGIN: neplatné chunks=")); Serial.println(pkt->total_chunks); return;
+    // Ed25519 overenie podpisu — ak neuspeje, session je okamžite odmietnutá.
+    // Podpisovaná správa = prvých 107 B paketu (type → old_sha256).
+    constexpr size_t s_msg_len = 107u;
+    bool sig_valid;
+
+#ifdef OTA_ALLOW_UNSIGNED
+    // DEV-ONLY: akceptuj nepodpísaný HEADER (nulový podpis). Aktivuje sa LEN
+    // build flagom -D OTA_ALLOW_UNSIGNED. V produkcii NIKDY — inak ktokoľvek
+    // pošle HEADER s nulovým podpisom a obíde overenie autora.
+    bool is_unsigned = (pkt->signature[0] == 0 && pkt->signature[1] == 0 &&
+                        pkt->signature[2] == 0 && pkt->signature[3] == 0);
+    if (is_unsigned) {
+        Serial.print(F("[OTA] HEADER: UNSIGNED key_id=0x"));
+        Serial.print(pkt->key_id, HEX);
+        Serial.println(F(" (OTA_ALLOW_UNSIGNED dev mode)"));
+        sig_valid = true;
+    } else
+#endif
+    {
+        sig_valid = verify_header_signature(pkt->signature,
+                                            (const uint8_t*)&pkt->type, s_msg_len,
+                                            pkt->key_id);
     }
 
-    // Rovnaká session?
+    if (!sig_valid) {
+        Serial.println(F("[OTA] HEADER: INVALID signature — rejecting"));
+        ota_set_error(OTA_ERR_SIGNATURE);
+        return;
+    }
+
+    if (pkt->total_chunks == 0 || pkt->total_chunks > OTA_MAX_CHUNKS) {
+        Serial.print(F("[OTA] HEADER: neplatné chunks=")); Serial.println(pkt->total_chunks); return;
+    }
+
+    // Base FW validácia — ak je base FW cache plná, over proti full old_sha256
+    if (ota.base_fw_size > 0) {
+        if (!ota_base_fw_check_full(ota.base_fw_size, pkt->old_sha256)) {
+            Serial.println(F("[OTA] HEADER: base FW nezhoda — iný FW beží na zariadení"));
+            ota_set_error(OTA_ERR_BASEFW);
+            return;
+        }
+    }
+
+    // Rovnaká, už bežiaca session? (retransmit HEADER) → ignoruj
     if ((ota.status & (OTA_ST_RECEIVING | OTA_ST_COMPLETE | OTA_ST_VERIFIED)) &&
         ota.total_chunks == pkt->total_chunks &&
         ota.patch_size   == pkt->patch_size   &&
         memcmp(ota.patch_sha256, pkt->patch_sha256, 32) == 0)
     {
-        Serial.print(F("[OTA] BEGIN: rovnaká session, mám "));
+        Serial.print(F("[OTA] HEADER: rovnaká session, mám "));
         Serial.print(ota.recv_count); Serial.print('/');
         Serial.print(ota.total_chunks); Serial.println(F(" chunkov"));
         return;
     }
 
-    // Nová session
-    OtaFS.remove(OTA_FS_LOG);
-    OtaFS.remove(OTA_FS_PATCH);
-    OtaFS.remove(OTA_FS_BITMAP);
-    ota_clear();
+    // Partial session zo skorých chunkov (HEADER dorazil neskôr — out-of-order)?
+    // RECEIVING bez total_chunks a base FW prefix sedí → PROMÓCIA: doplň
+    // metadáta a ZACHOVAJ už prijaté chunky (log + bitmap). Inak nová session.
+    bool promote = (ota.status & OTA_ST_RECEIVING) && ota.total_chunks == 0 &&
+                   memcmp(ota.old_sha256, pkt->old_sha256_prefix, 4) == 0;
+
+    if (!promote) {
+        // Nová session (alebo prepísanie inej) — vyčisti FS
+        OtaFS.remove(OTA_FS_LOG);
+        OtaFS.remove(OTA_FS_PATCH);
+        OtaFS.remove(OTA_FS_BITMAP);
+        ota_clear();
+    }
 
     ota.total_chunks = pkt->total_chunks;
     ota.patch_size   = pkt->patch_size;
     memcpy(ota.patch_sha256, pkt->patch_sha256, 32);
     memcpy(ota.new_sha256,   pkt->new_sha256,   32);
-    ota.old_fw_size = pkt->old_fw_size;
     memcpy(ota.old_sha256,   pkt->old_sha256,   32);
     ota.status = OTA_ST_RECEIVING;
+
+    if (promote) {
+        // Prepočítaj recv_count z bitmapy (počíta len idx < total_chunks);
+        // prípadné stray chunky idx ≥ total sa ignorujú pri assembly.
+        ota.recv_count = bitmap_popcount();
+        Serial.print(F("[OTA] HEADER: promócia partial session — mám "));
+        Serial.print(ota.recv_count); Serial.print('/'); Serial.print(ota.total_chunks);
+        Serial.println(F(" chunkov"));
+        save_bitmap();
+    }
     save_meta();
 
-    Serial.print(F("[OTA] BEGIN  chunks=")); Serial.print(pkt->total_chunks);
+    Serial.print(F("[OTA] HEADER  chunks=")); Serial.print(pkt->total_chunks);
     Serial.print(F("  patch_size="));        Serial.print(pkt->patch_size); Serial.println('B');
-    Serial.print(F("[OTA]   old_fw_size=")); Serial.print(pkt->old_fw_size);
-    Serial.print(F("B  old_sha256="));
+    Serial.print(F("[OTA]   old_sha256="));
     for (int i = 0; i < 6; i++) { if (pkt->old_sha256[i] < 0x10) Serial.print('0'); Serial.print(pkt->old_sha256[i], HEX); }
     Serial.println(F("..."));
     Serial.print(F("[OTA]   patch_sha256="));
@@ -357,25 +501,55 @@ static void handle_begin(const uint8_t* plain, int plen) {
 // Spracovanie OTA_CHUNK
 // =====================================================================
 static void handle_chunk(const uint8_t* plain, int plen) {
-    if (!(ota.status & OTA_ST_RECEIVING)) { Serial.println(F("[OTA] CHUNK: bez session")); return; }
-    if (plen < 5) return;
+    if (plen < 13) return;  // min: type(1)+idx(2)+crc(2)+old_fw_size(4)+prefix(4) = 13B
 
-    uint16_t idx;
-    uint16_t rx_crc;
-    memcpy(&idx,    plain + 1, 2);
-    memcpy(&rx_crc, plain + 3, 2);
-    const uint8_t* data    = plain + 5;
-    uint16_t       data_len = (uint16_t)(plen - 5);
+    const OtaChunkPkt* pkt = (const OtaChunkPkt*)plain;
+    uint16_t idx = pkt->chunk_idx;
+    uint16_t rx_crc = pkt->crc16;
+    const uint8_t* data = pkt->data;
+    uint16_t data_len = (uint16_t)(plen - (int)(sizeof(OtaChunkPkt) - OTA_CHUNK_DATA_MAX));
 
-    if (idx >= ota.total_chunks) { ota_set_error(OTA_ERR_OVERFLOW); return; }
+    // Base FW validácia — over, že chunk je pre aktuálny FW na zariadení
+    if (!ota_base_fw_validated(pkt->old_fw_size, pkt->old_sha256_prefix)) {
+        Serial.println(F("[OTA] CHUNK: base FW nezhoda — drop"));
+        return;
+    }
 
-    // Presná dĺžka chunku je deterministická z idx/patch_size — NESPOLIEHAJ sa na
-    // dĺžku paketu. AES-ECB dopĺňa plaintext na 16B blok; padding treba strhnúť,
-    // inak CRC (počítané senderom cez presnú dĺžku) nesedí.
-    uint16_t exp_len;
-    if (idx < ota.total_chunks - 1u) {
-        exp_len = OTA_CHUNK_DATA_MAX;
-    } else {
+    // Session init alebo merge:
+    //  - žiadna session → vytvor partial (total_chunks=0, base z chunku);
+    //    skoré chunky sa rovno bufferujú, HEADER ich neskôr "promuje".
+    //  - existujúca session s INÝM base FW → ignoruj (nemiešaj patche).
+    if (!(ota.status & OTA_ST_RECEIVING)) {
+        OtaFS.remove(OTA_FS_LOG);
+        OtaFS.remove(OTA_FS_PATCH);
+        OtaFS.remove(OTA_FS_BITMAP);
+        ota_clear();
+        ota.old_fw_size = pkt->old_fw_size;
+        memcpy(ota.old_sha256, pkt->old_sha256_prefix, 4);  // zvyšok doplní HEADER
+        ota.status = OTA_ST_RECEIVING;
+        ota.total_chunks = 0;  // čaká HEADER (alebo promóciu)
+        save_meta();
+        Serial.println(F("[OTA] CHUNK: partial session z chunku (čaká HEADER)"));
+    } else if (memcmp(ota.old_sha256, pkt->old_sha256_prefix, 4) != 0) {
+        return;  // chunk patrí inému base FW než bežiaca session
+    }
+    // HEADER nenesie old_fw_size — session ho preberá z chunku (base už overený
+    // vyššie cez ota_base_fw_validated). Bez tohto by ostal 0 po HEADER ceste.
+    ota.old_fw_size = pkt->old_fw_size;
+
+    // Hranica idx: kým nepoznáme total_chunks (pred HEADER), bufferuj až po MAX.
+    uint16_t max_idx = (ota.total_chunks > 0) ? ota.total_chunks : (uint16_t)OTA_MAX_CHUNKS;
+    if (idx >= max_idx) {
+        if (ota.total_chunks > 0) ota_set_error(OTA_ERR_OVERFLOW);
+        return;
+    }
+
+    // Presná dĺžka chunku — AES-ECB dopĺňa plaintext na 16B blok; padding treba
+    // strhnúť, inak CRC (sender ráta cez presnú dĺžku) nesedí. Posledný chunk má
+    // dĺžku z patch_size, tú poznáme až po HEADER — preto sa posledný chunk PRED
+    // HEADER neuloží (CRC zlyhá na paddingu) a príde znova v ďalšom cykle.
+    uint16_t exp_len = OTA_CHUNK_DATA_MAX;
+    if (ota.total_chunks > 0 && idx == (uint16_t)(ota.total_chunks - 1u)) {
         uint32_t rem = ota.patch_size - (uint32_t)(ota.total_chunks - 1u) * OTA_CHUNK_DATA_MAX;
         exp_len = (rem > OTA_CHUNK_DATA_MAX) ? OTA_CHUNK_DATA_MAX : (uint16_t)rem;
     }
@@ -399,7 +573,7 @@ static void handle_chunk(const uint8_t* plain, int plen) {
     ota.recv_count++;
 
     s_bitmap_dirty++;
-    bool complete = (ota.recv_count >= ota.total_chunks);
+    bool complete = (ota.total_chunks > 0) && (ota.recv_count >= ota.total_chunks);
     if (s_bitmap_dirty >= OTA_BITMAP_SAVE_EVERY || complete)
         save_bitmap();
 
@@ -446,14 +620,17 @@ void ota_print_pkt(const uint8_t* plain, int plen, float rssi, float snr) {
     Serial.print(F("[OTA] "));
 
     switch (type) {
-        case OTA_PKT_BEGIN: {
-            if (plen < (int)sizeof(OtaBeginPkt)) { Serial.println(F("BEGIN (krátky)")); return; }
-            const OtaBeginPkt* p = (const OtaBeginPkt*)plain;
+        case OTA_PKT_HEADER: {
+            if (plen < (int)sizeof(OtaHeaderPkt)) { Serial.println(F("HEADER (krátky)")); return; }
+            const OtaHeaderPkt* p = (const OtaHeaderPkt*)plain;
             uint16_t tc; memcpy(&tc, &p->total_chunks, 2);
             uint32_t ps; memcpy(&ps, &p->patch_size,   4);
-            Serial.print(F("BEGIN  chunks=")); Serial.print(tc);
+            Serial.print(F("HEADER  chunks=")); Serial.print(tc);
             Serial.print(F("  size="));        Serial.print(ps); Serial.print('B');
-            Serial.print(F("  patch="));
+            Serial.print(F("  key_id=0x"));    Serial.println(p->key_id, HEX);
+            Serial.print(F("  sig="));
+            for (int i = 0; i < 4; i++) { if (p->signature[i] < 0x10) Serial.print('0'); Serial.print(p->signature[i], HEX); }
+            Serial.print(F("...  patch="));
             for (int i = 0; i < 4; i++) { if (p->patch_sha256[i] < 0x10) Serial.print('0'); Serial.print(p->patch_sha256[i], HEX); }
             Serial.print(F("...  new="));
             for (int i = 0; i < 4; i++) { if (p->new_sha256[i] < 0x10) Serial.print('0'); Serial.print(p->new_sha256[i], HEX); }
@@ -461,19 +638,20 @@ void ota_print_pkt(const uint8_t* plain, int plen, float rssi, float snr) {
             break;
         }
         case OTA_PKT_CHUNK: {
-            if (plen < 5) { Serial.println(F("CHUNK (krátky)")); return; }
-            uint16_t idx;    memcpy(&idx,    plain + 1, 2);
-            uint16_t rx_crc; memcpy(&rx_crc, plain + 3, 2);
-            uint16_t dlen = (uint16_t)(plen - 5);
-            uint16_t calc  = ota_crc16(plain + 5, dlen);
-            bool crc_ok    = (calc == rx_crc);
+            if (plen < (int)(sizeof(OtaChunkPkt) - OTA_CHUNK_DATA_MAX)) { Serial.println(F("CHUNK (krátky)")); return; }
+            const OtaChunkPkt* p = (const OtaChunkPkt*)plain;
+            uint16_t dlen = (uint16_t)(plen - (int)(sizeof(OtaChunkPkt) - OTA_CHUNK_DATA_MAX));
+            uint16_t calc  = ota_crc16(p->data, dlen);
+            bool crc_ok    = (calc == p->crc16);
 
-            Serial.print(F("CHUNK  idx="));  Serial.print(idx);
+            Serial.print(F("CHUNK  idx="));  Serial.print(p->chunk_idx);
             if (ota.total_chunks > 0) { Serial.print('/'); Serial.print(ota.total_chunks); }
             Serial.print(F("  len="));       Serial.print(dlen); Serial.print('B');
-            Serial.print(F("  crc=0x"));     Serial.print(rx_crc, HEX);
+            Serial.print(F("  crc=0x"));     Serial.print(p->crc16, HEX);
             Serial.print(crc_ok ? F("  OK") : F("  BAD"));
-            if (idx < OTA_MAX_CHUNKS && OTA_BIT_GET(ota.bitmap, idx)) Serial.print(F(" DUP"));
+            if (p->chunk_idx < OTA_MAX_CHUNKS && OTA_BIT_GET(ota.bitmap, p->chunk_idx)) Serial.print(F(" DUP"));
+            Serial.print(F("  base="));
+            for (int i = 0; i < 4; i++) { if (p->old_sha256_prefix[i] < 0x10) Serial.print('0'); Serial.print(p->old_sha256_prefix[i], HEX); }
             break;
         }
         case OTA_PKT_APPLY: {
@@ -502,7 +680,7 @@ void ota_print_pkt(const uint8_t* plain, int plen, float rssi, float snr) {
 bool ota_process(const uint8_t* plain, int plen) {
     if (plen < 1) return false;
     switch (plain[0]) {
-        case OTA_PKT_BEGIN: handle_begin(plain, plen); return true;
+        case OTA_PKT_HEADER: handle_header(plain, plen); return true;
         case OTA_PKT_CHUNK: handle_chunk(plain, plen); return true;
         case OTA_PKT_APPLY: handle_apply(plain, plen); return true;
         default:            return false;

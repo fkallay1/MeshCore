@@ -27,3 +27,7 @@ test_nrf-ota/ota_patch.bin
 
 # Claude Code agent/memory dir
 .claude/
+
+# OTA test private key + pycache (never commit)
+test_nrf-ota/test_key.der
+test_nrf-ota/__pycache__/

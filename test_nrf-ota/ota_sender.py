@@ -47,7 +47,7 @@ for _s in (sys.stdout, sys.stderr):
 # ─────────────────────────────────────────────────────────────────────
 # Protokol — synchronizované s ota_proto.h
 # ─────────────────────────────────────────────────────────────────────
-OTA_PKT_BEGIN   = 0x10
+OTA_PKT_HEADER   = 0x10
 OTA_PKT_CHUNK   = 0x11
 OTA_PKT_APPLY   = 0x12
 OTA_PKT_STATUS  = 0x20
@@ -73,6 +73,25 @@ def crc16(data: bytes) -> int:
             crc = ((crc << 1) ^ 0x1021) if (crc & 0x8000) else (crc << 1)
             crc &= 0xFFFF
     return crc
+
+# ─────────────────────────────────────────────────────────────────────
+# Ed25519 podpisanie OTA HEADER
+# ─────────────────────────────────────────────────────────────────────
+def load_ed25519_privkey(key_path: Path):
+    """Načíta Ed25519 private key z DER/PEM súboru, vráti ECC key objekt."""
+    try:
+        from Crypto.PublicKey import ECC
+    except ImportError:
+        sys.exit("[CHYBA] --privkey potrebuje pycryptodome:\n"
+                 "         <penv>/python.exe -m pip install pycryptodome")
+    raw = key_path.read_bytes()
+    return ECC.import_key(raw)
+
+def sign_ota_header(otbmsg: bytes, privkey) -> bytes:
+    """Podpise message (107B: type→old_sha256) a vráti 64B signature."""
+    from Crypto.Signature import eddsa
+    sig_obj = eddsa.new(privkey, 'rfc8032')
+    return sig_obj.sign(otbmsg)
 
 # ─────────────────────────────────────────────────────────────────────
 # Kryptografia (MeshCore GRP_DATA)
@@ -242,20 +261,35 @@ class SerialReader(threading.Thread):
 # ─────────────────────────────────────────────────────────────────────
 # OTA paket buiders
 # ─────────────────────────────────────────────────────────────────────
-def build_ota_begin(patch: bytes, patch_sha256: bytes, new_sha256: bytes,
-                    old_sha256: bytes, old_fw_size: int) -> bytes:
+def build_ota_header(patch: bytes, patch_sha256: bytes, new_sha256: bytes,
+                    old_sha256: bytes, old_fw_size: int,
+                    key_id: int, signature: bytes) -> bytes:
+    """Vyrovi OTA_HEADER paket s Ed25519 podpisom.
+    
+    Message (podpisované, 107B): type + total_chunks + patch_size +
+        patch_sha256 + new_sha256 + old_sha256_prefix(4B) + old_sha256
+    Po message: key_id (1B) + signature (64B) = 65B
+    Celkom: 172B = 176B plaintext po GRP_DATA (s timestampom 4B)
+    """
     total = (len(patch) + OTA_CHUNK_DATA - 1) // OTA_CHUNK_DATA
-    # OtaBeginPkt: [type 1B][total_chunks 2B][patch_size 4B][patch_sha256 32B]
-    #              [new_sha256 32B][old_fw_size 4B][old_sha256 32B]
-    return (bytes([OTA_PKT_BEGIN])
-            + struct.pack('<HI', total, len(patch))
-            + patch_sha256
-            + new_sha256
-            + struct.pack('<I', old_fw_size)
-            + old_sha256)
+    # Podpisovaný message (prvých 107B: type → old_sha256)
+    # old_sha256_prefix (4B) nahradilo old_fw_size — session izolácia
+    otbmsg = (bytes([OTA_PKT_HEADER])
+              + struct.pack('<HI', total, len(patch))
+              + patch_sha256
+              + new_sha256
+              + old_sha256[:4]  # old_sha256_prefix (4B)
+              + old_sha256)
+    assert len(otbmsg) == 107, f"OTA_HEADER message musi byt 107B, dostali {len(otbmsg)}"
+    return otbmsg + bytes([key_id]) + signature
 
-def build_ota_chunk(idx: int, data: bytes) -> bytes:
-    return bytes([OTA_PKT_CHUNK]) + struct.pack('<HH', idx, crc16(data)) + data
+def build_ota_chunk(idx: int, data: bytes, old_fw_size: int, old_sha256_prefix: bytes) -> bytes:
+    """Vyrovi OTA_CHUNK s base FW validáciou (+8B oproti pôvodnému)."""
+    return (bytes([OTA_PKT_CHUNK])
+            + struct.pack('<HH', idx, crc16(data))
+            + struct.pack('<I', old_fw_size)
+            + old_sha256_prefix  # 4B
+            + data)
 
 def build_ota_apply(patch_sha256: bytes) -> bytes:
     return bytes([OTA_PKT_APPLY]) + patch_sha256
@@ -268,9 +302,11 @@ def send_ota(ser: serial.Serial,
              old_sha256: bytes, old_fw_size: int,
              psk: bytes | None, mode: str,
              chunk_delay: float, nack_retries: int, do_reboot: bool = False,
-             drop_prob: float = 0.0):
+             drop_prob: float = 0.0,
+             privkey=None, key_id: int = 1, packetorder: str = 'normal'):
     chunks = [patch[i:i+OTA_CHUNK_DATA] for i in range(0, len(patch), OTA_CHUNK_DATA)]
     total  = len(chunks)
+    old_sha256_prefix = old_sha256[:4]  # 4B pre session izoláciu
     print(f"[OTA] {len(patch)}B → {total} chunkov")
     print(f"[OTA]   PATCH sha256 = {patch_sha256.hex()}")
     print(f"[OTA]   OLD   sha256 = {old_sha256.hex()}  ({old_fw_size}B)")
@@ -292,15 +328,43 @@ def send_ota(ser: serial.Serial,
             lora_pkt = direct_ota_packet(payload)
         send_frame(ser, lora_pkt)
 
-    # --- BEGIN ---
-    print("[OTA] Posielam BEGIN...")
-    try:
-        send_pkt(build_ota_begin(patch, patch_sha256, new_sha256, old_sha256, old_fw_size))
-    except serial.SerialException as e:
-        print(e)
-        reader.stop()
-        return False
-    time.sleep(1.2)
+    # --- HEADER (poradie podľa packetorder) ---
+    otbmsg = (bytes([OTA_PKT_HEADER])
+              + struct.pack('<HI', total, len(patch))
+              + patch_sha256
+              + new_sha256
+              + old_sha256_prefix  # 4B prefix nahradil old_fw_size
+              + old_sha256)
+    if privkey:
+        print(f"[OTA] Signujem HEADER (key_id=0x{key_id:02X})...")
+        sig = sign_ota_header(otbmsg, privkey)
+    else:
+        print("[OTA] WARNING: --privkey nie je zadany, HEADER bez podpisu!")
+        sig = bytes(64)
+    header_payload = build_ota_header(patch, patch_sha256, new_sha256, old_sha256,
+                                      old_fw_size, key_id, sig)
+
+    _hdr_sent = [False]
+    def send_header():
+        if _hdr_sent[0]:
+            return
+        print(f"[OTA] Posielam HEADER (size={len(patch)}B, chunks={total}, order={packetorder})...")
+        send_pkt(header_payload)
+        _hdr_sent[0] = True
+        time.sleep(1.2)
+
+    # Kam vložiť HEADER v prvom pokuse (out-of-order test):
+    #   normal/hbegin → pred chunkami | hmiddle → po total//2 chunkoch | hend → po všetkých
+    if packetorder in ('normal', 'hbegin'):
+        try:
+            send_header()
+        except serial.SerialException as e:
+            print(e); reader.stop(); return False
+        header_pos = -1
+    elif packetorder == 'hmiddle':
+        header_pos = total // 2
+    else:  # hend
+        header_pos = total
 
     # --- CHUNKS ---
     to_send = list(range(total))
@@ -311,12 +375,16 @@ def send_ota(ser: serial.Serial,
         serial_lost = False
         dropped = 0
         for pos, idx in enumerate(to_send):
+            # HEADER v strede (hmiddle) — vlož pred chunk na pozícii header_pos
+            if attempt == 0 and not _hdr_sent[0] and pos == header_pos:
+                try: send_header()
+                except serial.SerialException: pass
             # Simulácia straty paketu (test kumulácie naprieč cyklami)
             if drop_prob > 0.0 and random.random() < drop_prob:
                 dropped += 1
                 continue
             try:
-                send_pkt(build_ota_chunk(idx, chunks[idx]))
+                send_pkt(build_ota_chunk(idx, chunks[idx], old_fw_size, old_sha256_prefix))
             except serial.SerialException as e:
                 print(f"\n{e}")
                 serial_lost = True
@@ -325,6 +393,10 @@ def send_ota(ser: serial.Serial,
                 print(f"  → {pos+1}/{len(to_send)} (idx={idx})", end='\r', flush=True)
             time.sleep(chunk_delay)
         print()
+        # HEADER na konci (hend) — po odoslaní všetkých chunkov prvého pokusu
+        if attempt == 0 and not _hdr_sent[0]:
+            try: send_header()
+            except serial.SerialException: pass
         if dropped:
             print(f"[OTA] (simulácia straty: vynechaných {dropped} chunkov)")
         if serial_lost:
@@ -407,12 +479,20 @@ def main():
     ap.add_argument('--reboot', action='store_true', default=False,
                                 help='Po odoslaní chunkov pošli APPLY (flash+reboot). Default: len chunky, bez resetu.')
     ap.add_argument('--cycles', type=int, default=1,
-                                help='Koľkokrát opakovať celý broadcast (BEGIN+chunky+APPLY). '
+                                help='Koľkokrát opakovať celý broadcast (HEADER+chunky+APPLY). '
                                      'Fire-and-forget model: prijímač si kumuluje chunky naprieč cyklami.')
     ap.add_argument('--drop',   type=float, default=0.0,
                                 help='Pravdepodobnosť [0..1] zahodenia chunku (simulácia LoRa straty, test kumulácie).')
     ap.add_argument('--cycle-delay', type=float, default=2.0,
                                 help='Pauza medzi cyklami [s].')
+    ap.add_argument('--privkey', help='Ed25519 private key (DER/PEM) na podpis HEADER')
+    ap.add_argument('--keyid',    type=int, default=1,
+                                help='Key ID ktory sa pouzije v HEADER (predvolene 1)')
+    ap.add_argument('--packetorder', choices=['normal', 'hbegin', 'hmiddle', 'hend'],
+                                default='normal',
+                                help='Pozícia HEADER paketu (out-of-order test): '
+                                     'normal/hbegin=na začiatku | hmiddle=v strede chunkov | '
+                                     'hend=na konci po všetkých chunkoch.')
     args = ap.parse_args()
     if not (0.0 <= args.drop < 1.0):
         print('[CHYBA] --drop musí byť v [0..1)'); sys.exit(1)
@@ -440,7 +520,13 @@ def main():
         make_patch(Path(args.old), Path(args.new), Path(args.patch))
     total = (len(patch) + OTA_CHUNK_DATA - 1) // OTA_CHUNK_DATA
 
-    print(f'[init] {total} chunkov × {OTA_CHUNK_DATA}B = {len(patch)}B patch')
+    print(f'[init] {total} chunkov x {OTA_CHUNK_DATA}B = {len(patch)}B patch')
+
+    # Nacitaj Ed25519 private key
+    privkey = None
+    if args.privkey:
+        print(f'[init] Ed25519 private key: {args.privkey} (key_id=0x{args.keyid:02X})')
+        privkey = load_ed25519_privkey(Path(args.privkey))
 
     # Otvor serial
     print(f'[serial] {args.port} @ {args.baud}')
@@ -450,7 +536,7 @@ def main():
     ok = False
     with serial.Serial(args.port, args.baud, timeout=0.05) as ser:
         # DTR pri otvorení resetne Adafruit nRF52 bridge → čerstvý boot rádia.
-        # Daj mu čas nabehnúť (radio.begin ~2s), inak sa stratí BEGIN.
+        # Daj mu čas nabehnúť (radio.begin ~2s), inak sa stratí HEADER.
         time.sleep(2.5)
         ser.reset_input_buffer()
         for cyc in range(args.cycles):
@@ -458,7 +544,8 @@ def main():
                 print(f'\n========== CYKLUS {cyc+1}/{args.cycles} ==========')
             ok = send_ota(ser, patch, patch_sha256, new_sha256, old_sha256, old_fw_size,
                           psk, args.mode, args.delay, args.nack_retries, args.reboot,
-                          drop_prob=args.drop)
+                          drop_prob=args.drop,
+                          privkey=privkey, key_id=args.keyid, packetorder=args.packetorder)
             if not ok:
                 print('[OTA] cyklus zlyhal (serial?) — končím')
                 break

@@ -15,7 +15,7 @@
 // =====================================================================
 // Typy OTA paketov (prvý bajt OTA payloadu — za 4B timestampom GRP_DATA)
 // =====================================================================
-#define OTA_PKT_BEGIN    0x10   // PC → zariadenie: spusti novú OTA session
+#define OTA_PKT_HEADER    0x10   // PC → zariadenie: spusti novú OTA session
 #define OTA_PKT_CHUNK    0x11   // PC → zariadenie: jeden chunk patch dát
 #define OTA_PKT_APPLY    0x12   // PC → zariadenie: aplikuj patch
 #define OTA_PKT_STATUS   0x20   // zariadenie → PC: stav prijímania
@@ -33,23 +33,31 @@
 // On-air štruktúry (packed, bez paddingu)
 // =====================================================================
 
-// OTA_BEGIN — 111 B
+// OTA_HEADER — 172 B (type → old_sha256 = 107B, key_id = 1B, signature = 64B)
+// old_fw_size nahradené old_sha256_prefix — veľkosť starého fw nie je potrebná
+// v HEADER (chunks majú old_fw_size pre base FW validáciu).
 typedef struct __attribute__((packed)) {
-    uint8_t  type;             // OTA_PKT_BEGIN
+    uint8_t  type;             // OTA_PKT_HEADER
     uint16_t total_chunks;     // LE
     uint32_t patch_size;       // LE [bajty]
     uint8_t  patch_sha256[32]; // SHA256 patch.bin (na overenie príjmu)
     uint8_t  new_sha256[32];   // SHA256 nového firmware po aplikácii patchu
-    uint32_t old_fw_size;      // LE — veľkosť STARÉHO fw (z ktorého bol patch generovaný)
+    uint8_t  old_sha256_prefix[4]; // prvých 4B SHA256 starého fw — rýchla base FW kontrola
     uint8_t  old_sha256[32];   // SHA256 starého fw — overenie že base na zariadení sedí
-} OtaBeginPkt;
+    uint8_t  key_id;           // 1B — ktorý autor podpísal (Ed25519)
+    uint8_t  signature[64];    // 64B Ed25519 signature (nad type→old_sha256, 107B)
+} OtaHeaderPkt;
 
-// OTA_CHUNK — 5 + data_len B (max 155 B)
+// OTA_CHUNK — 13 + data_len B (max 163 B)
+// +8B oproti pôvodnému: old_fw_size + old_sha256_prefix pre session izoláciu
+// plaintext: 4B ts + 163B = 167B ≤ 168B ✅
 typedef struct __attribute__((packed)) {
-    uint8_t  type;          // OTA_PKT_CHUNK
-    uint16_t chunk_idx;     // LE, 0-based
-    uint16_t crc16;         // CRC16/CCITT len nad data[]
-    uint8_t  data[OTA_CHUNK_DATA_MAX];  // reálna dĺžka z pktlen-5
+    uint8_t  type;                 // OTA_PKT_CHUNK
+    uint16_t chunk_idx;            // LE, 0-based
+    uint16_t crc16;                // CRC16/CCITT len nad data[]
+    uint32_t old_fw_size;          // LE — veľkosť base FW pre validáciu
+    uint8_t  old_sha256_prefix[4]; // prvých 4B SHA256 base FW — rýchla kontrola
+    uint8_t  data[OTA_CHUNK_DATA_MAX];  // reálna dĺžka z pktlen-13
 } OtaChunkPkt;
 
 // OTA_APPLY — 33 B

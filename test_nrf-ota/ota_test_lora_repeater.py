@@ -278,6 +278,10 @@ def phase_run(args):
               "--delay", str(args.delay)]
     if args.drop > 0.0:
         sender += ["--drop", str(args.drop)]
+    if args.privkey:
+        sender += ["--privkey", args.privkey, "--keyid", str(args.keyid)]
+    if args.packetorder and args.packetorder != "normal":
+        sender += ["--packetorder", args.packetorder]
 
     # Fresh reboot repeatera tesne pred broadcastom — rádio RX po nečinnosti/DFU
     # býva zaseknuté; čerstvý boot dáva spoľahlivé RX okno (overené HW testom).
@@ -365,8 +369,15 @@ def main():
     ap.add_argument("--reboot-settle", type=int, default=4,
                     help="Sekundy po reboote pred prvým broadcastom (RX arm)")
     ap.add_argument("--verify-first", action="store_true",
-                    help="Spustiť 'ota verify' (dry-run) pred ostrým flashom. DEFAULT vyp — "
-                         "dry-run pred flashom občas spôsobí hardfault flashera (heap).")
+                     help="Spustiť 'ota verify' (dry-run) pred ostrým flashom. DEFAULT vyp — "
+                          "dry-run pred flashom občas spôsobí hardfault flashera (heap).")
+    ap.add_argument("--privkey", help="Ed25519 private key (DER/PEM) na podpis OTA HEADER")
+    ap.add_argument("--keyid", type=int, default=1,
+                     help="Key ID pre podpis OTA HEADER (default: 1)")
+    ap.add_argument("--packetorder", choices=["normal", "hbegin", "hmiddle", "hend"],
+                     default="normal",
+                     help="Pozícia HEADER paketu pri broadcaste (out-of-order test): "
+                          "hmiddle=v strede chunkov, hend=po všetkých chunkoch")
     args = ap.parse_args()
 
     try:
