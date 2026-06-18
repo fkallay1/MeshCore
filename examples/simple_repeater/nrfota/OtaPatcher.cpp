@@ -29,6 +29,8 @@
 #endif
 
 extern const OtaState* ota_get_state();
+// Patch do RAM: default zostaví z recv.log, -D USE_PATCHBIN_FILE číta patch.bin
+extern uint8_t* ota_acquire_patch_ram(uint32_t* out_size);
 
 static void print_sha16(const uint8_t* h) {
     for (int i = 0; i < 16; i++) { if (h[i] < 0x10) Serial.print('0'); Serial.print(h[i], HEX); }
@@ -109,7 +111,9 @@ static bool ensure_flasher_written() {
 // ================================================================
 #if OTA_HAS_HPATCH
 
-// Sekvenčné čítanie z File (hpatch_lite_open + hpatch_lite_patch zdieľajú handle)
+// Sekvenčné čítanie z File (ponechané pre prípadné súborové cesty; teraz sa patch
+// načítava do RAM cez ota_acquire_patch_ram, takže je nepoužité → unused)
+__attribute__((unused))
 static hpi_BOOL patch_file_read(hpi_TInputStreamHandle h,
                                 hpi_byte* out, hpi_size_t* size) {
     if (*size == 0) return hpi_TRUE;
@@ -155,55 +159,52 @@ static hpi_BOOL patch_zlib_read(hpi_TInputStreamHandle h,
     return (n > 0 || ps->state == PS_DONE) ? hpi_TRUE : hpi_FALSE;
 }
 
+// Sekvenčné čítanie z RAM buffra (pre nekomprimovaný patch zostavený do RAM)
+typedef struct { const uint8_t* p; uint32_t len; uint32_t pos; } MemStream;
+static hpi_BOOL patch_mem_read(hpi_TInputStreamHandle h,
+                               hpi_byte* out, hpi_size_t* size) {
+    if (*size == 0) return hpi_TRUE;
+    MemStream* m = (MemStream*)h;
+    uint32_t avail = m->len - m->pos;
+    uint32_t n = ((uint32_t)*size < avail) ? (uint32_t)*size : avail;
+    if (n == 0) { *size = 0; return hpi_FALSE; }
+    memcpy(out, m->p + m->pos, n);
+    m->pos += n;
+    *size = (hpi_size_t)n;
+    return hpi_TRUE;
+}
+
 // ── TEST MÓD: SHA256-only, nič nezapisuje do flash ────────────────────
 bool ota_patch_to_file() {
     const OtaState* st = ota_get_state();
     Serial.println(F("[PATCH] Test: SHA256 verify (bez flash)..."));
     ota_verify_old_fw();   // len informatívne v dry-rune (neblokuje test)
 
-    File patch_f(OtaFS);
-    if (!patch_f.open(OTA_FS_PATCH, FILE_O_READ)) {
-        Serial.println(F("[PATCH] patch.bin chýba"));
-        return false;
-    }
-    uint32_t patch_size = (uint32_t)patch_f.size();
+    uint32_t patch_size = 0;
+    uint8_t* patch_buf = ota_acquire_patch_ram(&patch_size);   // RAM: z recv.log | patch.bin
+    if (!patch_buf) { Serial.println(F("[PATCH] patch nedostupný")); return false; }
 
     // Detekuj komprimovaný formát (magic 'ZLIB' v prvých 4 bajtoch)
     uint32_t magic = 0;
-    patch_f.read((uint8_t*)&magic, 4);
+    if (patch_size >= 4) memcpy(&magic, patch_buf, 4);
     if (magic == ZPATCH_MAGIC) {
-        // ── ZLIB streaming dry-run ──────────────────────────────────────
+        // ── ZLIB streaming dry-run (komprimovaný patch v RAM) ──────────────
         uint32_t uncomp_sz = 0, new_fw_sz = 0;
-        patch_f.read((uint8_t*)&uncomp_sz, 4);
-        patch_f.read((uint8_t*)&new_fw_sz, 4);
+        memcpy(&uncomp_sz, patch_buf + 4, 4);
+        memcpy(&new_fw_sz, patch_buf + 8, 4);
         uint32_t comp_sz = patch_size - 12;
 
         Serial.print(F("[PATCH] ZLIB: compressed=")); Serial.print(comp_sz);
         Serial.print(F("B  raw=")); Serial.print(uncomp_sz);
         Serial.print(F("B  new_fw=")); Serial.print(new_fw_sz); Serial.println('B');
 
-        uint8_t* comp_buf = (uint8_t*)malloc(comp_sz);
-        if (!comp_buf) {
-            patch_f.close();
-            Serial.print(F("[PATCH] malloc(")); Serial.print(comp_sz);
-            Serial.println(F("B) zlyhalo"));
-            return false;
-        }
-        uint32_t rd = (uint32_t)patch_f.read(comp_buf, comp_sz);
-        patch_f.close();
-        if (rd != comp_sz) {
-            free(comp_buf);
-            Serial.println(F("[PATCH] Chyba čítania patch.bin"));
-            return false;
-        }
-
         puff_stream_t* ps = (puff_stream_t*)malloc(sizeof(puff_stream_t));
         if (!ps) {
-            free(comp_buf);
+            free(patch_buf);
             Serial.println(F("[PATCH] malloc puff_stream zlyhalo"));
             return false;
         }
-        puff_stream_init(ps, comp_buf, comp_sz);
+        puff_stream_init(ps, patch_buf + 12, comp_sz);   // komprimované telo z RAM
 
         hpi_compressType compress_type = hpi_compressType_no;
         hpi_pos_t new_size = 0, uncomp_size_hpi = 0;
@@ -213,7 +214,7 @@ bool ota_patch_to_file() {
                                   &uncomp_size_hpi, &extra_safe)) {
             Serial.print(F("[PATCH] Neplatny HPatchLite header (ZLIB) ps_err="));
             Serial.println(ps->error);
-            free(ps); free(comp_buf);
+            free(ps); free(patch_buf);
             return false;
         }
         Serial.print(F("[PATCH] hpatchi: new_size=")); Serial.print((uint32_t)new_size);
@@ -230,7 +231,7 @@ bool ota_patch_to_file() {
         bool ok = (bool)hpatch_lite_patch(&sl.base, new_size, cache, sizeof(cache));
         int ps_err = ps->error;
         free(ps);
-        free(comp_buf);
+        free(patch_buf);
 
         if (!ok) {
             if (ps_err) {
@@ -258,22 +259,22 @@ bool ota_patch_to_file() {
         Serial.println(F("[PATCH] ZLIB patch overeny!"));
         return true;
     }
-    patch_f.seek(0);
 
-    // Pôvodný formát: nekomprimovaný HPatchLite
+    // Pôvodný formát: nekomprimovaný HPatchLite (z RAM cez MemStream)
+    MemStream ms = { patch_buf, patch_size, 0 };
     hpi_compressType compress_type = hpi_compressType_no;
     hpi_pos_t new_size = 0, uncomp_size = 0;
     hpi_size_t extra_safe = 0;
-    if (!hpatchi_inplace_open(&patch_f, patch_file_read,
+    if (!hpatchi_inplace_open(&ms, patch_mem_read,
                               &compress_type, &new_size,
                               &uncomp_size, &extra_safe)) {
-        patch_f.close();
         Serial.println(F("[PATCH] Neplatny format patchu (hpatchi_inplace_open)"));
+        free(patch_buf);
         return false;
     }
     if (compress_type != hpi_compressType_no) {
-        patch_f.close();
         Serial.println(F("[PATCH] Komprimovany patch nie je podporovany"));
+        free(patch_buf);
         return false;
     }
 
@@ -283,20 +284,20 @@ bool ota_patch_to_file() {
 
     ShaListener sl;
     sl.written = 0;
-    sl.base.diff_data = &patch_f;
-    sl.base.read_diff = patch_file_read;
+    sl.base.diff_data = &ms;
+    sl.base.read_diff = patch_mem_read;
     sl.base.read_old  = sha_read_old;
     sl.base.write_new = sha_write_new;
 
     uint8_t cache[2048];
     bool ok = (bool)hpatch_lite_patch(&sl.base, new_size, cache, sizeof(cache));
-    patch_f.close();
 
-    if (!ok) { Serial.println(F("[PATCH] HPatchLite ZLYHALO")); return false; }
+    if (!ok) { Serial.println(F("[PATCH] HPatchLite ZLYHALO")); free(patch_buf); return false; }
 
     uint8_t result_sha[32];
     sl.sha.finalize(result_sha, sizeof(result_sha));
     Serial.print(F("[PATCH] SHA256=")); print_sha16(result_sha); Serial.println(F("..."));
+    free(patch_buf);
 
     bool all_zero = true;
     for (int i = 0; i < 32 && all_zero; i++)
@@ -328,70 +329,53 @@ bool ota_flash_via_flasher() {
         return false;
     }
 
-    // ── 1: otvor patch.bin, zisti new_fw_size z hlavičky ──
-    File patch_f(OtaFS);
-    if (!patch_f.open(OTA_FS_PATCH, FILE_O_READ)) {
-        Serial.println(F("[FLASHER] patch.bin chýba"));
+    // ── 1: načítaj patch do RAM (recv.log assembly | patch.bin), new_fw_size z hlavičky ──
+    //    ota_acquire_patch_ram: default zostaví z recv.log priamo do RAM (žiadny patch.bin),
+    //    -D USE_PATCHBIN_FILE číta /ota/patch.bin. FS sa použije TU, pred OtaFS.end() nižšie.
+    uint32_t patch_size = 0;
+    uint8_t* patch_buf = ota_acquire_patch_ram(&patch_size);
+    if (!patch_buf) {
+        Serial.println(F("[FLASHER] patch nedostupný (RAM/súbor)"));
         return false;
     }
-    uint32_t patch_size = (uint32_t)patch_f.size();
     if (patch_size == 0 || patch_size > OTA_FS_FLASH_SIZE) {
         Serial.print(F("[FLASHER] Neplatná veľkosť patchu: ")); Serial.println(patch_size);
-        patch_f.close();
+        free(patch_buf);
         return false;
     }
 
     uint32_t new_fw_size = 0;
     {
         uint32_t magic = 0;
-        patch_f.read((uint8_t*)&magic, 4);
+        if (patch_size >= 12) memcpy(&magic, patch_buf, 4);
         if (magic == ZPATCH_MAGIC) {
             uint32_t uncomp_sz = 0;
-            patch_f.read((uint8_t*)&uncomp_sz, 4);
-            patch_f.read((uint8_t*)&new_fw_size, 4);
-            patch_f.seek(0);
+            memcpy(&uncomp_sz, patch_buf + 4, 4);
+            memcpy(&new_fw_size, patch_buf + 8, 4);
             Serial.print(F("[FLASHER] Komprimovany format: staged=")); Serial.print(patch_size);
             Serial.print(F("B  raw=")); Serial.print(uncomp_sz);
             Serial.print(F("B  new_fw=")); Serial.print(new_fw_size); Serial.println('B');
         } else {
-            patch_f.seek(0);
+            MemStream ms = { patch_buf, patch_size, 0 };
             hpi_compressType compress_type = hpi_compressType_no;
             hpi_pos_t new_fw_size64 = 0, uncomp_size = 0;
             hpi_size_t extra_safe = 0;
-            if (!hpatchi_inplace_open(&patch_f, patch_file_read,
+            if (!hpatchi_inplace_open(&ms, patch_mem_read,
                                       &compress_type, &new_fw_size64,
                                       &uncomp_size, &extra_safe)) {
-                patch_f.close();
+                free(patch_buf);
                 Serial.println(F("[FLASHER] Neplatny format patchu"));
                 return false;
             }
             if (compress_type != hpi_compressType_no) {
-                patch_f.close();
+                free(patch_buf);
                 Serial.println(F("[FLASHER] Komprimovany HPatchLite nie je podporovany"));
                 return false;
             }
             new_fw_size = (uint32_t)new_fw_size64;
             Serial.print(F("[FLASHER] Nekomprimovany format: new_fw=")); Serial.print(new_fw_size);
             Serial.print(F("B  patch=")); Serial.print(patch_size); Serial.println('B');
-            patch_f.seek(0);
         }
-    }
-
-    // ── 2: načítaj patch.bin do RAM (~50kB) ──
-    uint8_t* patch_buf = (uint8_t*)malloc(patch_size);
-    if (!patch_buf) {
-        patch_f.close();
-        Serial.print(F("[FLASHER] malloc(")); Serial.print(patch_size);
-        Serial.println(F("B) zlyhalo — nedostatok RAM"));
-        return false;
-    }
-    patch_f.seek(0);
-    uint32_t rd = (uint32_t)patch_f.read(patch_buf, patch_size);
-    patch_f.close();
-    if (rd != patch_size) {
-        free(patch_buf);
-        Serial.println(F("[FLASHER] Chyba čítania patch.bin"));
-        return false;
     }
     Serial.print(F("[FLASHER] Patch v RAM (")); Serial.print(patch_size); Serial.println(F("B)"));
 

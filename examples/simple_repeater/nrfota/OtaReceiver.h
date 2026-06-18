@@ -39,6 +39,12 @@ const OtaState* ota_get_state();
 // Vymaže všetky OTA súbory z CustomLFS + resetuje RAM stav.
 void ota_clear_session();
 
+// Načíta patch do čerstvo malloc-nutého RAM buffra (caller uvoľní free()).
+//   default:           zostaví z /ota/recv.log priamo do RAM (bez patch.bin)
+//   -D USE_PATCHBIN_FILE: prečíta /ota/patch.bin
+// *out_size = veľkosť patchu. Vracia NULL pri chybe (vrátane malloc zlyhania).
+uint8_t* ota_acquire_patch_ram(uint32_t* out_size);
+
 // Postav STATUS/NACK paket do out[] (pre odoslanie späť cez LoRa OTA kanál).
 // Vracia dĺžku payloadu, alebo 0 ak nie je čo poslať.
 int ota_build_status(uint8_t* out);

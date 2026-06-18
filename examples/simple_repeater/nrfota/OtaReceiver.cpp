@@ -40,23 +40,32 @@ static uint32_t s_log_data_offset[OTA_MAX_CHUNKS];
 // =====================================================================
 // Veľkosť bežiaceho FW image — z linker symbolov (žiadna zmena ld scriptu,
 // žiadny post-build). nrf52_common.ld exportuje __etext (= LMA .data, t.j.
-// koniec .text/.exidx vo flashi) a __data_start__/__data_end__ (VMA .data
-// v RAM). .data má v RAM rovnakú veľkosť ako jej flash LMA-obraz, takže:
+// koniec .text/.exidx vo flashi), __data_start__/__data_end__ (VMA .data
+// v RAM) a __flash_arduino_start (= ORIGIN(FLASH), reálny app base z aktívneho
+// ld). .data má v RAM rovnakú veľkosť ako jej flash LMA-obraz, takže:
 //   image_end = __etext + (__data_end__ - __data_start__)
-//   fw_size   = image_end - APP_FLASH_START
+//   fw_size   = image_end - __flash_arduino_start
 // Zhoduje sa s firmware.bin z DFU zipu (= old_fw_size od sendera). Overené.
+//
+// Base berieme z linker symbolu __flash_arduino_start (NIE hardcoded
+// APP_FLASH_START) — symbol vždy odráža reálny link base aktívneho ld scriptu
+// (v6=0x26000, v7=0x27000) a je tak robustnejší zdroj pravdy než makro.
+// APP_FLASH_START/MAX makrá ostávajú pre compile-time kontexty (symbol tam
+// nie je konštantný výraz). Hodnoty sú link-time konštanty (relokácie) — pri
+// kompilácii neznáme, ale to runtime aritmetike nevadí.
 // =====================================================================
 extern "C" {
     extern char __etext;
     extern char __data_start__;
     extern char __data_end__;
+    extern char __flash_arduino_start;   // = ORIGIN(FLASH) = app base
 }
 
 static inline uint32_t fw_image_size(void) {
     uint32_t data_size = (uint32_t)(uintptr_t)&__data_end__
                        - (uint32_t)(uintptr_t)&__data_start__;
     uint32_t image_end = (uint32_t)(uintptr_t)&__etext + data_size;
-    return image_end - APP_FLASH_START;
+    return image_end - (uint32_t)(uintptr_t)&__flash_arduino_start;
 }
 
 // Cross-check: zodpovedá deklarovaná old_fw_size reálne bežiacemu FW?
@@ -217,71 +226,127 @@ static bool log_append(uint16_t idx, const uint8_t* data, uint16_t data_len) {
 }
 
 // =====================================================================
-// Assembly + SHA256 verifikácia (po COMPLETE)
+// Assembly z recv.log — spoločné pomocné funkcie
 // =====================================================================
-static bool assemble_and_verify() {
-    Serial.println(F("[OTA] Zostavujem patch.bin..."));
+// Presná dĺžka chunku i (bez AES paddingu): plné chunky = OTA_CHUNK_DATA_MAX,
+// posledný = zvyšok z patch_size.
+static uint16_t chunk_exp_len(uint16_t i) {
+    if (i < ota.total_chunks - 1u) return OTA_CHUNK_DATA_MAX;
+    uint32_t rem = ota.patch_size - (uint32_t)(ota.total_chunks - 1u) * OTA_CHUNK_DATA_MAX;
+    return (rem > OTA_CHUNK_DATA_MAX) ? OTA_CHUNK_DATA_MAX : (uint16_t)rem;
+}
 
-    // --- Prechod 1: offset tabuľka ---
+// Prechod 1: naplň s_log_data_offset[] z recv.log (posledný výskyt idx vyhrá).
+static void build_log_offsets(File& log_r) {
     memset(s_log_data_offset, 0xFF, sizeof(s_log_data_offset));
+    uint32_t log_pos = 0;
+    uint8_t  hdr[4];
+    log_r.seek(0);
+    while (log_r.read(hdr, 4) == 4) {
+        uint16_t idx      = (uint16_t)(hdr[0] | ((uint16_t)hdr[1] << 8));
+        uint16_t data_len = (uint16_t)(hdr[2] | ((uint16_t)hdr[3] << 8));
+        if (idx < ota.total_chunks) s_log_data_offset[idx] = log_pos + 4;
+        log_pos += 4u + data_len;
+        log_r.seek(log_pos);
+    }
+}
 
+// Zostaví patch z recv.log priamo do RAM (buf, kapacita cap).
+// Vráti zostavenú veľkosť (== ota.patch_size) alebo 0 pri chybe/chýbajúcom chunku.
+static uint32_t assemble_log_to_buf(uint8_t* buf, uint32_t cap) {
+    if (ota.total_chunks == 0 || ota.patch_size == 0 || ota.patch_size > cap) return 0;
+    File log_r(OtaFS);
+    if (!log_r.open(OTA_FS_LOG, FILE_O_READ)) return 0;
+    build_log_offsets(log_r);
+    uint32_t out_pos = 0;
+    for (uint16_t i = 0; i < ota.total_chunks; i++) {
+        if (s_log_data_offset[i] == 0xFFFFFFFFu) { log_r.close(); return 0; }
+        uint16_t exp_len = chunk_exp_len(i);
+        if (out_pos + exp_len > cap) { log_r.close(); return 0; }
+        log_r.seek(s_log_data_offset[i]);
+        if (log_r.read(buf + out_pos, exp_len) != (int)exp_len) { log_r.close(); return 0; }
+        out_pos += exp_len;
+    }
+    log_r.close();
+    return out_pos;
+}
+
+#ifndef USE_PATCHBIN_FILE
+// RAM mód: SHA256 patchu streamovo z recv.log (bez patch.bin, bez veľkého buffra).
+static bool verify_log_sha() {
     File log_r(OtaFS);
     if (!log_r.open(OTA_FS_LOG, FILE_O_READ)) {
         Serial.println(F("[OTA] log: čítanie zlyhal")); return false;
     }
-
-    uint32_t log_pos = 0;
-    uint8_t  hdr[4];
-    while (log_r.read(hdr, 4) == 4) {
-        uint16_t idx      = (uint16_t)(hdr[0] | ((uint16_t)hdr[1] << 8));
-        uint16_t data_len = (uint16_t)(hdr[2] | ((uint16_t)hdr[3] << 8));
-        if (idx < ota.total_chunks)
-            s_log_data_offset[idx] = log_pos + 4;
-        log_pos += 4u + data_len;
-        log_r.seek(log_pos);
+    build_log_offsets(log_r);
+    SHA256 sha;
+    uint8_t buf[OTA_CHUNK_DATA_MAX];
+    for (uint16_t i = 0; i < ota.total_chunks; i++) {
+        if (s_log_data_offset[i] == 0xFFFFFFFFu) {
+            Serial.print(F("[OTA] chýba chunk ")); Serial.println(i);
+            log_r.close(); return false;
+        }
+        uint16_t exp_len = chunk_exp_len(i);
+        log_r.seek(s_log_data_offset[i]);
+        if (log_r.read(buf, exp_len) != (int)exp_len) { log_r.close(); return false; }
+        sha.update(buf, exp_len);
     }
+    log_r.close();
+    uint8_t hash[32];
+    sha.finalize(hash, sizeof(hash));
+    if (memcmp(hash, ota.patch_sha256, 32) != 0) {
+        Serial.print(F("[OTA] SHA256 NESÚHLASÍ  got="));
+        for (int i = 0; i < 8; i++) { if (hash[i] < 0x10) Serial.print('0'); Serial.print(hash[i], HEX); }
+        Serial.println(F("..."));
+        return false;
+    }
+    return true;
+}
+#endif
 
-    // --- Prechod 2: zostavenie patch.bin + SHA256 ---
+// =====================================================================
+// Assembly + SHA256 verifikácia (po COMPLETE)
+//   default:           over SHA streamovo z recv.log, NEpíš patch.bin (úspora FS)
+//   USE_PATCHBIN_FILE: zostav recv.log → patch.bin (FS) + over SHA, zmaž recv.log
+// =====================================================================
+static bool assemble_and_verify() {
+#ifndef USE_PATCHBIN_FILE
+    Serial.println(F("[OTA] Overujem patch SHA256 (RAM, bez patch.bin)..."));
+    if (!verify_log_sha()) return false;
+    Serial.println(F("[OTA] patch SHA256 OK (recv.log ostáva ako zdroj)"));
+    return true;
+#else
+    Serial.println(F("[OTA] Zostavujem patch.bin..."));
+    File log_r(OtaFS);
+    if (!log_r.open(OTA_FS_LOG, FILE_O_READ)) {
+        Serial.println(F("[OTA] log: čítanie zlyhal")); return false;
+    }
+    build_log_offsets(log_r);
+
     OtaFS.remove(OTA_FS_PATCH);
     File out_f(OtaFS);
-    if (!out_f.open(OTA_FS_PATCH, FILE_O_WRITE)) {
-        log_r.close(); return false;
-    }
+    if (!out_f.open(OTA_FS_PATCH, FILE_O_WRITE)) { log_r.close(); return false; }
 
     SHA256 sha;
     bool   ok = true;
     uint8_t buf[OTA_CHUNK_DATA_MAX];
-
     for (uint16_t i = 0; i < ota.total_chunks && ok; i++) {
         if (s_log_data_offset[i] == 0xFFFFFFFFu) {
-            Serial.print(F("[OTA] chýba chunk ")); Serial.println(i);
-            ok = false; break;
+            Serial.print(F("[OTA] chýba chunk ")); Serial.println(i); ok = false; break;
         }
-
-        uint16_t exp_len;
-        if (i < ota.total_chunks - 1u) {
-            exp_len = OTA_CHUNK_DATA_MAX;
-        } else {
-            uint32_t rem = ota.patch_size - (uint32_t)(ota.total_chunks - 1u) * OTA_CHUNK_DATA_MAX;
-            exp_len = (rem > OTA_CHUNK_DATA_MAX) ? OTA_CHUNK_DATA_MAX : (uint16_t)rem;
-        }
-
+        uint16_t exp_len = chunk_exp_len(i);
         log_r.seek(s_log_data_offset[i]);
         int n = log_r.read(buf, exp_len);
         if (n != (int)exp_len) { ok = false; break; }
-
         sha.update(buf, (size_t)n);
         out_f.write(buf, (size_t)n);
     }
-
     log_r.close();
     out_f.close();
-
     if (!ok) { Serial.println(F("[OTA] zostava zlyhala")); return false; }
 
     uint8_t hash[32];
     sha.finalize(hash, sizeof(hash));
-
     if (memcmp(hash, ota.patch_sha256, 32) != 0) {
         Serial.print(F("[OTA] SHA256 NESÚHLASÍ  got="));
         for (int i = 0; i < 8; i++) { if (hash[i] < 0x10) Serial.print('0'); Serial.print(hash[i], HEX); }
@@ -289,7 +354,46 @@ static bool assemble_and_verify() {
         return false;
     }
     Serial.println(F("[OTA] patch.bin SHA256 OK"));
+    OtaFS.remove(OTA_FS_LOG);   // recv.log cleanup — patch.bin je odteraz zdroj
+    Serial.println(F("[OTA] recv.log zmazaný (patch.bin je zdroj)"));
     return true;
+#endif
+}
+
+// =====================================================================
+// ota_acquire_patch_ram — patch do čerstvo malloc-nutého RAM buffra.
+//   default:           zostaví z recv.log (žiadny patch.bin, žiadny 2× FS)
+//   USE_PATCHBIN_FILE: prečíta /ota/patch.bin
+// Caller uvoľní cez free(). *out_size = veľkosť. NULL pri chybe/malloc zlyhaní.
+// =====================================================================
+uint8_t* ota_acquire_patch_ram(uint32_t* out_size) {
+#ifdef USE_PATCHBIN_FILE
+    File f(OtaFS);
+    if (!f.open(OTA_FS_PATCH, FILE_O_READ)) { Serial.println(F("[OTA] patch.bin chýba")); return nullptr; }
+    uint32_t sz = (uint32_t)f.size();
+    if (sz == 0 || sz > OTA_FS_FLASH_SIZE) { f.close(); return nullptr; }
+    uint8_t* buf = (uint8_t*)malloc(sz);
+    if (!buf) { f.close(); Serial.print(F("[OTA] malloc ")); Serial.print(sz); Serial.println(F("B zlyhal")); return nullptr; }
+    bool ok = ((uint32_t)f.read(buf, sz) == sz);
+    f.close();
+    if (!ok) { free(buf); Serial.println(F("[OTA] čítanie patch.bin zlyhalo")); return nullptr; }
+    *out_size = sz;
+    return buf;
+#else
+    uint32_t sz = ota.patch_size;
+    if (sz == 0 || sz > OTA_FS_FLASH_SIZE) { Serial.println(F("[OTA] neplatná patch_size")); return nullptr; }
+    uint8_t* buf = (uint8_t*)malloc(sz);
+    if (!buf) {
+        Serial.print(F("[OTA] malloc ")); Serial.print(sz);
+        Serial.println(F("B zlyhal (RAM assembly) — pre veľké patche skús -D USE_PATCHBIN_FILE"));
+        return nullptr;
+    }
+    if (assemble_log_to_buf(buf, sz) != sz) {
+        free(buf); Serial.println(F("[OTA] RAM assembly z recv.log zlyhala")); return nullptr;
+    }
+    *out_size = sz;
+    return buf;
+#endif
 }
 
 // =====================================================================
