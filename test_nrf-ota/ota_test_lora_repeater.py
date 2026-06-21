@@ -297,6 +297,12 @@ def phase_run(args):
         sender += ["--privkey", args.privkey, "--keyid", str(args.keyid)]
     if args.packetorder and args.packetorder != "normal":
         sender += ["--packetorder", args.packetorder]
+    if args.scope:
+        sender += ["--scope", args.scope]
+        if args.scope_name:     sender += ["--scope-name", args.scope_name]
+        if args.scope_key:      sender += ["--scope-key", args.scope_key]
+        if args.path:           sender += ["--path", args.path]
+        if args.path_hashsize:  sender += ["--path-hashsize", str(args.path_hashsize)]
 
     # Pozn.: reboot repeatera robí broadcast_until_verified PRED KAŽDÝM kolom
     # (čerstvé RX okno proti "stuck receiver"), takže sa tu už nerebootuje.
@@ -394,6 +400,13 @@ def main():
                           "header/meta prežíva reboot → budget sa minie na chunky, nie na "
                           "už-známy header (spoľahlivejšie VERIFIED pri slabom RF). "
                           "'normal'=header prvý (out-of-order test: hmiddle/hbegin).")
+    ap.add_argument("--scope", choices=["flood", "zerohop", "region", "direct"],
+                     default=None, help="LoRa šírenie GRP_DATA (passthrough do ota_sender). "
+                          "None = nechá default ota_sender (zerohop).")
+    ap.add_argument("--scope-name", help="Región pre --scope region (passthrough).")
+    ap.add_argument("--scope-key",  help="16B hex scope key pre --scope region (passthrough).")
+    ap.add_argument("--path",       help="--scope direct: čiarkou hex hashe hopov (passthrough).")
+    ap.add_argument("--path-hashsize", type=int, choices=[1, 2, 3], help="Veľkosť path hashu (passthrough).")
     args = ap.parse_args()
 
     # --privkey má default = test_nrf-ota/test_key.der (viď argparse vyššie), ALE ten

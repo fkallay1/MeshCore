@@ -28,6 +28,7 @@ Serial rámec od zariadenia (gateway reply): [0xCC][0xDD][len 2B LE][data]
 import argparse
 import hashlib
 import hmac as hmaclib
+from collections import namedtuple
 import random
 import serial
 import serial.threaded
@@ -55,6 +56,16 @@ OTA_PKT_NACK    = 0x21
 
 OTA_CHUNK_DATA  = 150
 DIRECT_MAGIC    = b'\x4F\x54'   # 'OT'
+
+# MeshCore route type (header bity 0-1, PH_ROUTE_MASK) — určuje LoRa šírenie
+ROUTE_TYPE_TRANSPORT_FLOOD = 0   # flood + transport_codes (region scope)
+ROUTE_TYPE_FLOOD           = 1   # flood (každý repeater re-flooduje)
+ROUTE_TYPE_DIRECT          = 2   # direct/zero-hop (path_len=0 = zero-hop)
+
+# scope = (mode, key, path_bytes, path_hashsize); key/path_* relevantné len pre region/direct.
+# path_hashsize = 1/2/3 (bajty na hash), default 1. path_bytes = hop_count * path_hashsize bajtov.
+Scope = namedtuple('Scope', ['mode', 'key', 'path_bytes', 'path_hashsize'],
+                   defaults=(None, b'', 1))
 
 OTA_ST_VERIFIED = 0x04
 OTA_ST_ERROR    = 0x80
@@ -110,14 +121,46 @@ def meshcore_encrypt(psk: bytes, plaintext: bytes) -> bytes:
     mac = hmaclib.new(psk32, ciphertext, hashlib.sha256).digest()[:2]
     return mac + ciphertext
 
-def meshcore_grp_data_packet(psk: bytes, ota_payload: bytes) -> bytes:
-    ch_hash  = hashlib.sha256(psk).digest()[0]
-    ts       = int(time.time()) & 0xFFFFFFFF
-    plain    = struct.pack('<I', ts) + ota_payload
-    enc      = meshcore_encrypt(psk, plain)
-    header   = (6 << 2) | 1   # FLOOD + GRP_DATA = 0x19
-    path_enc = 0x00
-    return bytes([header, path_enc, ch_hash]) + enc
+def calc_transport_code(scope_key16: bytes, payload_type: int, payload: bytes) -> int:
+    """Replikuje TransportKey::calcTransportCode (TransportKeyStore.cpp).
+    HMAC-SHA256(key16, type(1B) + payload), prvé 2B little-endian uint16."""
+    d = hmaclib.new(scope_key16, bytes([payload_type]) + payload, hashlib.sha256).digest()
+    code = d[0] | (d[1] << 8)
+    if code == 0:        code = 1        # 0x0000 a 0xFFFF sú rezervované
+    elif code == 0xFFFF: code = 0xFFFE
+    return code
+
+def wrap_meshcore_packet(payload_type: int, payload: bytes, scope: Scope) -> bytes:
+    """Payload-type-agnostický wrapper: [hdr][transport_codes?][path_len][path][payload].
+    'payload' je už hotové payload pole (pre GRP_DATA: ch_hash+MAC+ciphertext).
+    Oddelené od typu, aby Fáza 2 (RAW_CUSTOM) iba zavolala s payload_type=0x0F."""
+    if scope.mode == 'flood':
+        route, codes, path = ROUTE_TYPE_FLOOD, b'', b''
+    elif scope.mode == 'zerohop':
+        route, codes, path = ROUTE_TYPE_DIRECT, b'', b''          # path_len=0 → zero-hop
+    elif scope.mode == 'region':
+        code1 = calc_transport_code(scope.key, payload_type, payload)
+        route, codes, path = ROUTE_TYPE_TRANSPORT_FLOOD, struct.pack('<HH', code1, 0), b''
+    elif scope.mode == 'direct':
+        route, codes, path = ROUTE_TYPE_DIRECT, b'', scope.path_bytes
+    else:
+        raise ValueError(f'neznámy scope.mode: {scope.mode!r}')
+    header = (payload_type << 2) | route
+    # path_len: bity 0-5 = počet hopov, bity 6-7 = (hash_size - 1)
+    hsz       = scope.path_hashsize
+    hop_count = len(path) // hsz
+    path_len  = ((hsz - 1) << 6) | (hop_count & 0x3F)
+    return bytes([header]) + codes + bytes([path_len]) + path + payload
+
+def build_grpdata_payload(psk: bytes, ota_payload: bytes) -> bytes:
+    """GRP_DATA payload pole: [ch_hash][MAC+ciphertext]. plaintext = [ts 4B LE][ota_payload]."""
+    ch_hash = hashlib.sha256(psk).digest()[0]
+    ts      = int(time.time()) & 0xFFFFFFFF
+    plain   = struct.pack('<I', ts) + ota_payload
+    return bytes([ch_hash]) + meshcore_encrypt(psk, plain)
+
+def meshcore_grp_data_packet(psk: bytes, ota_payload: bytes, scope: Scope) -> bytes:
+    return wrap_meshcore_packet(6, build_grpdata_payload(psk, ota_payload), scope)
 
 def direct_ota_packet(ota_payload: bytes) -> bytes:
     return DIRECT_MAGIC + ota_payload
@@ -303,7 +346,8 @@ def send_ota(ser: serial.Serial,
              psk: bytes | None, mode: str,
              chunk_delay: float, nack_retries: int, do_reboot: bool = False,
              drop_prob: float = 0.0,
-             privkey=None, key_id: int = 1, packetorder: str = 'normal'):
+             privkey=None, key_id: int = 1, packetorder: str = 'normal',
+             scope: Scope = Scope('zerohop', None, b'')):
     chunks = [patch[i:i+OTA_CHUNK_DATA] for i in range(0, len(patch), OTA_CHUNK_DATA)]
     total  = len(chunks)
     old_sha256_prefix = old_sha256[:4]  # 4B pre session izoláciu
@@ -321,7 +365,7 @@ def send_ota(ser: serial.Serial,
 
     def send_pkt(payload: bytes):
         if mode == 'meshcore':
-            lora_pkt = meshcore_grp_data_packet(psk, payload)
+            lora_pkt = meshcore_grp_data_packet(psk, payload, scope)
         elif mode == 'direct':
             lora_pkt = direct_ota_packet(payload)
         else:  # serial-direct: inject priamo ako direct OTA cez serial rámec
@@ -493,6 +537,19 @@ def main():
                                 help='Pozícia HEADER paketu (out-of-order test): '
                                      'normal/hbegin=na začiatku | hmiddle=v strede chunkov | '
                                      'hend=na konci po všetkých chunkoch.')
+    ap.add_argument('--scope', choices=['flood', 'zerohop', 'region', 'direct'],
+                                default='zerohop',
+                                help='LoRa šírenie GRP_DATA (--mode meshcore): '
+                                     'zerohop=len priami susedia, nikto nerepeatuje (DEFAULT) | '
+                                     'flood=každý repeater re-flooduje | '
+                                     'region=flood len v zhodnom regióne (--scope-name/--scope-key) | '
+                                     'direct=cez menované hopy (--path).')
+    ap.add_argument('--scope-name', help='Názov regiónu pre --scope region (key = SHA256(name)[:16]).')
+    ap.add_argument('--scope-key',  help='16B hex scope key pre --scope region (alternatíva k --scope-name).')
+    ap.add_argument('--path',       help='--scope direct: čiarkou oddelené hex hashe hopov v poradí, '
+                                         'napr. 3f,a1 (1B) alebo 3fa1,b2c3 (2B). Veľkosť podľa --path-hashsize.')
+    ap.add_argument('--path-hashsize', type=int, choices=[1, 2, 3], default=1,
+                                help='Veľkosť path hashu v bajtoch pre --scope direct (default 1).')
     args = ap.parse_args()
     if not (0.0 <= args.drop < 1.0):
         print('[CHYBA] --drop musí byť v [0..1)'); sys.exit(1)
@@ -514,6 +571,40 @@ def main():
         print('[init] Mode=SerialDirect (USB serial, inject do sniffera)')
         if args.delay > 0.1:
             print(f'[init] TIP: pre serial-direct môžeš skúsiť --delay 0.05')
+
+    # Zostav scope (LoRa šírenie) — relevantné len pre --mode meshcore
+    scope = Scope('zerohop', None, b'', 1)
+    if args.mode == 'meshcore':
+        if args.scope in ('flood', 'zerohop'):
+            scope = Scope(args.scope, None, b'', 1)
+            print(f'[init] scope={args.scope}')
+        elif args.scope == 'region':
+            if bool(args.scope_name) == bool(args.scope_key):
+                print('[CHYBA] --scope region vyžaduje práve jedno z --scope-name / --scope-key'); sys.exit(1)
+            if args.scope_name:
+                key = hashlib.sha256(args.scope_name.encode()).digest()[:16]
+            else:
+                key = bytes.fromhex(args.scope_key)
+                if len(key) != 16:
+                    print('[CHYBA] --scope-key musí byť 16 bajtov (32 hex znakov)'); sys.exit(1)
+            scope = Scope('region', key, b'', 1)
+            print(f'[init] scope=region name={args.scope_name or "(key)"} ')
+        elif args.scope == 'direct':
+            if not args.path:
+                print('[CHYBA] --scope direct vyžaduje --path'); sys.exit(1)
+            hsz = args.path_hashsize
+            try:
+                hops = [bytes.fromhex(tok.strip()) for tok in args.path.split(',') if tok.strip()]
+            except ValueError:
+                print('[CHYBA] --path obsahuje neplatný hex'); sys.exit(1)
+            if not hops or any(len(h) != hsz for h in hops):
+                print(f'[CHYBA] každý hop v --path musí byť {hsz}B (podľa --path-hashsize)'); sys.exit(1)
+            if not (1 <= len(hops) <= 63) or len(hops) * hsz > 64:
+                print('[CHYBA] --path: počet hopov 1..63 a hop_count*hashsize <= 64'); sys.exit(1)
+            scope = Scope('direct', None, b''.join(hops), hsz)
+            print(f'[init] scope=direct hops={len(hops)} hashsize={hsz}B')
+    elif args.scope != 'zerohop':
+        print(f'[init] POZOR: --scope {args.scope} sa ignoruje (platí len pre --mode meshcore)')
 
     # Generuj patch
     patch, patch_sha256, new_sha256, old_sha256, old_fw_size = \
@@ -545,7 +636,8 @@ def main():
             ok = send_ota(ser, patch, patch_sha256, new_sha256, old_sha256, old_fw_size,
                           psk, args.mode, args.delay, args.nack_retries, args.reboot,
                           drop_prob=args.drop,
-                          privkey=privkey, key_id=args.keyid, packetorder=args.packetorder)
+                          privkey=privkey, key_id=args.keyid, packetorder=args.packetorder,
+                          scope=scope)
             if not ok:
                 print('[OTA] cyklus zlyhal (serial?) — končím')
                 break
