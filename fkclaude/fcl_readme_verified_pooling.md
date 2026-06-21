@@ -63,9 +63,11 @@ spustiť manuálne (`ota verify`) alebo v teste cez `--verify-first`.
 |-----|---------|-------|
 | `--verify-first` | (vyp) | spustiť `ota verify` (dry-run) pred ostrým flashom; default vyp kvôli heap hardfaultu |
 
-> **TODO (firmware):** opraviť heap stav tak, aby `ota verify` + `ota flash` bezpečne fungovali
-> za sebou (napr. nealokovať/uvoľniť čistejšie v `ota_patch_to_file`, alebo medzi nimi `malloc`
-> arénu zresetovať). Dovtedy default = bez dry-runu.
+> **Stav (2026-06-21):** commit `5d4f23df` (RAM-assembly) prerobil obe cesty na `ota_acquire_patch_ram`
+> s korektným `free()` a deklaruje „dry-run pred flashom bez hardfaultu". Standalone `ota verify` je
+> overený OK (opakovane, bit-presná rekonštrukcia). Sekvencia verify→flash v jednom boote ale NEBOLA
+> priamo retestovaná (medzi nimi sa rebootovalo) → `--verify-first` ostáva default **vyp** ako poistka.
+> Pred zapnutím over verify→flash same-boot na HW. Viď [readme_tech_nrf-ota.md](readme_tech_nrf-ota.md) §8.2.
 
 ---
 

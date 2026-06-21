@@ -203,12 +203,15 @@ ota status | verify | flash | clear | decompress | nack | dbg | agc
 - **Reboot-resilient session** — bitmap sa ukladá každých 8 chunkov / pri complete; CustomLFS
   session prežije aj DFU reflash app flashu (overené).
 - **`ota_apply` stav pri zlyhaní** — pri base-mismatch obnoví predošlý status (neostane APPLYING).
-- **`ota verify` (dry-run) PRED `ota flash` → heap hardfault** — `ota_patch_to_file` spraví
-  `malloc` + streaming rekonštrukciu celého ~442 kB FW; následný `ota_apply` potom hardfaultne na
-  `malloc(patch_size)` (flasher sa zastaví hneď po `[FLASHER] Komprimovany format`, repeater
-  nabehne na OLD). Manuálny `ota flash` bez dry-runu je spoľahlivý. Workaround: test default
-  vynecháva dry-run (`--verify-first` je opt-in, viď [readme_verified_pooling.md](readme_verified_pooling.md)).
-  **TODO firmware:** vyčistiť alokácie v `ota_patch_to_file` / zresetovať heap medzi verify a flash.
+- **`ota verify` (dry-run) PRED `ota flash` → heap hardfault** (historicky pred `5d4f23df`) —
+  `ota_patch_to_file` robil `malloc` + streaming rekonštrukciu celého ~442 kB FW; následný
+  `ota_apply` hardfaultol na `malloc(patch_size)` (flasher sa zastavil po `[FLASHER] Komprimovany
+  format`, repeater nabehol na OLD). **Stav po `5d4f23df` (RAM-assembly):** obe cesty idú cez
+  `ota_acquire_patch_ram` s korektným `free()`; commit deklaruje „dry-run pred flashom bez
+  hardfaultu". **Standalone `ota verify` overený OK (2026-06-21)** — beží opakovane, bez hardfaultu,
+  rekonštruuje bit-presne. ⚠️ **Sekvencia verify→flash v JEDNOM boote NEBOLA v 2026-06-21 session
+  priamo retestovaná** (medzi verify a flash sa rebootovalo). Preto `--verify-first` v teste ostáva
+  **default vyp** ako poistka; ak treba dry-run v teste, najprv over verify→flash same-boot na HW.
 
 ### 8.3 Príjem na rádiu — DÔLEŽITÝ rozbor (2026-06)
 Symptóm: repeater po čase **prestal prijímať čokoľvek** (`rawrx=0`), dlhodobo hluchý.
