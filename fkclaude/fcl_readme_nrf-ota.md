@@ -23,6 +23,7 @@ Detailný popis OTA modulu samotného: [examples/simple_repeater/nrfota/README.m
   flasher, krypto, **vyriešené problémy** vrátane AGC-vs-flash interakcie) pre údržbu/budúcnosť.
 - [conv_claude_20260615.md](conv_claude_20260615.md) — záznam debugovacej cesty.
 - [readme_verified_pooling.md](readme_verified_pooling.md) — spevnenie VERIFIED-pollingu v teste.
+- [e2e_runbook_nrf-ota.md](e2e_runbook_nrf-ota.md) — **runbook**: porty/zariadenia/úlohy + ako spustiť a overiť e2e.
 
 ---
 
