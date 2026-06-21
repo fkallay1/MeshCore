@@ -392,16 +392,18 @@ def main():
                           "'normal'=header prvý (out-of-order test: hmiddle/hbegin).")
     args = ap.parse_args()
 
-    # Default --privkey = test signing key, ak existuje. Firmware vyžaduje podpísaný
-    # OTA HEADER (Ed25519, key_id=1); bez kľúča ide nepodpísaný header → zariadenie
-    # ho ZAMIETNE (CHYBA=0x6) a test NIKDY nedosiahne VERIFIED. test_key.der je
-    # spárovaný s pubkey zakompilovaným vo firmware (OtaReceiver_signkey.cpp).
+    # --privkey má default = test_nrf-ota/test_key.der (viď argparse vyššie), ALE ten
+    # súbor je GITIGNORED (.gitignore — súkromný kľúč sa necommituje) → na ČERSTVOM
+    # klone CHÝBA. Bez neho ide nepodpísaný HEADER → repeater ho ZAMIETNE (CHYBA=0x6) →
+    # test NIKDY nedosiahne VERIFIED (a hláška by inak bola mätúca). Preto explicitné
+    # varovanie. Kľúč musí byť ten, ktorého pubkey je zakompilovaný (s_authors[key_id=1]
+    # v OtaReceiver_signkey.cpp); skopíruj ho z funkčného prostredia do test_nrf-ota/.
     if not args.privkey:
-        _tk = SCRIPT_DIR / "test_key.der"
-        if _tk.exists():
-            args.privkey = str(_tk)
-            print(cyan(f"[init] --privkey auto = {_tk.name} (key_id={args.keyid}) "
-                       f"— firmware vyžaduje podpísaný HEADER"))
+        print(yellow("[init] VAROVANIE: test_nrf-ota/test_key.der CHÝBA (gitignored — "
+                     "neprenesie sa klonom). OTA env vyžaduje PODPÍSANÝ HEADER → bez kľúča "
+                     "repeater HEADER zamietne (CHYBA=0x6) a test NEDOSIAHNE VERIFIED. "
+                     "Skopíruj test_key.der (matchujúci pubkey v OtaReceiver_signkey.cpp) "
+                     "do test_nrf-ota/, alebo zadaj --privkey."))
 
     try:
         import serial  # noqa

@@ -94,10 +94,14 @@ Po pridaní podpísaného OTA HEADER-u runner prestal dosahovať VERIFIED (posie
 header → firmware ho zamietol). Tri zmeny v `ota_test_lora_repeater.py` (commit `d487a3dd`),
 aby `baseline` + `run` prešli **bez manuálnych flagov**:
 
-1. **auto `--privkey`** = `test_nrf-ota/test_key.der` ak existuje. Firmware vyžaduje podpísaný
+1. **auto `--privkey`** = `test_nrf-ota/test_key.der`. Firmware vyžaduje podpísaný
    HEADER (Ed25519 key_id=1, [OtaReceiver_signkey.cpp](examples/simple_repeater/nrfota/OtaReceiver_signkey.cpp));
    bez kľúča → `CHYBA=0x6`, `total_chunks=0`, session sa nedokončí. (Toto bola príčina, prečo
    test „nešiel" po pridaní podpisu.)
+   > ⚠️ **`test_key.der` je GITIGNORED** (`.gitignore`) — súkromný kľúč sa necommituje, takže na
+   > **čerstvom klone / po presune projektu CHÝBA** a test ticho nedosiahne VERIFIED. Runner na to
+   > teraz VAROVÁ. Skopíruj `test_key.der` z funkčného prostredia (musí matchovať pubkey
+   > `c22f8ae0…5b51` zakompilovaný v `OtaReceiver_signkey.cpp`, `key_id=1`) do `test_nrf-ota/`.
 2. **`--packetorder` default `hend`** (chunky prvé, header nakoniec). SX1262 RX po čerstvom
    boote chytí len ~4 rámce (stuck receiver, [readme_tech_nrf-ota.md](readme_tech_nrf-ota.md) §8.3);
    header/meta prežíva reboot → pri `hend` sa budget minie na chunky, nie na už-známy header.
