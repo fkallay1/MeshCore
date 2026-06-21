@@ -71,12 +71,15 @@ static uint32_t _atoi(const char* sp) {
     ArduinoSerialInterface serial_interface;
   #endif
 #elif defined(NRF52_PLATFORM)
-  #ifdef BLE_PIN_CODE
+  #if defined(BLE_PIN_CODE) && !defined(DEBUG_NO_BLE)
     #include <helpers/nrf52/SerialBLEInterface.h>
     SerialBLEInterface serial_interface;
   #else
     #include <helpers/ArduinoSerialInterface.h>
     ArduinoSerialInterface serial_interface;
+    #ifdef DEBUG_NO_BLE
+      #define companion_serial Serial1
+    #endif
   #endif
 #elif defined(STM32_PLATFORM)
   #include <helpers/ArduinoSerialInterface.h>
@@ -150,8 +153,12 @@ void setup() {
     #endif
   );
 
-#ifdef BLE_PIN_CODE
+#if defined(BLE_PIN_CODE) && !defined(DEBUG_NO_BLE)
   serial_interface.begin(BLE_NAME_PREFIX, the_mesh.getNodePrefs()->node_name, the_mesh.getBLEPin());
+#elif defined(DEBUG_NO_BLE)
+  companion_serial.begin(115200);
+  serial_interface.begin(companion_serial);
+  Serial.println("[DEBUG] BLE off, companion on Serial1");
 #else
   serial_interface.begin(Serial);
 #endif
@@ -218,7 +225,66 @@ void setup() {
 #endif
 }
 
+extern uint32_t g_nrf52_reset_reason;
+
+void fkInfo1_Reset_WDT() {
+
+
+
+  uint32_t reas = g_nrf52_reset_reason; //NRF_POWER->GPREGRET | (NRF_POWER->GPREGRET2 << 8);
+    
+    Serial.println("\n=== POSLEDNY RESET (z retained reg) ===");
+    if (reas & (1 << 1)) Serial.println("  >> DOG - WDT timeout!");
+    if (reas & (1 << 2)) Serial.println("  >> SREQ - Software reset (SoftDevice)!");
+    if (reas & (1 << 3)) Serial.println("  >> LOCKUP!");
+    if (reas & (1 << 16)) Serial.println("  >> DIF - Debug interface");
+    Serial.print("  Raw = 0x"); Serial.println(reas, HEX);
+    
+
+    uint32_t wdt_running = NRF_WDT->RUNSTATUS;
+    Serial.print  ("  NRF_WDT->RUNSTATUS = "); Serial.println(wdt_running);
+    // 0 = WDT NEBEZI, 1 = WDT BEZI (a uz ho NEMOZES zastavit)
+
+    if (wdt_running) {
+        uint32_t crv = NRF_WDT->CRV;
+        float timeout_sec = (float)crv / 32768.0f;
+        Serial.print  ("  WDT timeout = "); Serial.print(timeout_sec, 2);
+        Serial.println(" sekund");
+
+        uint32_t cfg = NRF_WDT->CONFIG;
+        Serial.print  ("  WDT CONFIG register = 0x"); Serial.println(cfg, HEX);
+        // Bit 0 (SLEEP): 0=pauza pocas sleep, 1=bezi aj pocas sleep
+        // Bit 3 (HALT):  0=pauza pri debug halt, 1=bezi aj pri debug halt
+        if (cfg & (1 << 3))
+            Serial.println("  !! HALT=1: WDT bezi aj ked debugger zastavi CPU !!");
+        else
+            Serial.println("  OK: HALT=0: WDT sa zastavi ked debugger zastavi CPU");
+
+        uint32_t reqstat = NRF_WDT->REQSTATUS;
+        Serial.print  ("  Kto musi feedovat WDT (REQSTATUS) = 0x");
+        Serial.println(reqstat, HEX);
+        // Bit N = reload register RRn je aktivny a musi byt feedovany
+    } else {
+        Serial.println("  WDT NEBEZI - reset nebol kvoli WDT");
+    }
+
+}
+
+
+static uint32_t s_fkInfo1 = 0;
+
 void loop() {
+
+  if ((s_fkInfo1++ % 1000000) == 0) {
+
+      fkInfo1_Reset_WDT();
+      Serial.print("Counter AA: ");
+      Serial.println(s_fkInfo1);
+  }
+
+
+
+
   the_mesh.loop();
   sensors.loop();
 #ifdef DISPLAY_CLASS

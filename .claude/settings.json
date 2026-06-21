@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/globesy/.platformio/**)",
+      "PowerShell(& \"C:\\\\Users\\\\globesy\\\\.platformio\\\\penv\\\\Scripts\\\\pip.exe\" install heatshrink2 2>&1)",
+      "Read(//x/FkData/10_Dev/FkProj/VSC/FK_lora-sniffer/tools/**)",
+      "WebFetch(domain:github.com)",
+      "Bash(dir \"x:\\\\FkData\\\\10_Dev\\\\FkProj\\\\VSC\\\\FK_lora-sniffer\\\\flasher\" /s /b)",
+      "Bash(python tools/build_flasher.py)",
+      "Bash(python3 tools/build_flasher.py)",
+      "Bash(py -3 tools/build_flasher.py)",
+      "PowerShell(cd \"x:\\\\FkData\\\\10_Dev\\\\FkProj\\\\VSC\\\\FK_lora-sniffer\"; $env:PYTHONIOENCODING=\"utf-8\"; & \"C:\\\\Users\\\\globesy\\\\.platformio\\\\penv\\\\Scripts\\\\python.exe\" tools/build_flasher.py 2>&1)",
+      "PowerShell($tc = \\(Get-ChildItem \"C:\\\\Users\\\\globesy\\\\.platformio\\\\packages\\\\toolchain-gccarmnoneeabi\\\\bin\\\\arm-none-eabi-objdump.exe\" -ErrorAction SilentlyContinue\\).FullName; if \\(-not $tc\\) { $tc = \"arm-none-eabi-objdump\" }; Write-Host \"objdump: $tc\")",
+      "Bash(awk '{print $5, $9}')",
+      "PowerShell(& \"C:\\\\Users\\\\globesy\\\\.platformio\\\\penv\\\\Scripts\\\\python.exe\" -c \"import py_compile; py_compile.compile\\(r'x:\\\\FkData\\\\10_Dev\\\\FkProj\\\\VSC\\\\FK_lora-sniffer\\\\tools\\\\ota_test.py', doraise=True\\); py_compile.compile\\(r'x:\\\\FkData\\\\10_Dev\\\\FkProj\\\\VSC\\\\FK_lora-sniffer\\\\tools\\\\gen_build_info.py', doraise=True\\); import serial; from serial.tools import list_ports; print\\('OK syntax + pyserial', serial.VERSION\\)\")",
+      "PowerShell(& \"C:\\\\Users\\\\globesy\\\\.platformio\\\\penv\\\\Scripts\\\\python.exe\" -c \"import platformio; print\\('platformio', platformio.__version__\\)\")",
+      "PowerShell(& \"C:\\\\Users\\\\globesy\\\\.platformio\\\\penv\\\\Scripts\\\\python.exe\" \"x:\\\\FkData\\\\10_Dev\\\\FkProj\\\\VSC\\\\FK_lora-sniffer\\\\tools\\\\ota_test.py\" --help)",
+      "Bash(ls -la .claude/)",
+      "Bash(cat .claude/settings.local.json)",
+      "Bash(cat .claude/settings.json)",
+      "Bash(git add *)",
+      "Bash(git commit *)"
+    ]
+  }
+}

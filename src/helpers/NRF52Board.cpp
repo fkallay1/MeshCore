@@ -174,7 +174,7 @@ void NRF52Board::enterSystemOff(uint8_t reason) {
   }
 
   // If we get here, something went wrong. Reset to recover.
-  NVIC_SystemReset();
+  //NVIC_SystemReset();
 }
 
 void NRF52Board::configureVoltageWake(uint8_t ain_channel, uint8_t refsel) {
