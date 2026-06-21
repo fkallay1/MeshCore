@@ -53,7 +53,11 @@ DEFAULT_BRIDGE_PORT = "COM3"
 DEFAULT_TARGET_PORT = "COM5"
 DEFAULT_TARGET_ENV  = "ProMicro_repeater_ota"
 DEFAULT_BRIDGE_ENV  = "Xiao_bridge"
-DEFAULT_FK_LORA     = Path("x:/FkData/10_Dev/FkProj/VSC/FK_lora-sniffer")
+# FK_lora-sniffer (zdroj bridge FW) je súrodenec MeshCore v projects dir. Portable:
+# ber PLATFORMIO_SETTING_PROJECTS_DIR ak je nastavená, inak odvodzuj od umiestnenia
+# tohto skriptu (MESHCORE_DIR.parent) — funguje bez ohľadu na to, kam je projekt presunutý.
+DEFAULT_FK_LORA     = Path(os.environ.get("PLATFORMIO_SETTING_PROJECTS_DIR")
+                           or str(MESHCORE_DIR.parent)) / "FK_lora-sniffer"
 OTA_PSK_STR         = "meshcore-ota-key"   # MUSÍ == OTA_CHANNEL_PSK v OTA env
 # OTA env (ProMicro_repeater_ota) NEMÁ -D OTA_ALLOW_UNSIGNED → HEADER MUSÍ byť
 # podpísaný Ed25519, inak repeater odmietne session (OTA_ERR_SIGNATURE 0x06).
