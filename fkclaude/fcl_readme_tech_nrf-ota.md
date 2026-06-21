@@ -267,6 +267,31 @@ nepotrebuje; zaseknutý receiver (zriedkavý) sa rieši rebootom.
 - **LIVE heartbeat** (každé 3 s, ASCII `[LIVE] preset=... tx=N rx=M`) — bezpečné voči binárnemu
   frame-parseru PC (`[0xCC 0xDD]` sa v ASCII nevyskytne).
 
+### 8.6 Flasher hang pri `ota flash` — IRQ počas NVMC okna (VYRIEŠENÉ 2026-06-21)
+Symptóm: po `ota flash` sa flasher zastavil hneď po `[FLASHER] Patch v RAM`, zariadenie
+zamrzlo (USB enumerované ako app PID, ale 0 bajtov serial, 1200-touch nezabral → nutný
+fyzický reset), nový FW nenabehol. Reprodukovateľné v session s množstvom rebootov/RX
+pred flashom; `#90→#91` prešiel (rádio idle).
+
+**Diagnostika:** `ota verify` (dry-run, app-side puff+hpatchi z recv.log, BEZ zápisu)
+zrekonštruoval patch **bit-presne** (SHA == cieľový FW) → príjem, assembly, dekompresia aj
+HPatchLite sú správne; chyba je **výlučne vo flash-write ceste**. NIE regres z RAM-assembly
+ani z `fw_image_size` linker symbolu (oboje overené správne). Pozn.: `ota dbg` trace je
+**vždy „prázdny" + GPREGRET2=0x1 aj pri ÚSPECHU** (`fmark`=no-op, ftrace nečitateľný cez app)
+→ tieto diagnostiky sú NEinformatívne; reálny signál = „nabehne nový build #".
+
+**Root cause:** `ota_flash_via_flasher()` volal `sd_softdevice_disable()` a hneď
+`ensure_flasher_written()` (NVMC zápis flasher blobu) **s povolenými prerušeniami a rádiom
+armnutým v RX**. Flasher si robí `cpsid i` až PO skoku. Keď počas NVMC okna prišlo rádio
+DIO1 / SysTick prerušenie → skok cez VTOR do app handlera (SD už disabled, FS odmountovaný)
+→ fault/hang.
+
+**Fix:** po `sd_softdevice_disable()` pridané `__disable_irq()` PRED `ensure_flasher_written()`
+([OtaPatcher.cpp](examples/simple_repeater/nrfota/OtaPatcher.cpp), commit `d24c6792`).
+`sd_disable` ostáva s IRQ povolenými (SVC sa dokončí); chránime kritické NVMC okno + skok.
+**Overené na HW: 2 čisté flash cykly (#101→#102, #102→#103, neskôr #104→#105).** Toto je
+pravdepodobne aj príčina §8.4 (agc sleep+calibrate = rádio v zlom stave → DIO ISR rozbije flash).
+
 ---
 
 ## 9. Známe obmedzenia / TODO

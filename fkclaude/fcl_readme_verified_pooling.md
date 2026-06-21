@@ -83,3 +83,28 @@ $PENV test_nrf-ota/ota_test_lora_repeater.py run      --bridge-port COM3 --targe
 
 Pozn.: pri reflashe OLD (baseline) sa raz prefs repeatera vrátili na SK preset — pred `run` over
 že repeater je na CZ (`set radio 869.525,62.5,7,5` + reboot), inak sa s CZ bridge nepočujú.
+
+---
+
+## Samobežný runner (2026-06-21) — 3 zmeny
+
+Po pridaní podpísaného OTA HEADER-u runner prestal dosahovať VERIFIED (posielal nepodpísaný
+header → firmware ho zamietol). Tri zmeny v `ota_test_lora_repeater.py` (commit `d487a3dd`),
+aby `baseline` + `run` prešli **bez manuálnych flagov**:
+
+1. **auto `--privkey`** = `test_nrf-ota/test_key.der` ak existuje. Firmware vyžaduje podpísaný
+   HEADER (Ed25519 key_id=1, [OtaReceiver_signkey.cpp](examples/simple_repeater/nrfota/OtaReceiver_signkey.cpp));
+   bez kľúča → `CHYBA=0x6`, `total_chunks=0`, session sa nedokončí. (Toto bola príčina, prečo
+   test „nešiel" po pridaní podpisu.)
+2. **`--packetorder` default `hend`** (chunky prvé, header nakoniec). SX1262 RX po čerstvom
+   boote chytí len ~4 rámce (stuck receiver, [readme_tech_nrf-ota.md](readme_tech_nrf-ota.md) §8.3);
+   header/meta prežíva reboot → pri `hend` sa budget minie na chunky, nie na už-známy header.
+3. **reboot pred KAŽDÝM broadcast kolom** v `broadcast_until_verified` — čerstvé RX okno proti
+   stuck-receiver (predtým loop medzi kolami nereboot → po 1. kole hluché → flaky). `recv_count`
+   je per-boot (bitmap sa <8 chunkov neukladá), takže VERIFIED si žiada 4/4 v jednom okne;
+   reboot dáva každému kolu novú šancu. Pri slabom RF (RSSI -26, ~3 rámce/okno) zvýš `--verify-wait`.
+
+> **Závislosť:** runner predpokladá fix flasher IRQ hangu (`__disable_irq` pred NVMC,
+> [readme_tech_nrf-ota.md](readme_tech_nrf-ota.md) §8.6, commit `d24c6792`) — inak `ota flash`
+> po VERIFIED zamrzne. Overené e2e: baseline #104 → run → VERIFIED 4/4 → `ota flash` →
+> **[PASS] #105**, bez manuálnych flagov.
