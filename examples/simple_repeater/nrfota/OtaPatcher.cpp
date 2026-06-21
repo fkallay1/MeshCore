@@ -398,6 +398,13 @@ bool ota_flash_via_flasher() {
     extern uint32_t sd_softdevice_disable(void);
     sd_softdevice_disable();
 
+    // Po sd_disable ZAKÁŽ IRQ pred NVMC zápisom + skokom na flasher. Bez tohto
+    // môže počas NVMC okna prísť rádio DIO1 / SysTick ISR → skok cez VTOR do app
+    // handlera (SD už disabled, FS odmountovaný) → fault/hang (flasher nenabehne
+    // alebo s pokazeným blobom; prázdny trace). sd_disable necháme s IRQ povolenými
+    // (SVC sa dokončí); chránime kritické NVMC okno. Flasher si robí vlastný cpsid i.
+    __disable_irq();
+
     // ── 5: flasher kód do 0xEB000 (nvmc, až po sd_disable) ──
     if (!ensure_flasher_written()) {
         NVIC_SystemReset();
