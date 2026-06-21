@@ -55,6 +55,10 @@ DEFAULT_TARGET_ENV  = "ProMicro_repeater_ota"
 DEFAULT_BRIDGE_ENV  = "Xiao_bridge"
 DEFAULT_FK_LORA     = Path("x:/FkData/10_Dev/FkProj/VSC/FK_lora-sniffer")
 OTA_PSK_STR         = "meshcore-ota-key"   # MUSÍ == OTA_CHANNEL_PSK v OTA env
+# OTA env (ProMicro_repeater_ota) NEMÁ -D OTA_ALLOW_UNSIGNED → HEADER MUSÍ byť
+# podpísaný Ed25519, inak repeater odmietne session (OTA_ERR_SIGNATURE 0x06).
+# Default = test keypair (pubkey == s_authors[key_id=1] v OtaReceiver_signkey.cpp).
+DEFAULT_PRIVKEY     = SCRIPT_DIR / "test_key.der"
 
 # OTA status flags (z OtaState.h)
 OTA_ST_VERIFIED = 0x04
@@ -374,7 +378,9 @@ def main():
     ap.add_argument("--verify-first", action="store_true",
                      help="Spustiť 'ota verify' (dry-run) pred ostrým flashom. DEFAULT vyp — "
                           "dry-run pred flashom občas spôsobí hardfault flashera (heap).")
-    ap.add_argument("--privkey", help="Ed25519 private key (DER/PEM) na podpis OTA HEADER")
+    ap.add_argument("--privkey", default=str(DEFAULT_PRIVKEY) if DEFAULT_PRIVKEY.exists() else None,
+                     help="Ed25519 private key (DER/PEM) na podpis OTA HEADER "
+                          "(default: test_nrf-ota/test_key.der — OTA env vyžaduje podpísaný HEADER)")
     ap.add_argument("--keyid", type=int, default=1,
                      help="Key ID pre podpis OTA HEADER (default: 1)")
     ap.add_argument("--packetorder", choices=["normal", "hbegin", "hmiddle", "hend"],
