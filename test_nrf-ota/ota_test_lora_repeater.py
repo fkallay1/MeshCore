@@ -205,6 +205,13 @@ def broadcast_until_verified(args, sender):
         rnd += 1
         remaining = int(deadline - time.time())
         print(cyan(f"\n────── broadcast kolo {rnd} (drop={args.drop:.0%}, zostáva ~{remaining}s) ──────"))
+        # Čerstvé rádio KAŽDÉ kolo: SX1262 RX po ~4 prijatých rámcoch ohluchne
+        # ("stuck receiver", viď readme §8.3) a v rámci jedného bootu sa už nespamätá.
+        # recv_count je per-boot (bitmap sa pri <8 chunkoch neukladá) → VERIFIED si
+        # žiada všetky chunky v JEDNOM čerstvom okne. Reboot odsekne hluchotu a dá
+        # nové čisté RX okno. HEADER/meta prežíva reboot, takže pri 'hend' (chunky
+        # prvé) sa ~4-rámcový budget minie na chunky, nie na už-známy header.
+        capture_serial(args.target_port, seconds=args.reboot_settle, send_cmd="reboot\r")
         run(sender, f"ota_sender broadcast #{rnd} cez {args.bridge_port}", check=False)
         # po každom broadcaste niekoľko trpezlivých 'ota status' pollov
         for _ in range(args.poll_tries):
@@ -283,12 +290,8 @@ def phase_run(args):
     if args.packetorder and args.packetorder != "normal":
         sender += ["--packetorder", args.packetorder]
 
-    # Fresh reboot repeatera tesne pred broadcastom — rádio RX po nečinnosti/DFU
-    # býva zaseknuté; čerstvý boot dáva spoľahlivé RX okno (overené HW testom).
-    # Settle: po reboote daj rádiu čas armnúť RX, než pošleme prvý broadcast
-    # (inak sa prvé kolo často stratí).
-    print(cyan(f">>> reboot repeatera + settle {args.reboot_settle}s (RX arm)"))
-    capture_serial(args.target_port, seconds=args.reboot_settle, send_cmd="reboot\r")
+    # Pozn.: reboot repeatera robí broadcast_until_verified PRED KAŽDÝM kolom
+    # (čerstvé RX okno proti "stuck receiver"), takže sa tu už nerebootuje.
 
     # 1) Trpezlivý príjem: broadcast + poll 'ota status' kým VERIFIED / --verify-wait.
     #    (Nahradilo fixný --cycles loop, ktorý pri strate paketov na začiatku zlyhal
@@ -375,10 +378,24 @@ def main():
     ap.add_argument("--keyid", type=int, default=1,
                      help="Key ID pre podpis OTA HEADER (default: 1)")
     ap.add_argument("--packetorder", choices=["normal", "hbegin", "hmiddle", "hend"],
-                     default="normal",
-                     help="Pozícia HEADER paketu pri broadcaste (out-of-order test): "
-                          "hmiddle=v strede chunkov, hend=po všetkých chunkoch")
+                     default="hend",
+                     help="Pozícia HEADER paketu pri broadcaste. DEFAULT 'hend' (chunky "
+                          "prvé, header nakoniec): RX po čerstvom boote chytí len ~4 rámce, "
+                          "header/meta prežíva reboot → budget sa minie na chunky, nie na "
+                          "už-známy header (spoľahlivejšie VERIFIED pri slabom RF). "
+                          "'normal'=header prvý (out-of-order test: hmiddle/hbegin).")
     args = ap.parse_args()
+
+    # Default --privkey = test signing key, ak existuje. Firmware vyžaduje podpísaný
+    # OTA HEADER (Ed25519, key_id=1); bez kľúča ide nepodpísaný header → zariadenie
+    # ho ZAMIETNE (CHYBA=0x6) a test NIKDY nedosiahne VERIFIED. test_key.der je
+    # spárovaný s pubkey zakompilovaným vo firmware (OtaReceiver_signkey.cpp).
+    if not args.privkey:
+        _tk = SCRIPT_DIR / "test_key.der"
+        if _tk.exists():
+            args.privkey = str(_tk)
+            print(cyan(f"[init] --privkey auto = {_tk.name} (key_id={args.keyid}) "
+                       f"— firmware vyžaduje podpísaný HEADER"))
 
     try:
         import serial  # noqa
