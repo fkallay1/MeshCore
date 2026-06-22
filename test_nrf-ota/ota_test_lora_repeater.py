@@ -273,7 +273,8 @@ def phase_baseline(args):
     # Po DFU: počkaj na port, vyčisti starú OTA session (CustomLFS @0xD4000 prežije
     # reflash!) a spáľ čistý reboot — rádio RX po DFU/CLI býva v zaseknutom stave.
     wait_port_back(args.target_port, timeout=30)
-    print(cyan(">>> ota clear + reboot (čistý štart rádia + bez stale session)"))
+    print(cyan(">>> set radio CZ + ota clear + reboot (prefs prežívajú → vynúť CZ preset)"))
+    capture_serial(args.target_port, seconds=4, send_cmd="set radio 869.525,62.5,7,5\r")
     capture_serial(args.target_port, seconds=3, send_cmd="ota clear\r")
     capture_serial(args.target_port, seconds=14, send_cmd="reboot\r")
     print(yellow("\n>>> Hotovo. Build# sa zvýši sám, potom:"))
