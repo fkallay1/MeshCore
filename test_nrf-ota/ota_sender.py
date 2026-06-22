@@ -347,7 +347,7 @@ def send_ota(ser: serial.Serial,
              chunk_delay: float, nack_retries: int, do_reboot: bool = False,
              drop_prob: float = 0.0,
              privkey=None, key_id: int = 1, packetorder: str = 'normal',
-             scope: Scope = Scope('zerohop', None, b'')):
+             scope: Scope = Scope('zerohop', None, b''), header_every: int = 0):
     chunks = [patch[i:i+OTA_CHUNK_DATA] for i in range(0, len(patch), OTA_CHUNK_DATA)]
     total  = len(chunks)
     old_sha256_prefix = old_sha256[:4]  # 4B pre session izoláciu
@@ -436,6 +436,18 @@ def send_ota(ser: serial.Serial,
             if (pos + 1) % 10 == 0 or pos == len(to_send) - 1:
                 print(f"  → {pos+1}/{len(to_send)} (idx={idx})", end='\r', flush=True)
             time.sleep(chunk_delay)
+            # Redundancia HEADER-a: pošli ho znova po každých 'header_every' chunkoch.
+            # HEADER je jediný kritický paket (total=0 blokuje všetko) a nemá akumulačnú
+            # výhodu ako 4 nezávislé chunky — viac pokusov/kolo zdvíha šancu doručenia
+            # (najmä cez slabý/zarušený relay hop).
+            if header_every > 0 and (pos + 1) % header_every == 0:
+                try:
+                    print(f"\n[OTA] HEADER (redundancia, po {pos+1} chunkoch)")
+                    send_pkt(header_payload)
+                    _hdr_sent[0] = True
+                    time.sleep(chunk_delay)
+                except serial.SerialException:
+                    serial_lost = True; break
         print()
         # HEADER na konci (hend) — po odoslaní všetkých chunkov prvého pokusu
         if attempt == 0 and not _hdr_sent[0]:
@@ -550,6 +562,9 @@ def main():
                                          'napr. 3f,a1 (1B) alebo 3fa1,b2c3 (2B). Veľkosť podľa --path-hashsize.')
     ap.add_argument('--path-hashsize', type=int, choices=[1, 2, 3], default=1,
                                 help='Veľkosť path hashu v bajtoch pre --scope direct (default 1).')
+    ap.add_argument('--header-every', type=int, default=0,
+                                help='Pošli HEADER znova po každých N chunkoch (redundancia pre slabý/relay '
+                                     'spoj; HEADER je jediný kritický paket). 0 = vyp (default).')
     args = ap.parse_args()
     if not (0.0 <= args.drop < 1.0):
         print('[CHYBA] --drop musí byť v [0..1)'); sys.exit(1)
@@ -637,7 +652,7 @@ def main():
                           psk, args.mode, args.delay, args.nack_retries, args.reboot,
                           drop_prob=args.drop,
                           privkey=privkey, key_id=args.keyid, packetorder=args.packetorder,
-                          scope=scope)
+                          scope=scope, header_every=args.header_every)
             if not ok:
                 print('[OTA] cyklus zlyhal (serial?) — končím')
                 break

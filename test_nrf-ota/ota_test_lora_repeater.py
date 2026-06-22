@@ -212,14 +212,18 @@ def broadcast_until_verified(args, sender):
     while time.time() < deadline:
         rnd += 1
         remaining = int(deadline - time.time())
-        print(cyan(f"\n────── broadcast kolo {rnd} (drop={args.drop:.0%}, zostáva ~{remaining}s) ──────"))
-        # Čerstvé rádio KAŽDÉ kolo: SX1262 RX po ~4 prijatých rámcoch ohluchne
-        # ("stuck receiver", viď readme §8.3) a v rámci jedného bootu sa už nespamätá.
-        # recv_count je per-boot (bitmap sa pri <8 chunkoch neukladá) → VERIFIED si
-        # žiada všetky chunky v JEDNOM čerstvom okne. Reboot odsekne hluchotu a dá
-        # nové čisté RX okno. HEADER/meta prežíva reboot, takže pri 'hend' (chunky
-        # prvé) sa ~4-rámcový budget minie na chunky, nie na už-známy header.
-        capture_serial(args.target_port, seconds=args.reboot_settle, send_cmd="reboot\r")
+        # Reboot LEN v 1. kole (čistý štart rádia po 'ota clear'). Ďalšie kolá už
+        # NEREBOOTUJÚ — session sa kumuluje v RAM naprieč kolami (strata paketov je
+        # bežná, treba viac kôl). Reboot uprostred by zmazal <8-chunk session (bitmap
+        # sa ukladá až od OTA_BITMAP_SAVE_EVERY=8 chunkov), a NESMIE sa viazať na rast
+        # recv: kolo môže priniesť len duplikáty (recv nerastie) hoci session je v
+        # poriadku — reboot by vtedy omylom zahodil už prijaté chunky. Ak rádio reálne
+        # ohluchne (RF/anténa), rieši sa to fyzicky, nie mazaním progresu.
+        if rnd == 1:
+            print(cyan(f"\n────── broadcast kolo {rnd} (reboot=čistý štart, zostáva ~{remaining}s) ──────"))
+            capture_serial(args.target_port, seconds=args.reboot_settle, send_cmd="reboot\r")
+        else:
+            print(cyan(f"\n────── broadcast kolo {rnd} (BEZ reboot — kumulujem, zostáva ~{remaining}s) ──────"))
         run(sender, f"ota_sender broadcast #{rnd} cez {args.bridge_port}", check=False)
         # po každom broadcaste niekoľko trpezlivých 'ota status' pollov
         for _ in range(args.poll_tries):

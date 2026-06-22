@@ -880,6 +880,11 @@ void MyMesh::onGroupDataRecv(mesh::Packet* packet, uint8_t type, const mesh::Gro
   if (type != PAYLOAD_TYPE_GRP_DATA) return;
   if (channel.hash[0] != _ota_channel.hash[0]) return;   // nie náš OTA kanál
   if (len < 5) return;                                   // ts(4) + aspoň typový bajt
+#ifdef OTA_GDR_DIAG
+  Serial.print(F("[DIAG] GDR otatype=0x")); Serial.print(data[4], HEX);
+  Serial.print(F(" len=")); Serial.print((int)len);
+  Serial.print(F(" pending=")); Serial.println(_ota_pending_len);
+#endif
   // Odlož payload — pomalé CustomLFS I/O sa spraví v loop() PO tom, čo dispatcher
   // re-armne rádio do RX. FS zápis priamo tu oneskoroval re-arm a rádio po prvom
   // pakete prestávalo prijímať. Ak ešte čaká predošlý, tento zahodíme (loop ho
