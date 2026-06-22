@@ -52,6 +52,12 @@ typedef struct __attribute__((packed)) {
     uint8_t  new_sha256[32];    // SHA256 nového firmware (na overenie aplikácie)
     uint32_t old_fw_size;       // veľkosť starého fw (base patchu) — prežije reboot/resume
     uint8_t  old_sha256[32];    // SHA256 starého fw — overenie base pred prepisom
+    // Zjednotený formát v0 — rozdelený HEADER (META+SIG), perzistuje cez reboot:
+    uint8_t  ota_prot_inf;      // verzia protokolu z META
+    uint8_t  meta_recv;         // META prijaté
+    uint8_t  sig_recv;          // SIG prijaté
+    uint8_t  hdr_key_id;        // key_id z SIG
+    uint8_t  hdr_sig[64];       // Ed25519 podpis z SIG (over po prijatí META+SIG)
     uint16_t crc16;             // CRC16 všetkého vyššie
 } OtaMetaPersist;
 
@@ -74,6 +80,13 @@ typedef struct {
     uint16_t recv_count;               // prepočítané z bitmap pri resume
     uint8_t  status;                   // OTA_ST_*
     uint8_t  err_code;                 // OTA_ERR_*
+
+    // Zjednotený formát v0 — rozdelený HEADER (META+SIG):
+    uint8_t  ota_prot_inf;             // verzia z META
+    uint8_t  meta_recv;                // META prijaté
+    uint8_t  sig_recv;                 // SIG prijaté
+    uint8_t  hdr_key_id;               // key_id z SIG
+    uint8_t  hdr_sig[64];              // Ed25519 podpis z SIG (over po prijatí META+SIG)
 
     // bitová mapa: bit N = 1 → chunk N prijatý a zapísaný (128 B pokryje 1024 chunkov)
     uint8_t  bitmap[OTA_BITMAP_BYTES];

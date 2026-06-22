@@ -879,7 +879,14 @@ void MyMesh::onGroupDataRecv(mesh::Packet* packet, uint8_t type, const mesh::Gro
                              uint8_t* data, size_t len) {
   if (type != PAYLOAD_TYPE_GRP_DATA) return;
   if (channel.hash[0] != _ota_channel.hash[0]) return;   // nie náš OTA kanál
-  if (len < 5) return;                                   // ts(4) + aspoň typový bajt
+  // Zjednotený OTA formát: štandardný GRP_DATA plaintext = [data_type 2B][len 1B][ts 4B][ota_payload].
+  // Odlúpni [data_type][len]; ak data_type != OTA_MAGIC, nie je to OTA. Po odlúpnutí má
+  // buffer tvar [ts 4B][ota_payload] — zvyšok pipeline (loop +4) ostáva nezmenený.
+  if (len < 3 + 5) return;                               // [dt2][len1] + [ts4][type1]
+  uint16_t dtype = (uint16_t)data[0] | ((uint16_t)data[1] << 8);
+  if (dtype != OTA_MAGIC) return;                        // nie náš OTA data_type
+  if (data[2] != (uint8_t)(len - 3)) return;             // sanity: vnútorná dĺžka
+  data += 3; len -= 3;                                   // → [ts4][ota_payload]
 #ifdef OTA_GDR_DIAG
   Serial.print(F("[DIAG] GDR otatype=0x")); Serial.print(data[4], HEX);
   Serial.print(F(" len=")); Serial.print((int)len);

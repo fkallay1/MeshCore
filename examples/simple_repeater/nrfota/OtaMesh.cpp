@@ -10,23 +10,24 @@
 #include <string.h>
 
 void ota_build_channel(mesh::GroupChannel& ch) {
-    const char* psk = OTA_CHANNEL_PSK;
-    int plen = (int)strlen(psk);
-
-    // secret = psk doplnené nulami na PUB_KEY_SIZE (32B) — AES kľúč = secret[:16],
-    // HMAC kľúč = secret[:32] (zhodné s ota_sender.py psk.ljust(32))
-    memset(ch.secret, 0, PUB_KEY_SIZE);
-    memcpy(ch.secret, psk, plen > PUB_KEY_SIZE ? PUB_KEY_SIZE : plen);
-
-    // channel hash = sha256(psk)[0..PATH_HASH_SIZE] (sha256 nad RAW psk bajtmi)
+    // MeshCore #-konvencia: secret = SHA256(OTA_CHANNEL_NAME)[0:16] (meno VRÁTANE '#',
+    // zhodné s meshcore_py set_channel device.py:216). secret obsahuje 0x00 →
+    // NEhashovať ako string. AES kľúč = secret[:16], HMAC kľúč = secret[:32].
+    const char* name = OTA_CHANNEL_NAME;
     uint8_t full[32];
-    mesh::Utils::sha256(full, sizeof(full), (const uint8_t*)psk, plen);
-    memcpy(ch.hash, full, PATH_HASH_SIZE);
+    mesh::Utils::sha256(full, sizeof(full), (const uint8_t*)name, (int)strlen(name));
+    memset(ch.secret, 0, PUB_KEY_SIZE);
+    memcpy(ch.secret, full, 16);
 
-    Serial.print(F("[OTA] kanál hash=0x"));
+    // channel hash = SHA256(secret)[0..PATH_HASH_SIZE] (zhodné s companion addChannel)
+    uint8_t h[32];
+    mesh::Utils::sha256(h, sizeof(h), ch.secret, 16);
+    memcpy(ch.hash, h, PATH_HASH_SIZE);
+
+    Serial.print(F("[OTA] kanál ")); Serial.print(name);
+    Serial.print(F(" hash=0x"));
     if (ch.hash[0] < 0x10) Serial.print('0');
-    Serial.print(ch.hash[0], HEX);
-    Serial.print(F("  psk_len=")); Serial.println(plen);
+    Serial.println(ch.hash[0], HEX);   // očakávané 0xA4 pre #fkotanrf
 }
 
 void ota_handle_command(const char* args, char* reply) {

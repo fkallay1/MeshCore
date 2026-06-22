@@ -8,16 +8,15 @@
 // =====================================================================
 #include <Mesh.h>   // mesh::GroupChannel, PUB_KEY_SIZE, PATH_HASH_SIZE
 
-// Default OTA kanál PSK — MUSÍ sa zhodovať s ota_sender.py --psk.
-// Override cez build_flags:  -D OTA_CHANNEL_PSK='"moj-tajny-kluc"'
-// 16 alebo 32 bajtov (zhodné s ota_sender.py --psk, ktoré berie hex). Sender
-// posiela hex(OTA_CHANNEL_PSK); tu sú to surové bajty reťazca.
-#ifndef OTA_CHANNEL_PSK
-  #define OTA_CHANNEL_PSK "meshcore-ota-key"
+// Default OTA kanál — MeshCore #-konvencia (secret = SHA256(name)[0:16]).
+// Override cez build_flags:  -D OTA_CHANNEL_NAME='"#mojkanal"'
+// Zhodné s meshcore_py set_channel(idx, name) aj ota_sender.py ota_channel_secret().
+#ifndef OTA_CHANNEL_NAME
+  #define OTA_CHANNEL_NAME "#fkotanrf"
 #endif
 
-// Postav OTA GroupChannel z PSK (hash = sha256(psk)[0], secret = psk doplnené
-// nulami na 32B) — zhodné s meshcore_grp_data_packet() v ota_sender.py.
+// Postav OTA GroupChannel z mena (secret = SHA256(name)[0:16] doplnené nulami na
+// 32B, hash = SHA256(secret)[0]) — zhodné s companion set_channel.
 void ota_build_channel(mesh::GroupChannel& ch);
 
 // Spracuj "ota ..." CLI príkaz (status|verify|flash|clear|decompress|nack|dbg).
