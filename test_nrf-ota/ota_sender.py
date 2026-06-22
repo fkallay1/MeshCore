@@ -181,11 +181,23 @@ def build_sig_payload(meta: bytes, privkey, key_id: int) -> bytes:
     assert len(out) == 99, f"SIG musi byt 99B, je {len(out)}"
     return out
 
-def build_grpdata_payload(psk: bytes, ota_payload: bytes) -> bytes:
-    """GRP_DATA payload pole: [ch_hash][MAC+ciphertext]. plaintext = [ts 4B LE][ota_payload]."""
+def grpdata_plaintext(ota_payload: bytes, ts: int) -> bytes:
+    """Zjednotený GRP_DATA plaintext: [OTA_MAGIC 2B LE][len 1B = 4+len][ts 4B LE][ota_payload].
+    Bajt-identické s tým, čo companion sendGroupData zostaví z data=[ts4][ota_payload]."""
+    data = struct.pack('<I', ts & 0xFFFFFFFF) + ota_payload
+    return struct.pack('<HB', OTA_MAGIC, len(data)) + data
+
+def companion_grpdata_plaintext(data_type: int, data: bytes) -> bytes:
+    """Replika BaseChatMesh::sendGroupData temp[] = [data_type 2B][len 1B][data] — pre testy ekvivalencie."""
+    return struct.pack('<HB', data_type, len(data)) + data
+
+def build_grpdata_payload(psk: bytes, ota_payload: bytes, ts: int | None = None) -> bytes:
+    """GRP_DATA payload pole: [ch_hash][MAC+ciphertext]. plaintext = zjednotený formát (s OTA_MAGIC).
+    POZN: pri kanáli #fkotanrf je psk = ota_channel_secret(); ch_hash = sha256(secret)[0] = 0xA4."""
     ch_hash = hashlib.sha256(psk).digest()[0]
-    ts      = int(time.time()) & 0xFFFFFFFF
-    plain   = struct.pack('<I', ts) + ota_payload
+    if ts is None:
+        ts = int(time.time()) & 0xFFFFFFFF
+    plain = grpdata_plaintext(ota_payload, ts)
     return bytes([ch_hash]) + meshcore_encrypt(psk, plain)
 
 def meshcore_grp_data_packet(psk: bytes, ota_payload: bytes, scope: Scope) -> bytes:
