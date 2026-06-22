@@ -51,10 +51,15 @@ for _s in (sys.stdout, sys.stderr):
 OTA_PKT_HEADER   = 0x10
 OTA_PKT_CHUNK   = 0x11
 OTA_PKT_APPLY   = 0x12
+OTA_PKT_HDR_SIG  = 0x13   # 2. časť HEADER — Ed25519 podpis (zjednotený formát v0)
 OTA_PKT_STATUS  = 0x20
 OTA_PKT_NACK    = 0x21
 
-OTA_CHUNK_DATA  = 150
+# Zjednotený OTA formát v0 — viď docs/superpowers/specs/2026-06-23-ota-companion-mcpy-design.md
+OTA_MAGIC        = 0x07A0      # GRP_DATA data_type pre OTA (gating diskriminátor)
+OTA_PROT_INF_V0  = 0x00       # verzia OTA protokolu/štruktúr
+OTA_CHUNK_DATA   = 144        # bolo 150 — GRP_DATA limit data_len ≤165 (4B ts + 13B hdr + 144 = 161)
+OTA_CHANNEL_NAME = "#fkotanrf"
 DIRECT_MAGIC    = b'\x4F\x54'   # 'OT'
 
 # MeshCore route type (header bity 0-1, PH_ROUTE_MASK) — určuje LoRa šírenie
@@ -151,6 +156,30 @@ def wrap_meshcore_packet(payload_type: int, payload: bytes, scope: Scope) -> byt
     hop_count = len(path) // hsz
     path_len  = ((hsz - 1) << 6) | (hop_count & 0x3F)
     return bytes([header]) + codes + bytes([path_len]) + path + payload
+
+def ota_channel_secret(name: str = OTA_CHANNEL_NAME) -> bytes:
+    """OTA kanál secret (16B PSK) = SHA256(name)[0:16] — MeshCore #-konvencia,
+    zhodné s meshcore_py set_channel (device.py:216, hashuje meno vrátane '#')."""
+    return hashlib.sha256(name.encode("utf-8")).digest()[:16]
+
+def build_meta_payload(total_chunks: int, patch_size: int,
+                       patch_sha256: bytes, new_sha256: bytes, old_sha256: bytes) -> bytes:
+    """META (102B) = podpisovaná správa zjednoteného formátu. total_chunks sa NEposiela
+    (odvodí sa z patch_size/OTA_CHUNK_DATA), old_sha256_prefix sa NEposiela (= old_sha256[:4]).
+    Argument total_chunks ponechaný pre kompatibilitu volajúceho/logu."""
+    msg = (bytes([OTA_PKT_HEADER, OTA_PROT_INF_V0])
+           + struct.pack('<I', patch_size)
+           + patch_sha256 + new_sha256 + old_sha256)
+    assert len(msg) == 102, f"META musi byt 102B, je {len(msg)}"
+    return msg
+
+def build_sig_payload(meta: bytes, privkey, key_id: int) -> bytes:
+    """SIG (99B) = type+ota_prot_inf+old_sha256+key_id+signature. Podpis nad 102B META."""
+    sig = sign_ota_header(meta, privkey) if privkey else bytes(64)
+    old_sha256 = meta[70:102]
+    out = bytes([OTA_PKT_HDR_SIG, OTA_PROT_INF_V0]) + old_sha256 + bytes([key_id]) + sig
+    assert len(out) == 99, f"SIG musi byt 99B, je {len(out)}"
+    return out
 
 def build_grpdata_payload(psk: bytes, ota_payload: bytes) -> bytes:
     """GRP_DATA payload pole: [ch_hash][MAC+ciphertext]. plaintext = [ts 4B LE][ota_payload]."""
