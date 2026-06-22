@@ -885,8 +885,11 @@ void MyMesh::onGroupDataRecv(mesh::Packet* packet, uint8_t type, const mesh::Gro
   if (len < 3 + 5) return;                               // [dt2][len1] + [ts4][type1]
   uint16_t dtype = (uint16_t)data[0] | ((uint16_t)data[1] << 8);
   if (dtype != OTA_MAGIC) return;                        // nie náš OTA data_type
-  if (data[2] != (uint8_t)(len - 3)) return;             // sanity: vnútorná dĺžka
-  data += 3; len -= 3;                                   // → [ts4][ota_payload]
+  // data[2] = pravá dĺžka [ts4][ota_payload]. MACThenDecrypt vracia AES-padovanú
+  // (16B) dĺžku, preto NEporovnávaj s len; použi data[2] na strhnutie paddingu.
+  uint8_t inner = data[2];
+  if (inner < 5 || (size_t)(3 + inner) > len) return;    // sanity vs padded buffer
+  data += 3; len = inner;                                // → presné [ts4][ota_payload]
 #ifdef OTA_GDR_DIAG
   Serial.print(F("[DIAG] GDR otatype=0x")); Serial.print(data[4], HEX);
   Serial.print(F(" len=")); Serial.print((int)len);
