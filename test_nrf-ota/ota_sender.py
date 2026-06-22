@@ -343,30 +343,8 @@ class SerialReader(threading.Thread):
                 break
 
 # ─────────────────────────────────────────────────────────────────────
-# OTA paket buiders
+# OTA paket buiders  (HEADER = META+SIG, viď build_meta_payload/build_sig_payload)
 # ─────────────────────────────────────────────────────────────────────
-def build_ota_header(patch: bytes, patch_sha256: bytes, new_sha256: bytes,
-                    old_sha256: bytes, old_fw_size: int,
-                    key_id: int, signature: bytes) -> bytes:
-    """Vyrovi OTA_HEADER paket s Ed25519 podpisom.
-    
-    Message (podpisované, 107B): type + total_chunks + patch_size +
-        patch_sha256 + new_sha256 + old_sha256_prefix(4B) + old_sha256
-    Po message: key_id (1B) + signature (64B) = 65B
-    Celkom: 172B = 176B plaintext po GRP_DATA (s timestampom 4B)
-    """
-    total = (len(patch) + OTA_CHUNK_DATA - 1) // OTA_CHUNK_DATA
-    # Podpisovaný message (prvých 107B: type → old_sha256)
-    # old_sha256_prefix (4B) nahradilo old_fw_size — session izolácia
-    otbmsg = (bytes([OTA_PKT_HEADER])
-              + struct.pack('<HI', total, len(patch))
-              + patch_sha256
-              + new_sha256
-              + old_sha256[:4]  # old_sha256_prefix (4B)
-              + old_sha256)
-    assert len(otbmsg) == 107, f"OTA_HEADER message musi byt 107B, dostali {len(otbmsg)}"
-    return otbmsg + bytes([key_id]) + signature
-
 def build_ota_chunk(idx: int, data: bytes, old_fw_size: int, old_sha256_prefix: bytes) -> bytes:
     """Vyrovi OTA_CHUNK s base FW validáciou (+8B oproti pôvodnému)."""
     return (bytes([OTA_PKT_CHUNK])
@@ -413,28 +391,22 @@ def send_ota(ser: serial.Serial,
             lora_pkt = direct_ota_packet(payload)
         send_frame(ser, lora_pkt)
 
-    # --- HEADER (poradie podľa packetorder) ---
-    otbmsg = (bytes([OTA_PKT_HEADER])
-              + struct.pack('<HI', total, len(patch))
-              + patch_sha256
-              + new_sha256
-              + old_sha256_prefix  # 4B prefix nahradil old_fw_size
-              + old_sha256)
+    # --- HEADER = META (102B, podpisované) + SIG (99B) — zjednotený formát v0 ---
+    meta_payload = build_meta_payload(total, len(patch), patch_sha256, new_sha256, old_sha256)
     if privkey:
-        print(f"[OTA] Signujem HEADER (key_id=0x{key_id:02X})...")
-        sig = sign_ota_header(otbmsg, privkey)
+        print(f"[OTA] Signujem META (key_id=0x{key_id:02X})...")
     else:
-        print("[OTA] WARNING: --privkey nie je zadany, HEADER bez podpisu!")
-        sig = bytes(64)
-    header_payload = build_ota_header(patch, patch_sha256, new_sha256, old_sha256,
-                                      old_fw_size, key_id, sig)
+        print("[OTA] WARNING: --privkey nie je zadany, podpis bude nulový!")
+    sig_payload = build_sig_payload(meta_payload, privkey, key_id)
 
     _hdr_sent = [False]
     def send_header():
         if _hdr_sent[0]:
             return
-        print(f"[OTA] Posielam HEADER (size={len(patch)}B, chunks={total}, order={packetorder})...")
-        send_pkt(header_payload)
+        print(f"[OTA] Posielam HEADER META+SIG (size={len(patch)}B, chunks={total}, order={packetorder})...")
+        send_pkt(meta_payload)
+        time.sleep(chunk_delay)
+        send_pkt(sig_payload)
         _hdr_sent[0] = True
         time.sleep(1.2)
 
@@ -483,8 +455,10 @@ def send_ota(ser: serial.Serial,
             # (najmä cez slabý/zarušený relay hop).
             if header_every > 0 and (pos + 1) % header_every == 0:
                 try:
-                    print(f"\n[OTA] HEADER (redundancia, po {pos+1} chunkoch)")
-                    send_pkt(header_payload)
+                    print(f"\n[OTA] HEADER META+SIG (redundancia, po {pos+1} chunkoch)")
+                    send_pkt(meta_payload)
+                    time.sleep(chunk_delay)
+                    send_pkt(sig_payload)
                     _hdr_sent[0] = True
                     time.sleep(chunk_delay)
                 except serial.SerialException:
