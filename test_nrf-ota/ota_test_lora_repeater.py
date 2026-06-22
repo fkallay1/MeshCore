@@ -53,6 +53,8 @@ DEFAULT_BRIDGE_PORT = "COM3"
 DEFAULT_TARGET_PORT = "COM5"
 DEFAULT_TARGET_ENV  = "ProMicro_repeater_ota"
 DEFAULT_BRIDGE_ENV  = "Xiao_bridge"
+DEFAULT_COMPANION_ENV = "Xiao_nrf52_companion_radio_usb"   # --sender mcpy: stock companion na COM3
+OTA_MCPY_SENDER     = SCRIPT_DIR / "ota_sender_mcpy.py"
 # FK_lora-sniffer (zdroj bridge FW) je súrodenec MeshCore v projects dir. Portable:
 # ber PLATFORMIO_SETTING_PROJECTS_DIR ak je nastavená, inak odvodzuj od umiestnenia
 # tohto skriptu (MESHCORE_DIR.parent) — funguje bez ohľadu na to, kam je projekt presunutý.
@@ -248,6 +250,8 @@ def broadcast_until_verified(args, sender):
 
 # ── fázy ──
 def phase_baseline(args):
+    if args.sender == "mcpy":
+        return phase_baseline_mcpy(args)
     print(green("\n══════ baseline — bridge (CZ) + OLD repeater (CZ) ══════"))
     cz_env = {"PLATFORMIO_BUILD_FLAGS": "-DLORA_PRESET_CZ"}
 
@@ -277,36 +281,75 @@ def phase_baseline(args):
                  f"--bridge-port {args.bridge_port} --target-port {args.target_port}"
                  f"{' --skip-bridge' if args.skip_bridge else ''}\n"))
 
+def phase_baseline_mcpy(args):
+    """baseline pre --sender mcpy: stock companion na COM3 (SK) + OLD repeater na COM5 (SK)."""
+    print(green("\n══════ baseline — companion (SK) + OLD repeater (SK) ══════"))
+    if not args.skip_bridge:
+        run([PY, "-m", "platformio", "run", "-e", DEFAULT_COMPANION_ENV,
+             "-t", "upload", "--upload-port", args.bridge_port],
+            f"Build+Upload COMPANION ({DEFAULT_COMPANION_ENV}, SK) → {args.bridge_port}")
+    else:
+        print(yellow("   (--skip-bridge — predpokladám že XIAO companion na COM3 už beží)"))
+
+    run([PY, "-m", "platformio", "run", "-e", args.target_env,
+         "-t", "upload", "--upload-port", args.target_port],
+        f"Build+Upload REPEATER OLD ({args.target_env}, SK) → {args.target_port}")
+    sz = extract_app_image(args.target_env, OLD_BIN)
+    old_build = read_build_number()
+    print(green(f"[OK] OLD app obraz ({sz}B)  build #{old_build}"))
+    wait_port_back(args.target_port, timeout=30)
+    print(cyan(">>> set radio SK + ota clear + reboot na repeateri (COM5)"))
+    capture_serial(args.target_port, seconds=4, send_cmd="set radio 869.618,62.5,8,5\r")
+    capture_serial(args.target_port, seconds=3, send_cmd="ota clear\r")
+    capture_serial(args.target_port, seconds=14, send_cmd="reboot\r")
+    print(yellow("\n>>> Hotovo. Build# sa zvýši sám, potom:"))
+    print(yellow(f"      {PY} test_nrf-ota/ota_test_lora_repeater.py run --sender mcpy "
+                 f"--bridge-port {args.bridge_port} --target-port {args.target_port}\n"))
+
 def phase_run(args):
-    print(green("\n══════ run — patch OLD→NEW broadcast cez bridge (CZ) ══════"))
+    preset = "SK" if args.sender == "mcpy" else "CZ"
+    print(green(f"\n══════ run — patch OLD→NEW broadcast cez {args.sender} ({preset}) ══════"))
     if not OLD_BIN.exists():
         sys.exit(red(f"[FAIL] {OLD_BIN} chýba — najprv: baseline"))
 
-    cz_env = {"PLATFORMIO_BUILD_FLAGS": "-DLORA_PRESET_CZ"}
+    # Bridge cesta buildí NEW na CZ; companion cesta na SK (root build_flags default).
+    build_env_extra = None if args.sender == "mcpy" else {"PLATFORMIO_BUILD_FLAGS": "-DLORA_PRESET_CZ"}
     run([PY, "-m", "platformio", "run", "-e", args.target_env],
-        f"Build REPEATER NEW ({args.target_env}, CZ)", env_extra=cz_env)
+        f"Build REPEATER NEW ({args.target_env}, {preset})", env_extra=build_env_extra)
     sz = extract_app_image(args.target_env, NEW_BIN)
     new_build = read_build_number()
     print(green(f"[OK] NEW app obraz ({sz}B)  build #{new_build}"))
     if OLD_BIN.read_bytes() == NEW_BIN.read_bytes():
         sys.exit(red("[FAIL] OLD == NEW — patch by bol prázdny (build# sa nezmenil?)."))
 
-    psk_hex = OTA_PSK_STR.encode().hex()
-    sender = [PY, str(OTA_SENDER), "--old", str(OLD_BIN), "--new", str(NEW_BIN),
-              "--port", args.bridge_port, "--mode", "meshcore", "--psk", psk_hex,
-              "--delay", str(args.delay)]
-    if args.drop > 0.0:
-        sender += ["--drop", str(args.drop)]
-    if args.privkey:
-        sender += ["--privkey", args.privkey, "--keyid", str(args.keyid)]
-    if args.packetorder and args.packetorder != "normal":
-        sender += ["--packetorder", args.packetorder]
-    if args.scope:
-        sender += ["--scope", args.scope]
-        if args.scope_name:     sender += ["--scope-name", args.scope_name]
-        if args.scope_key:      sender += ["--scope-key", args.scope_key]
-        if args.path:           sender += ["--path", args.path]
-        if args.path_hashsize:  sender += ["--path-hashsize", str(args.path_hashsize)]
+    if args.sender == "mcpy":
+        sender = [PY, str(OTA_MCPY_SENDER), "--old", str(OLD_BIN), "--new", str(NEW_BIN),
+                  "--port", args.bridge_port, "--channel-name", "#fkotanrf",
+                  "--channel-idx", "1", "--scope", (args.scope or "zerohop"),
+                  "--delay", str(args.delay),
+                  "--freq", "869.618", "--bw", "62.5", "--sf", "8", "--cr", "5"]
+        if args.privkey:
+            sender += ["--privkey", args.privkey, "--keyid", str(args.keyid)]
+        if args.packetorder:
+            sender += ["--packetorder", args.packetorder]
+    else:
+        import ota_sender as _S
+        psk_hex = _S.ota_channel_secret().hex()   # #fkotanrf secret (16B)
+        sender = [PY, str(OTA_SENDER), "--old", str(OLD_BIN), "--new", str(NEW_BIN),
+                  "--port", args.bridge_port, "--mode", "meshcore", "--psk", psk_hex,
+                  "--delay", str(args.delay)]
+        if args.drop > 0.0:
+            sender += ["--drop", str(args.drop)]
+        if args.privkey:
+            sender += ["--privkey", args.privkey, "--keyid", str(args.keyid)]
+        if args.packetorder and args.packetorder != "normal":
+            sender += ["--packetorder", args.packetorder]
+        if args.scope:
+            sender += ["--scope", args.scope]
+            if args.scope_name:     sender += ["--scope-name", args.scope_name]
+            if args.scope_key:      sender += ["--scope-key", args.scope_key]
+            if args.path:           sender += ["--path", args.path]
+            if args.path_hashsize:  sender += ["--path-hashsize", str(args.path_hashsize)]
 
     # Pozn.: reboot repeatera robí broadcast_until_verified PRED KAŽDÝM kolom
     # (čerstvé RX okno proti "stuck receiver"), takže sa tu už nerebootuje.
@@ -364,6 +407,9 @@ def evaluate(lines, new_build, expected_fnv):
 def main():
     ap = argparse.ArgumentParser(description="End-to-end OTA test MeshCore repeatera cez LoRa")
     ap.add_argument("phase", choices=["baseline", "run"])
+    ap.add_argument("--sender", choices=["bridge", "mcpy"], default="bridge",
+                    help="bridge=FK_lora bridge (CZ, raw) | mcpy=MeshCore companion (SK, meshcore_py). "
+                         "Obe na COM3 (XIAO), repeater na COM5.")
     ap.add_argument("--bridge-port", default=DEFAULT_BRIDGE_PORT)
     ap.add_argument("--target-port", default=DEFAULT_TARGET_PORT)
     ap.add_argument("--target-env",  default=DEFAULT_TARGET_ENV)
@@ -433,7 +479,10 @@ def main():
         sys.exit(red("[FAIL] pyserial chýba — spúšťaj cez penv python "
                      "(~/.platformio/penv/Scripts/python.exe)"))
 
-    print(cyan("[preset] LoRa = CZ (869.525/SF7)"))
+    if args.sender == "mcpy":
+        print(cyan("[preset] LoRa = SK (869.618/62.5/SF8/CR5)  sender=companion (meshcore_py)"))
+    else:
+        print(cyan("[preset] LoRa = CZ (869.525/SF7)  sender=FK_lora bridge"))
     if args.phase == "baseline":
         phase_baseline(args)
     else:
