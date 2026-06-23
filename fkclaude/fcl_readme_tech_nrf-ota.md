@@ -313,3 +313,25 @@ pravdepodobne aj príčina §8.4 (agc sleep+calibrate = rádio v zlom stave → 
 ## 10. História verzií (testovacie buildy)
 `#11→#12` prvý dokázaný OTA flash cez LoRa (prv. session). `#23→#24`, `#28→#29`, `#32→#33`
 opakované PASS pri `agc_reset=0`. Build# je dočasné testovacie počítadlo (`gen_build_info.py`).
+
+---
+
+## 11. OTVORENÝ BUG — po `ota clear` sa pakety zobrazia len ako RAW (2026-06-23)
+
+Zistené pri E2E teste OTA cez Flutter appku (sibling `../meshcore-open`, web/Web Serial → companion
+→ LoRa → tento repeater). **Doručenie OTA funguje** (chunky+META+SIG dorazia, CRC OK, base-FW check
+správny). **Problém:** keď po úspešnej dávke spravíš `ota clear` a znova odošleš celú dávku, pakety
+sa **už nedispatchujú cez OTA logiku** a v logu sú len `[OTA] RAW #N ... type=10`. Repeater pritom
+nemá žiadnu session.
+
+Lokalizované (env `ProMicro_repeater_ota`, `examples/simple_repeater/`):
+- RAW log + dispatch gate `if (dtype != OTA_MAGIC) return;` — `MyMesh.cpp:488, 883–887`
+- `ota clear` handler („OTA cleared") — `nrfota/OtaMesh.cpp:52`
+- chunk/META/SIG + base-FW kontroly — `nrfota/OtaReceiver.cpp`; stav — `nrfota/OtaState.h`
+
+Hypotéza: `ota clear` odregistruje OTA kanál (channel secret/hash) alebo zhodí „armed" flag, takže
+prichádzajúce `#fkotanrf` GRP_DATA sa už nematchne na kanál → nedešifruje → ostane RAW (nedôjde
+k `OTA_MAGIC` gate). Oprava: OTA routing/kanál nech prežije `ota clear` (bezstavový gate len podľa
+`data_type==OTA_MAGIC`), alebo `ota clear` čisti len patch/staging buffer, nie registráciu kanála.
+NEOVERENÉ — treba prejsť cez systematic-debugging (čítaj kód, nájdi čo presne `ota clear` nuluje vs.
+od čoho závisí dispatch). Appka NIE je príčina (posiela identické rámce, dokázané).
