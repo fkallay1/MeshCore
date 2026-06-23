@@ -52,6 +52,16 @@ OTA pakety idú ako MeshCore `PAYLOAD_TYPE_GRP_DATA` na dedikovanom kanáli (PSK
   timestamp a zavolá `ota_process()`.
 - **Žiadna zmena jadra MeshCore** — `onGroupDataRecv`/`searchChannelsByHash` sú existujúce virtuálne hooky.
 
+> **GOTCHA — dedup vs. re-send (2026-06-23):** GRP_DATA sa dešifruje a routuje na OTA len ak
+> `!_tables->hasSeen(pkt)` (`Mesh.cpp:227`). `hasSeen` je cyklická tabuľka 160 hashov, kde
+> `packet_hash = SHA256(typ‖payload)` (`Packet.cpp:41`). Ak sender pošle **byte-identické** pakety
+> (rovnaký patch + rovnaký `ts`), repeater ich zahodí ako duplikáty — `logRxRaw` vypíše len `[OTA] RAW`,
+> `onGroupDataRecv` sa NEzavolá. `ota clear` čistí len OTA receiver, NIE seen-table. **Sender preto MUSÍ
+> dať každému paketu unikátny `ts`** (py sendery: `int(time.time())`+`ts+=1`). Symptóm „po ota clear +
+> re-send len RAW" bol presne toto — bug bol vo Flutter appke (`tsBase=0`), nie vo firmvéri. Firmware
+> dedup je korektný; ak by raz bolo treba znášať identické re-sendy, je možný „bezstavový OTA routing"
+> (doručiť aj pri `hasSeen`, retransmit ponechať pod dedupom) — neimplementované, netreba.
+
 Kanál: `hash = sha256(psk)[0]`, `secret = psk doplnené nulami na 32B`. PSK je 16/32-bajtový
 (default `"meshcore-ota-key"`). Zhodné s `ota_sender.py --mode meshcore --psk <hex>`.
 
