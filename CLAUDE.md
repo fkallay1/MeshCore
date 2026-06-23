@@ -8,6 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **`fkclaude/`** holds the maintainer's (Fedor Kallay) working docs, prefixed `fcl_*`. Read these at the start of a session when touching their subject area:
   - `fcl_readme_nrf-ota.md` / `fcl_readme_tech_nrf-ota.md` — the LoRa delta-patch OTA system for nRF52840 repeaters (a custom feature, separate from MeshCore's built-in BLE DFU "OTA").
   - `fcl_readme_verified_pooling.md` — hardening of the OTA end-to-end test.
+- **Auxiliary / Claude-generated docs go under `fkclaude/docs/`, never the upstream tree.** The upstream `docs/` directory and the repo root are off-limits for helper material. In particular, brainstorming specs and implementation plans (the superpowers skills' default `docs/superpowers/specs|plans/`) MUST be written to `fkclaude/docs/superpowers/specs|plans/` — this user preference overrides the skills' default location. Do not create new top-level directories or files of a helper nature; consolidate them under `fkclaude/`.
 
 ## Common commands
 
