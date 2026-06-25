@@ -54,7 +54,7 @@ Disabled by default (`-w -DNDEBUG`). Uncomment `; -D MESH_DEBUG=1` or `; -D MESH
 
 ### NRF52 platform specifics
 - Custom Adafruit nRF52 Arduino fork used (see `platformio.ini` nrf52_base for URL).
-- Softdevice: s140 v6 (default) or v7 (XIAO boards, needs `-D FOTA_SOFTDEVICE_V7`).
+- Softdevice: s140 v6 (default) or v7 (XIAO/SenseCap boards). FOTA reads the app base from the linker symbol at runtime, so no board flag is needed.
 - Linker scripts in `boards/`: `nrf52840_s140_v6.ld`, `nrf52840_s140_v6_extrafs.ld` (extra FS, app ends at 0xD4000).
 - OTA repeater variants use `_extrafs.ld` + `board_upload.maximum_size = 712704`.
 
@@ -69,8 +69,8 @@ Located in `examples/simple_repeater/nrffota/`, gated by `-D WITH_LORA_FOTA=1`.
 (Formerly "OTA"; renamed to FOTA — wire protocol unchanged, see `fkclaude/docs/fota-rename-handoff.md`.)
 
 **Build order**:
-1. `BOARD_FLASHER={promicro|xiao} python examples/simple_repeater/nrffota/tools/build_flasher.py` — generates per-SoftDevice `nrffota/flasher_code_v6.h` (s140 v6, app@0x26000) / `flasher_code_v7.h` (s140 v7, app@0x27000). Only needed once or after `flasher.c` changes.
-2. `pio run -e ProMicro_repeater_fota` (v6) or `pio run -e SenseCap_Solar_repeater_fota` (v7) — builds with FOTA support. v7 boards MUST set `-D FOTA_SOFTDEVICE_V7=1` (app base 0x27000; OtaPatcher selects the v7 flasher blob).
+1. `python examples/simple_repeater/nrffota/tools/build_flasher.py` — generates ONE board-agnostic `nrffota/flasher_code.h`. Only needed once or after `flasher.c` changes.
+2. `pio run -e ProMicro_repeater_fota` (v6) or `pio run -e SenseCap_Solar_repeater_fota` (v7) — builds with FOTA support. **No board flag needed**: app base (0x26000/0x27000) is read from the linker symbol (`fota_running_fw_base()`) and passed to the flasher at runtime.
 
 CLI commands: `fota status | verify | flash | clear | decompress | nack | dbg | id | agc` (legacy `ota …` alias still accepted; marked `FOTA-CLI-ALIAS`).
 

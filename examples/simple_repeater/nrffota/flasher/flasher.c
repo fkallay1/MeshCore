@@ -199,6 +199,11 @@ static hpi_BOOL patch_read(hpi_TInputStreamHandle h,
  * puff_stream to zaručuje. Žiadny veľký dekompresný buffer (na rozdiel od puff()). */
 static puff_stream_t s_ps;   /* ~1.8kB v .bss */
 
+/* App flash base (0x26000 v6 / 0x27000 v7) — odovzdaná RUNTIME z FW
+ * (fota_running_fw_base() = linker symbol), nie compile-time makro. Vďaka tomu
+ * je flasher JEDEN, board-agnostický. BEZ inicializátora (.bss; .data by ld discardol). */
+static uint32_t s_app_base;
+
 static hpi_BOOL patch_zlib_read(hpi_TInputStreamHandle h,
                                  hpi_byte* out, hpi_size_t* size) {
     if (*size == 0) return hpi_TRUE;
@@ -222,8 +227,8 @@ static hpi_BOOL flash_read_old(hpatchi_listener_t* l,
                                 hpi_pos_t pos,
                                 hpi_byte* out, hpi_size_t size) {
     (void)l;
-    if ((uint32_t)pos + (uint32_t)size > APP_FLASH_MAX) return hpi_FALSE;
-    memcpy(out, (const uint8_t*)(APP_FLASH_START + (uint32_t)pos), size);
+    if ((uint32_t)pos + (uint32_t)size > (APP_FLASH_END - s_app_base)) return hpi_FALSE;
+    memcpy(out, (const uint8_t*)(s_app_base + (uint32_t)pos), size);
     return hpi_TRUE;
 }
 
@@ -254,7 +259,7 @@ static hpi_BOOL flash_write_new(hpatchi_listener_t* l,
         size -= n;
         if (c->page_used == PAGE_SIZE) {
 #if !FLASHER_DRYRUN
-            uint32_t addr = APP_FLASH_START + c->current_page * PAGE_SIZE;
+            uint32_t addr = s_app_base + c->current_page * PAGE_SIZE;
             nvmc_erase_page(addr);
             nvmc_write_page(addr, c->page_buf);
 #else
@@ -272,8 +277,9 @@ static hpi_BOOL flash_write_new(hpatchi_listener_t* l,
  * Stack priestor: ~256kB minus overhead (NVIC/SP nastavuje flasher_entry).
  */
 void flasher_main(uint32_t patch_addr, uint32_t patch_size,
-                   uint32_t new_fw_size) {
+                   uint32_t new_fw_size, uint32_t app_base) {
     (void)new_fw_size;
+    s_app_base = app_base;   /* board-agnostický base z FW (linker symbol), nie makro */
     /* Vypni IRQ — flasher beží MIMO OS/SoftDevice kontextu. Ak by prišlo
      * prerušenie (SysTick/RADIO/USB), CPU by skočilo cez VTOR do app handlera
      * bez platného SD/RTOS stavu → crash/reset. Flasher je čisto sekvenčný. */
@@ -342,7 +348,7 @@ void flasher_main(uint32_t patch_addr, uint32_t patch_size,
             memset(fc.page_buf + fc.page_used, 0xFF,
                    PAGE_SIZE - fc.page_used);
 #if !FLASHER_DRYRUN
-            uint32_t addr = APP_FLASH_START + fc.current_page * PAGE_SIZE;
+            uint32_t addr = s_app_base + fc.current_page * PAGE_SIZE;
             nvmc_erase_page(addr);
             nvmc_write_page(addr, fc.page_buf);
 #endif
@@ -358,7 +364,7 @@ void flasher_main(uint32_t patch_addr, uint32_t patch_size,
          * pokazeného FW (zariadenie sa dá obnoviť cez USB, nie brick). */
         {
             uint32_t vfnv = 2166136261u;
-            const uint8_t* app = (const uint8_t*)APP_FLASH_START;
+            const uint8_t* app = (const uint8_t*)s_app_base;
             for (uint32_t i = 0; i < (uint32_t)new_size; i++) {
                 vfnv ^= (uint32_t)app[i];
                 vfnv *= 16777619u;
@@ -407,16 +413,19 @@ FAIL:
  * Po sd_softdevice_disable je celých 256kB RAM voľných.
  */
 __attribute__((naked))
-void flasher_entry(uint32_t patch_addr, uint32_t patch_size, uint32_t new_fw_size)
+void flasher_entry(uint32_t patch_addr, uint32_t patch_size, uint32_t new_fw_size, uint32_t app_base)
 {
+    /* r0..r3 = patch_addr, patch_size, new_fw_size, app_base (AAPCS) — zachované
+     * pre flasher_main. SP nastav cez r12 (scratch reg), NIE r3 — inak by sa
+     * 4. parameter (app_base) prepísal pred volaním flasher_main. */
     __asm volatile (
-        "ldr r3, =0x20040000\n\t"   /* top of nRF52840 RAM */
-        "mov sp, r3\n\t"
+        "ldr r12, =0x20040000\n\t"  /* top of nRF52840 RAM */
+        "mov sp, r12\n\t"
         "bl  flasher_main\n\t"
         "1: b 1b\n\t"               /* never reached — flasher_main resets */
-        ::: "r3"
+        ::: "r12"
     );
-    (void)patch_addr; (void)patch_size; (void)new_fw_size;  /* suppress warnings */
+    (void)patch_addr; (void)patch_size; (void)new_fw_size; (void)app_base;  /* suppress warnings */
 }
 
 #endif  /* FOTA_FLASHER_BUILD */

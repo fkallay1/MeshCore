@@ -95,7 +95,9 @@ Nezmenené: `FwId.{h,cpp}`, `flash_layout.h`, `flasher_code*.h`, `puff_stream.*`
 **Build (`platformio.ini`):**
 - `-D WITH_LORA_OTA` → `-D WITH_LORA_FOTA`
 - `-D OTA_CHANNEL_NAME` → `-D FOTA_CHANNEL_NAME`
-- `-D OTA_SOFTDEVICE_V7` → `-D FOTA_SOFTDEVICE_V7`
+- `-D OTA_SOFTDEVICE_V7` → `-D FOTA_SOFTDEVICE_V7` — pozn.: tento flag už NETREBA;
+  FOTA je board-agnostické (app base z linker symbolu + runtime do flashera). Makro
+  `APP_FLASH_START` je legacy.
 - include/`build_src_filter`/`extra_scripts` cesty → `nrffota` / `test_nrf-fota`
 
 **C identifikátory:** `OTA_*` → `FOTA_*` (makrá/enum), `Ota*` → `Fota*` (typy),
@@ -120,7 +122,8 @@ Nezmenené: `FwId.{h,cpp}`, `flash_layout.h`, `flasher_code*.h`, `puff_stream.*`
 
 - FW build `SenseCap_Solar_repeater_fota`: **PASS** (#153).
 - Python testy `test_nrf-fota/tests/`: **9/9 PASS**.
-- Flasher bloby `flasher_code_v6.h` / `_v7.h`: regenerované, v6≠v7.
+- Flasher: JEDEN board-agnostický `flasher_code.h` (app base runtime cez 4. arg
+  `flasher_entry`); per-board `flasher_code_v6/v7.h` zrušené.
 - `gen_fotapkg.py` end-to-end: produkuje `.fotapkg.json` + `.bin` + `.uf2`.
 
 Pôvodný (predrenamový) dobrý stav je commitnutý na `features/nrf-ota`

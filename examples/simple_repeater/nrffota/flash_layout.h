@@ -24,6 +24,12 @@
 // Jediný rozdiel medzi boardmi je APP_FLASH_START (veľkosť SoftDevice):
 //   s140 v6  → 0x26000  (ProMicro, Heltec T096, ...)  — default
 //   s140 v7  → 0x27000  (Seeed XIAO nRF52840, ...)
+//
+// POZOR: APP_FLASH_START makro je dnes LEGACY/compile-time fallback. Bežiaci FW
+// (FotaReceiver/FotaPatcher) ani flasher ho NEPOUŽÍVAJÚ — app base sa berie z
+// linker symbolu __flash_arduino_start (ORIGIN(FLASH) aktívneho ld) cez
+// fota_running_fw_base() a odovzdáva flasheru runtime. Preto NETREBA board flag.
+// APP_FLASH_END (0xD4000) je board-nezávislé (FS okno).
 // =====================================================================
 
 #if defined(BOARD_XIAO) || defined(FOTA_SOFTDEVICE_V7)

@@ -1,8 +1,8 @@
-# LoRa-OTA pre MeshCore repeater (nRF52840) — kompletný popis
+# LoRa-FOTA pre MeshCore repeater (nRF52840) — kompletný popis
 
 Aktualizácia firmvéru MeshCore **repeatera cez LoRa** prenosom malého **delta-patchu**
 (rozdiel starý→nový FW), namiesto nahrávania celého firmvéru. Port funkčného systému
-z projektu **FK_lora-sniffer**. Toto je **iné** ako vstavané MeshCore „OTA"
+z projektu **FK_lora-sniffer**. Toto je **iné** ako vstavané MeshCore „FOTA"
 (`NRF52Board::startOTAUpdate`), ktoré len reštartuje do Nordic DFU a FW sa nahráva cez BLE.
 
 ---
@@ -11,12 +11,12 @@ z projektu **FK_lora-sniffer**. Toto je **iné** ako vstavané MeshCore „OTA"
 
 | Oblasť | Súbory | Popis |
 |--------|--------|-------|
-| OTA modul | [examples/simple_repeater/nrfota/](examples/simple_repeater/nrfota/) | celý OTA kód (príjem + patchovanie), MeshCore jadro nezmenené |
-| Integrácia | [MyMesh.h](examples/simple_repeater/MyMesh.h) / [MyMesh.cpp](examples/simple_repeater/MyMesh.cpp) | 3 malé `#ifdef WITH_LORA_OTA` zásahy |
-| Build env | [variants/promicro/platformio.ini](variants/promicro/platformio.ini) | `ProMicro_repeater_ota` (extrafs.ld + flag + CZ) |
-| Test | [test_nrf-ota/](test_nrf-ota/) | end-to-end LoRa test + nástroje z FK_lora |
+| FOTA modul | [examples/simple_repeater/nrffota/](examples/simple_repeater/nrffota/) | celý FOTA kód (príjem + patchovanie), MeshCore jadro nezmenené |
+| Integrácia | [MyMesh.h](examples/simple_repeater/MyMesh.h) / [MyMesh.cpp](examples/simple_repeater/MyMesh.cpp) | 3 malé `#ifdef WITH_LORA_FOTA` zásahy |
+| Build env | [variants/promicro/platformio.ini](variants/promicro/platformio.ini) | `ProMicro_repeater_fota` (extrafs.ld + flag + CZ) |
+| Test | [test_nrf-fota/](test_nrf-fota/) | end-to-end LoRa test + nástroje z FK_lora |
 
-Detailný popis OTA modulu samotného: [examples/simple_repeater/nrfota/README.md](examples/simple_repeater/nrfota/README.md).
+Detailný popis FOTA modulu samotného: [examples/simple_repeater/nrffota/README.md](examples/simple_repeater/nrffota/README.md).
 
 **Súvisiace dokumenty:**
 - [readme_tech_nrf-ota.md](readme_tech_nrf-ota.md) — detailný technický popis (architektúra,
@@ -33,9 +33,9 @@ Detailný popis OTA modulu samotného: [examples/simple_repeater/nrfota/README.m
 ## 2. Architektúra
 
 ```
-PC (test_nrf-ota/ota_sender.py)              REPEATER (nRF52840, MeshCore)
+PC (test_nrf-fota/fota_sender.py)              REPEATER (nRF52840, MeshCore)
   hdiffi -inplaceB old new patch               MyMesh::onGroupDataRecv()  ← GRP_DATA (dešifr.)
-  zlib(-9,wbits=-9) → staged [ZLIB|..|deflate] ota_process()  (skip 4B ts → OTA typ)
+  zlib(-9,wbits=-9) → staged [ZLIB|..|deflate] fota_process()  (skip 4B ts → FOTA typ)
   GRP_DATA (AES-128-ECB + HMAC) ──┐            chunky → CustomLFS append-log (/ota/recv.log)
                                   │ LoRa       COMPLETE → assemble patch.bin + SHA256 → VERIFIED
   BRIDGE (XIAO, FK_lora) ─────────┘            'ota flash' → flasher@0xEB000:
@@ -45,25 +45,25 @@ PC (test_nrf-ota/ota_sender.py)              REPEATER (nRF52840, MeshCore)
 ```
 
 ### Transport (GRP_DATA kanál)
-OTA pakety idú ako MeshCore `PAYLOAD_TYPE_GRP_DATA` na dedikovanom kanáli (PSK).
-- `MyMesh::searchChannelsByHash()` — keď sa `channel_hash` zhoduje s OTA kanálom, vráti ho
+FOTA pakety idú ako MeshCore `PAYLOAD_TYPE_GRP_DATA` na dedikovanom kanáli (PSK).
+- `MyMesh::searchChannelsByHash()` — keď sa `channel_hash` zhoduje s FOTA kanálom, vráti ho
   → MeshCore dešifruje payload cez `Utils::MACThenDecrypt` (AES-128-ECB + HMAC-SHA256).
-- `MyMesh::onGroupDataRecv()` — dostane plaintext `[ts 4B][ota_type][...]`, preskočí 4B
-  timestamp a zavolá `ota_process()`.
+- `MyMesh::onGroupDataRecv()` — dostane plaintext `[ts 4B][fota_type][...]`, preskočí 4B
+  timestamp a zavolá `fota_process()`.
 - **Žiadna zmena jadra MeshCore** — `onGroupDataRecv`/`searchChannelsByHash` sú existujúce virtuálne hooky.
 
-> **GOTCHA — dedup vs. re-send (2026-06-23):** GRP_DATA sa dešifruje a routuje na OTA len ak
+> **GOTCHA — dedup vs. re-send (2026-06-23):** GRP_DATA sa dešifruje a routuje na FOTA len ak
 > `!_tables->hasSeen(pkt)` (`Mesh.cpp:227`). `hasSeen` je cyklická tabuľka 160 hashov, kde
 > `packet_hash = SHA256(typ‖payload)` (`Packet.cpp:41`). Ak sender pošle **byte-identické** pakety
-> (rovnaký patch + rovnaký `ts`), repeater ich zahodí ako duplikáty — `logRxRaw` vypíše len `[OTA] RAW`,
-> `onGroupDataRecv` sa NEzavolá. `ota clear` čistí len OTA receiver, NIE seen-table. **Sender preto MUSÍ
+> (rovnaký patch + rovnaký `ts`), repeater ich zahodí ako duplikáty — `logRxRaw` vypíše len `[FOTA] RAW`,
+> `onGroupDataRecv` sa NEzavolá. `ota clear` čistí len FOTA receiver, NIE seen-table. **Sender preto MUSÍ
 > dať každému paketu unikátny `ts`** (py sendery: `int(time.time())`+`ts+=1`). Symptóm „po ota clear +
 > re-send len RAW" bol presne toto — bug bol vo Flutter appke (`tsBase=0`), nie vo firmvéri. Firmware
-> dedup je korektný; ak by raz bolo treba znášať identické re-sendy, je možný „bezstavový OTA routing"
+> dedup je korektný; ak by raz bolo treba znášať identické re-sendy, je možný „bezstavový FOTA routing"
 > (doručiť aj pri `hasSeen`, retransmit ponechať pod dedupom) — neimplementované, netreba.
 
 Kanál: `hash = sha256(psk)[0]`, `secret = psk doplnené nulami na 32B`. PSK je 16/32-bajtový
-(default `"meshcore-ota-key"`). Zhodné s `ota_sender.py --mode meshcore --psk <hex>`.
+(default `"meshcore-ota-key"`). Zhodné s `fota_sender.py --mode meshcore --psk <hex>`.
 
 ### Krypto / FS — znovupoužité z MeshCore
 - **SHA256**: `mesh::Utils::sha256` + `rweather/Crypto` (existujúca dep, žiadna nová).
@@ -73,7 +73,7 @@ Kanál: `hash = sha256(psk)[0]`, `secret = psk doplnené nulami na 32B`. PSK je 
 ### Flash mapa (extrafs.ld, app končí 0xD4000)
 ```
 0x26000–0xD4000  aplikačný kód repeatera (712 kB)
-0xD4000–0xEB000  OTA FS (CustomLFS, 92 kB — recv.log/patch.bin/meta/bitmap)
+0xD4000–0xEB000  FOTA FS (CustomLFS, 92 kB — recv.log/patch.bin/meta/bitmap)
 0xEB000–0xEC000  flasher kód (4 kB, beží MIMO app flash aj InternalFS)
 0xEC000–0xED000  flasher trace/meta (4 kB)
 0xED000–0xF4000  MeshCore InternalFS (identity/prefs/ACL — NEDOTKNUTÝ)
@@ -96,15 +96,15 @@ Strop patchu ~40 kB (recv.log + patch.bin súčasne v 92 kB FS).
 
 ```bash
 # 1) flasher blob (raz / po zmene flasher.c)
-python examples/simple_repeater/nrfota/tools/build_flasher.py     # → nrfota/flasher_code.h
+python examples/simple_repeater/nrffota/tools/build_flasher.py     # → nrffota/flasher_code.h
 
-# 2) OTA repeater
-pio run -e ProMicro_repeater_ota
+# 2) FOTA repeater
+pio run -e ProMicro_repeater_fota
 ```
-- Gated `-D WITH_LORA_OTA=1`. Bez flagu sú nrfota súbory inertné → stock buildy nedotknuté.
-- OTA env používa `boards/nrf52840_s140_v6_extrafs.ld` (app končí 0xD4000) + **CZ preset**
+- Gated `-D WITH_LORA_FOTA=1`. Bez flagu sú nrffota súbory inertné → stock buildy nedotknuté.
+- FOTA env používa `boards/nrf52840_s140_v6_extrafs.ld` (app končí 0xD4000) + **CZ preset**
   (`LORA_FREQ=869.525`, `SF=7`) aby sa nerušila SK sieť a zhodovalo sa s FK_lora bridge.
-- Pre XIAO/s140 v7: pridaj `-D FOTA_SOFTDEVICE_V7` a regeneruj flasher `BOARD_FLASHER=xiao`.
+- Pre XIAO/s140 v7 (app base 0x27000): nič netreba — FOTA je board-agnostické (app base z linker symbolu `fota_running_fw_base()`, odovzdaný flasheru runtime). Jeden `flasher_code.h`.
 
 ---
 
@@ -117,16 +117,16 @@ pio run -e ProMicro_repeater_ota
 
 Cez Serial píš priamo (`ota status`). Cez LoRa idú ako admin CLI príkazy (existujúca
 MeshCore cesta). Flasher sa púšťa **manuálne** (`ota flash`) — auto-APPLY cez LoRa je tiež
-možný (`ota_sender --reboot`), ale default je manuálne spustenie po `ota verify`.
+možný (`fota_sender --reboot`), ale default je manuálne spustenie po `ota verify`.
 
 ---
 
 ## 5. Build number (dočasné testovacie lešenie)
 
-`test_nrf-ota/gen_build_info.py` (pre-script OTA env-u) pri každom builde inkrementuje
-`test_nrf-ota/build_number.txt` a generuje `build_info.h` s `FW_BUILD_NUMBER`. Repeater
-ho vypisuje na boote a v heartbeate `[OTA] AALIVE build #N`. Slúži na:
-- detekciu, či po OTA flash beží NOVÁ verzia (build# sa zvýšil),
+`test_nrf-fota/gen_build_info.py` (pre-script FOTA env-u) pri každom builde inkrementuje
+`test_nrf-fota/build_number.txt` a generuje `build_info.h` s `FW_BUILD_NUMBER`. Repeater
+ho vypisuje na boote a v heartbeate `[FOTA] AALIVE build #N`. Slúži na:
+- detekciu, či po FOTA flash beží NOVÁ verzia (build# sa zvýšil),
 - zaručenie že OLD != NEW (build# je súčasť kódu → patch nie je prázdny).
 
 ---
@@ -135,18 +135,18 @@ ho vypisuje na boote a v heartbeate `[OTA] AALIVE build #N`. Slúži na:
 
 **Topológia:** `PC ─USB─ XIAO bridge (COM3) ─LoRa─ ProMicro repeater (COM5) ─USB─ PC`
 
-Bridge = FK_lora `gateway_fw` (`[0xAB CD len]` serial → raw LoRa TX). Repeater = MeshCore OTA.
+Bridge = FK_lora `gateway_fw` (`[0xAB CD len]` serial → raw LoRa TX). Repeater = MeshCore FOTA.
 Oba na **CZ presete** (869.525/SF7), aby sa počuli a nerušili SK sieť.
 
 ```bash
 PENV=~/.platformio/penv/Scripts/python.exe   # má pyserial + platformio
 
 # 1) baseline: flash bridge (CZ) na COM3 + repeater OLD (CZ) na COM5
-$PENV test_nrf-ota/ota_test_lora_repeater.py baseline --bridge-port COM3 --target-port COM5
+$PENV test_nrf-fota/fota_test_lora_repeater.py baseline --bridge-port COM3 --target-port COM5
 #    (ak XIAO už beží ako CZ bridge:  pridaj --skip-bridge)
 
 # 2) run: build NEW, patch OLD→NEW, broadcast cez bridge, flash, verify
-$PENV test_nrf-ota/ota_test_lora_repeater.py run --bridge-port COM3 --target-port COM5
+$PENV test_nrf-fota/fota_test_lora_repeater.py run --bridge-port COM3 --target-port COM5
 #    voliteľne: --cycles 4 --drop 0.2  (simulácia straty + kumulácia naprieč cyklami)
 ```
 
@@ -157,11 +157,11 @@ Test:
    `[FLASHER-DBG]` marker + FNV-1a checksum.
 
 **Predpoklady:** COM5/COM3 voľné (zatvor Serial Monitor), `hdiffi.exe` + `pyserial` +
-`pycryptodome` v penv pythone (`pip install -r test_nrf-ota/requirements.txt`).
+`pycryptodome` v penv pythone (`pip install -r test_nrf-fota/requirements.txt`).
 
 ### Stav testu — OVERENÉ NA HW (2026-06-14)
 
-**OTA cez LoRa funguje end-to-end — DOKÁZANÉ.** Build #11 → patch #11→#12 (488 B,
+**FOTA cez LoRa funguje end-to-end — DOKÁZANÉ.** Build #11 → patch #11→#12 (488 B,
 hdiffi+zlib) odvysielaný cez XIAO bridge ako GRP_DATA → repeater prijal všetky 4 chunky
 → assembly + SHA256 verify OK → dry-run (`ota verify`) potvrdil base aj nový SHA256 →
 `ota flash` → flasher@0xEB000 (HPatchLite in-place + NVMC) → reboot → **repeater nabehol
@@ -170,7 +170,7 @@ na build #12**. ✅
 Overené aj bezpečnostné poistky:
 - **Base-FW check**: keď bežiaci FW != `old` z patchu (#11 vs starý #6 patch), flash
   bol korektne ODMIETNUTÝ („BASE NESEDÍ — NEPREPISUJEM"). ✅
-- **Reboot-resilient FS**: OTA session (CustomLFS @0xD4000) prežije DFU reflash app flash. ✅
+- **Reboot-resilient FS**: FOTA session (CustomLFS @0xD4000) prežije DFU reflash app flash. ✅
 
 #### Kľúčové nálezy z ladenia RF spoja (DÔLEŽITÉ)
 1. **Preamble**: MeshCore pre SF≤8 používa preamble **32** ([RadioLibWrappers.h:47](src/helpers/radiolib/RadioLibWrappers.h#L47)),
@@ -182,7 +182,7 @@ Overené aj bezpečnostné poistky:
 #### Ladenie príjmu (2026-06-15) — HW OK, finálny config = agc_reset 0 + štandardný preamble 32
 Mali sme epizódu trvalej hluchoty repeatera (`rawrx=0`). Postup ladenia a ZÁVER:
 
-1. **HW overené čistým FK_lora testom**: `ota_test_lora.py` (sniffer COM5 + bridge COM3, CZ,
+1. **HW overené čistým FK_lora testom**: `fota_test_lora.py` (sniffer COM5 + bridge COM3, CZ,
    direct) PREŠIEL (#115→#116) na tých istých doskách/anténe → **HW v poriadku** (RSSI -23,
    SNR +11). Problém nebol v anténe ani RF spoji.
 2. **Trvalá hluchota (#21) = jednorazový zaseknutý stav rádia** ("stuck noise floor -120",
@@ -191,13 +191,13 @@ Mali sme epizódu trvalej hluchoty repeatera (`rawrx=0`). Postup ladenia a ZÁVE
    funguje (overené #27/#28/#32: `rxpkts>0`, RSSI -23, dosiahnutý VERIFIED).
    > Preamble 64 na bridge sa najprv javil ako "fix", ale bola to náhoda (reflash resetol
    > rádio). Na repeateri sa **nič radio-config nemenilo** → plná kompatibilita s MeshCore.
-3. **AGC auto-reset (`set agc.reset.interval N>0`) NEKOMBINOVAŤ s OTA flashom!** Ak agc resety
-   (`radio.sleep`+`calibrate`) bežia počas OTA session, nasledujúci `ota flash` ZLYHÁ (flasher
+3. **AGC auto-reset (`set agc.reset.interval N>0`) NEKOMBINOVAŤ s FOTA flashom!** Ak agc resety
+   (`radio.sleep`+`calibrate`) bežia počas FOTA session, nasledujúci `ota flash` ZLYHÁ (flasher
    sa zastaví po „Komprimovany format", repeater nabehne na OLD). Overené: agc=0 → #28→#29 aj
    #32→#33 flash PASS; agc=8 → #28→#29 aj #30→#31 FAIL. **Nechať agc_reset=0 (MeshCore default).**
 
-**Diagnostika (gated `WITH_LORA_OTA`):**
-- `logRxRaw()` → `rawrx` v `[OTA] AALIVE` heartbeate = surové CRC-OK rámce PRED dekódom
+**Diagnostika (gated `WITH_LORA_FOTA`):**
+- `logRxRaw()` → `rawrx` v `[FOTA] AALIVE` heartbeate = surové CRC-OK rámce PRED dekódom
   (odlíši „rádio nepočuje nič" od „počuje, dekód zlyhá").
 - `ota agc` (serial/CLI) → SX1262 RxGain register (0x08AC: 0x96 boosted / 0x94 power-save),
   okamžité RSSI, noise floor, `agc_reset_interval`. **Read-only — nemení config rádia.**
@@ -206,7 +206,7 @@ Mali sme epizódu trvalej hluchoty repeatera (`rawrx=0`). Postup ladenia a ZÁVE
 Postup testu (fire-and-forget, príjem niekedy potrebuje pár cyklov kvôli strate paketov):
 ```bash
 PENV=~/.platformio/penv/Scripts/python.exe
-$PENV test_nrf-ota/ota_test_lora_repeater.py baseline --skip-bridge   # OLD + clear + reboot
-$PENV test_nrf-ota/ota_test_lora_repeater.py run --skip-bridge --cycles 4
-# ak run skončí pred VERIFIED: znova broadcast (ota_sender) a potom 'ota flash' manuálne
+$PENV test_nrf-fota/fota_test_lora_repeater.py baseline --skip-bridge   # OLD + clear + reboot
+$PENV test_nrf-fota/fota_test_lora_repeater.py run --skip-bridge --cycles 4
+# ak run skončí pred VERIFIED: znova broadcast (fota_sender) a potom 'ota flash' manuálne
 ```

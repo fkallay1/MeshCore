@@ -20,19 +20,11 @@
 // Streaming DEFLATE decompressor pre ZLIB dry-run
 #include "puff_stream.h"
 
-// Per-board flasher blob (standalone kód má app base zapečený compile-time).
-// Generuj: BOARD_FLASHER={promicro|xiao} python nrffota/tools/build_flasher.py
-//   v6 (app@0x26000) → flasher_code_v6.h   |   v7 (app@0x27000) → flasher_code_v7.h
-#if defined(FOTA_SOFTDEVICE_V7)
-  #define FOTA_FLASHER_HDR "flasher_code_v7.h"
-#else
-  #define FOTA_FLASHER_HDR "flasher_code_v6.h"
-#endif
-#if __has_include(FOTA_FLASHER_HDR)
-  #include FOTA_FLASHER_HDR
-  #define FOTA_HAS_FLASHER 1
-#elif __has_include("flasher_code.h")
-  #include "flasher_code.h"   // spätná kompatibilita (starý jednotný blob = v6)
+// JEDEN board-agnostický flasher blob — app base dostáva RUNTIME (4. arg flasher_entry,
+// viď s_app_base vo flasher.c), nie compile-time. Generuj:
+//   python nrffota/tools/build_flasher.py
+#if __has_include("flasher_code.h")
+  #include "flasher_code.h"
   #define FOTA_HAS_FLASHER 1
 #else
   #define FOTA_HAS_FLASHER 0
@@ -403,7 +395,10 @@ bool fota_flash_via_flasher() {
     FotaFS.end();
 
     // ── 4: BYE + disable SoftDevice (USB CDC zmizne) ──
-    typedef void(*flasher_fn_t)(uint32_t, uint32_t, uint32_t);
+    // app_base z linker symbolu (v6=0x26000, v7=0x27000) — odovzdáme flasheru ako
+    // 4. arg, takže je JEDEN board-agnostický blob (nie compile-time per-board).
+    uint32_t app_base = fota_running_fw_base();
+    typedef void(*flasher_fn_t)(uint32_t, uint32_t, uint32_t, uint32_t);
     Serial.print(F("[FLASHER] → 0x")); Serial.print(FLASHER_CODE_ADDR, HEX);
     Serial.println(F(" [BYE] (streaming)"));
     Serial.flush();
@@ -428,7 +423,7 @@ bool fota_flash_via_flasher() {
     memmove((void*)PATCH_RAM_ADDR, patch_buf, patch_size);
 
     // ── 7: skok na flasher — NEVRÁTI SA. ──
-    ((flasher_fn_t)(FLASHER_CODE_ADDR | 1u))(PATCH_RAM_ADDR, patch_size, new_fw_size);
+    ((flasher_fn_t)(FLASHER_CODE_ADDR | 1u))(PATCH_RAM_ADDR, patch_size, new_fw_size, app_base);
     while (1);
     return false;  // unreachable
 #endif  // FOTA_HAS_FLASHER

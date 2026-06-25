@@ -40,8 +40,9 @@ PC (fota_sender.py)                     Repeater (nRF52840)
 0xED000 - 0xF4000 : MeshCore InternalFS (28 kB — identity/prefs/ACL, NEDOTKNUTÝ)
 0xF4000+          : bootloader
 ```
-Strop patchu ~40 kB (recv.log + patch.bin súčasne). Pre s140 v7 (XIAO) je
-`APP_FLASH_START=0x27000` — nastav `-D FOTA_SOFTDEVICE_V7` a `BOARD_FLASHER=xiao`.
+Strop patchu ~40 kB (recv.log + patch.bin súčasne). Pre s140 v7 (XIAO/SenseCap) je
+app base `0x27000` — nič netreba nastavovať: FW ho zistí z linker symbolu
+(`fota_running_fw_base()`) a odovzdá flasheru runtime (jeden board-agnostický blob).
 
 ## Build
 
