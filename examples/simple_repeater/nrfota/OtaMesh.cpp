@@ -59,8 +59,10 @@ void ota_handle_command(const char* args, char* reply) {
     } else if (strcmp(args, "dbg") == 0) {
         ota_print_flasher_debug();
         strcpy(reply, "OTA dbg -> serial");
+    } else if (strcmp(args, "id") == 0 || strcmp(args, "fwid") == 0) {
+        ota_print_fw_id(reply);   // build#, image_size, plný running sha256 -> serial
     } else {
-        strcpy(reply, "OTA: status|verify|flash|clear|decompress|nack|dbg");
+        strcpy(reply, "OTA: status|verify|flash|clear|decompress|nack|dbg|id");
     }
 }
 

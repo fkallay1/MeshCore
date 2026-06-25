@@ -26,7 +26,7 @@
 //   s140 v7  → 0x27000  (Seeed XIAO nRF52840, ...)
 // =====================================================================
 
-#if defined(BOARD_XIAO) || defined(OTA_SOFTDEVICE_V7)
+#if defined(BOARD_XIAO) || defined(FOTA_SOFTDEVICE_V7)
   // SoftDevice s140 v7.x
   #define APP_FLASH_START      0x27000u
 #elif defined(OTA_APP_FLASH_START)

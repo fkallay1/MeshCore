@@ -18,12 +18,24 @@ post-akcií na firmware.hex):
 Vypnutie: zakomentuj riadok v variants/promicro/platformio.ini, alebo nastav
 env premennú OTAPKG_SKIP=1.
 """
+import locale
 import os
 import subprocess
 import sys
 from pathlib import Path
 
 Import("env")  # type: ignore  # PlatformIO SCons kontext
+
+
+def _safe_print(s):  # noqa: ANN001
+    # PlatformIO náš stdout re-echo-uje cez click.secho do SVOJHO stdoutu, ktorý
+    # je na Windows cp1250. Keď riadok obsahuje '→' (U+2192) a iné znaky mimo
+    # cp1250, padne až ten vonkajší pio proces (náš print prejde). Preto riadok
+    # sanitizujeme do locale kódovania UŽ TU: '→' → '->', ostatné nereprezentova-
+    # teľné → '?'. Slovenské znaky sú v cp1250 OK, takže ostanú.
+    s = s.replace("→", "->")
+    sink = locale.getpreferredencoding(False) or "utf-8"
+    print(s.encode(sink, "replace").decode(sink))
 
 
 def _post(source, target, env):  # noqa: ANN001
@@ -35,15 +47,20 @@ def _post(source, target, env):  # noqa: ANN001
     # názov zariadenia z env: "ProMicro_repeater_ota" → "promicro"
     device = env.subst("$PIOENV").split("_")[0].lower() or "device"
     try:
+        # Vynúť UTF-8 na oboch stranách: dieťa tlačí slovenské znaky v UTF-8,
+        # bez tohto by parent na Windows dekódoval cez locale (cp1250) a spadol
+        # na 0x88 (UTF-8 continuation byte) v reader-threade. errors="replace"
+        # je poistka, aby hook nikdy nepadol na dekódovaní.
+        child_env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUTF8="1")
         r = subprocess.run([sys.executable, str(script), "--from-hex", hexf, "--device", device],
-                           capture_output=True, text=True)
+                           capture_output=True, encoding="utf-8", errors="replace", env=child_env)
         for ln in ((r.stdout or "") + (r.stderr or "")).splitlines():
             if ln.startswith(("[otapkg]", "[export]")):
-                print(ln)
+                _safe_print(ln)
         if r.returncode != 0:
-            print("[otapkg] hook: json nevygenerovaný (možno len 1 build v archíve) — OK")
+            _safe_print("[otapkg] hook: json nevygenerovaný (možno len 1 build v archíve) — OK")
     except Exception as e:  # noqa: BLE001
-        print(f"[otapkg] hook chyba (nefatálne): {e}")
+        _safe_print(f"[otapkg] hook chyba (nefatálne): {e}")
 
 
 env.AddPostAction("$BUILD_DIR/${PROGNAME}.hex", _post)  # type: ignore

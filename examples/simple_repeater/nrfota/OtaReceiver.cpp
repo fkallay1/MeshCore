@@ -7,6 +7,7 @@
 #ifdef WITH_LORA_OTA
 #include "OtaReceiver.h"
 #include "OtaFs.h"
+#include "FwId.h"             // fw_id_trailer (build#, image_size, sha256)
 #include <Arduino.h>
 #include <SHA256.h>          // rweather/Crypto — rovnaká dep ako mesh::Utils
 #include <Ed25519.h>         // rweather/Crypto —Ed25519::verify()
@@ -68,6 +69,60 @@ static inline uint32_t fw_image_size(void) {
     return image_end - (uint32_t)(uintptr_t)&__flash_arduino_start;
 }
 
+// Reálny app base z linker symbolu (= ORIGIN(FLASH) aktívneho ld scriptu):
+// v6=0x26000, v7=0x27000. Toto je zdroj pravdy pre device-side SHA — NIE makro
+// APP_FLASH_START, ktoré je pri zlej/chýbajúcej board konfigurácii (napr. v7
+// board bez FOTA_SOFTDEVICE_V7) nesprávne a hash by sa počítal z inej oblasti.
+// (Flasher je standalone bez linker symbolov → tam makro ostáva, viď flash_layout.h.)
+static inline uint32_t fw_flash_base(void) {
+    return (uint32_t)(uintptr_t)&__flash_arduino_start;
+}
+
+// Exportované pre OtaPatcher / OtaMesh — jeden zdroj pravdy pre app base a
+// veľkosť bežiaceho FW (z linker symbolov, nie z makra).
+uint32_t ota_running_fw_base(void) { return fw_flash_base(); }
+uint32_t ota_running_fw_size(void) { return fw_image_size(); }
+
+static void print_sha_full(const uint8_t* h) {
+    for (int i = 0; i < 32; i++) { if (h[i] < 0x10) Serial.print('0'); Serial.print(h[i], HEX); }
+    Serial.println();
+}
+
+// "ota id" — vypíš FW identitu a dopočítaj plný SHA256 bežiaceho FW.
+// running sha256 sa počíta nad [base, +image_size) AS-IS (vrátane vyplneného
+// traileru) → ZHODUJE sa s old_sha256 v .otapkg.json (to PC počíta nad rovnakým
+// app image). Trailer.sha256 je iný hash (self-hash so sha[]=0) — len referencia.
+void ota_print_fw_id(char* reply) {
+    uint32_t base      = fw_flash_base();
+    uint32_t link_size = fw_image_size();
+    uint32_t timg      = fw_id_trailer.image_size;
+    uint32_t build     = fw_id_trailer.build_number;
+
+    Serial.println(F("[OTA] === FW identity ==="));
+    Serial.print(F("[OTA] build #            = ")); Serial.println((unsigned long)build);
+    Serial.print(F("[OTA] app base           = 0x")); Serial.println(base, HEX);
+    Serial.print(F("[OTA] image_size trailer = ")); Serial.println((unsigned long)timg);
+    Serial.print(F("[OTA] image_size linker  = ")); Serial.println((unsigned long)link_size);
+    if (timg != link_size)
+        Serial.println(F("[OTA] !! POZOR: trailer != linker veľkosť — zlá board konfig?"));
+    Serial.print(F("[OTA] trailer sha256     = ")); print_sha_full(fw_id_trailer.sha256);
+
+    uint8_t h[32]; memset(h, 0, sizeof(h));
+    if (timg && timg <= (APP_FLASH_END - base)) {
+        SHA256 sha;
+        sha.update((const void*)base, timg);
+        sha.finalize(h, sizeof(h));
+        Serial.print(F("[OTA] running sha256     = ")); print_sha_full(h);
+        Serial.println(F("[OTA] ^ porovnaj s old_sha256 v .otapkg.json"));
+    } else {
+        Serial.println(F("[OTA] running sha256: image_size neplatná"));
+    }
+    if (reply) {
+        sprintf(reply, "id b#%lu sz=%lu sha=%02X%02X%02X%02X",
+                (unsigned long)build, (unsigned long)timg, h[0], h[1], h[2], h[3]);
+    }
+}
+
 // Cross-check: zodpovedá deklarovaná old_fw_size reálne bežiacemu FW?
 // Lacná brána pred drahým SHA256 — ak veľkosť nesedí, base FW je iný.
 static bool ota_fw_size_matches(uint32_t fw_size) {
@@ -90,13 +145,13 @@ static bool ota_base_fw_validated(uint32_t fw_size, const uint8_t* prefix) {
         return memcmp(ota.base_fw_sha256, prefix, 4) == 0;
     }
     // Veľkosť sa zmenila alebo cache prázdna → re-počítaj
-    if (fw_size > APP_FLASH_MAX) {
+    if (fw_size > (APP_FLASH_END - fw_flash_base())) {
         Serial.print(F("[OTA] base FW: fw_size ")); Serial.print(fw_size);
-        Serial.println(F(" > APP_FLASH_MAX"));
+        Serial.println(F(" > app okno"));
         return false;
     }
     SHA256 sha;
-    sha.update((const void*)APP_FLASH_START, fw_size);
+    sha.update((const void*)fw_flash_base(), fw_size);
     uint8_t h[32];
     sha.finalize(h, sizeof(h));
     ota.base_fw_size = fw_size;
@@ -111,9 +166,9 @@ static bool ota_base_fw_validated(uint32_t fw_size, const uint8_t* prefix) {
 // Overenie base FW cez kompletný SHA256 (pre HEADER s full old_sha256)
 static bool ota_base_fw_check_full(uint32_t fw_size, const uint8_t* sha256_full) {
     if (!ota_fw_size_matches(fw_size)) return false;
-    if (fw_size > APP_FLASH_MAX) return false;
+    if (fw_size > (APP_FLASH_END - fw_flash_base())) return false;
     SHA256 sha;
-    sha.update((const void*)APP_FLASH_START, fw_size);
+    sha.update((const void*)fw_flash_base(), fw_size);
     uint8_t h[32];
     sha.finalize(h, sizeof(h));
     ota.base_fw_size = fw_size;

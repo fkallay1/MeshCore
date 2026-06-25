@@ -24,6 +24,7 @@ Archív .bin je lokálny (gitignored) — slúži ako "pamäť posledných build
 import argparse
 import json
 import struct
+import subprocess
 import sys
 from pathlib import Path
 
@@ -38,6 +39,8 @@ OFF_BUILD = 12  # uint32 LE za magicom (zhodné s gen_fw_trailer.py)
 DEFAULT_HEX = HERE.parent / ".pio" / "build" / "ProMicro_repeater_ota" / "firmware.hex"
 BUILDS_DIR = HERE / "builds"
 FOTAPKG_DIR = HERE / "fotapkg_json"  # default cieľ pre vygenerované .otapkg.json
+UF2CONV = HERE.parent / "bin" / "uf2conv" / "uf2conv.py"
+UF2_FAMILY = "0xADA52840"  # nRF52840 (rovnaké ako create-uf2.py / build.sh)
 
 
 # ---- Intel HEX → flat app image (rovnaká logika ako gen_fw_trailer.read_ihex) ----
@@ -85,6 +88,26 @@ def bin_build_num(path: Path) -> int:
     return build_number(Path(path).read_bytes())
 
 
+def archive_uf2_from_hex(hex_path: Path, device: str, n: int) -> Path | None:
+    """Vyrob aj .uf2 (z toho istého HEX) vedľa .bin — pohodlné flashovanie buildu.
+    Nefatálne: ak uf2conv chýba/zlyhá, len varuj a pokračuj."""
+    if not UF2CONV.exists():
+        print(f"[otapkg] uf2conv nenájdený ({UF2CONV}) — .uf2 archív preskočený")
+        return None
+    out = BUILDS_DIR / f"{device}.fw_{n}.uf2"
+    try:
+        r = subprocess.run([sys.executable, str(UF2CONV), str(hex_path),
+                            "-c", "-o", str(out), "-f", UF2_FAMILY],
+                           capture_output=True, encoding="utf-8", errors="replace")
+        if r.returncode == 0 and out.exists():
+            print(f"[otapkg] archív: {out.name}  ({out.stat().st_size} B)")
+            return out
+        print(f"[otapkg] .uf2 archív zlyhal (rc={r.returncode}) — nefatálne")
+    except Exception as e:  # noqa: BLE001
+        print(f"[otapkg] .uf2 archív chyba (nefatálne): {e}")
+    return None
+
+
 def archive_from_hex(hex_path: Path, device: str) -> tuple[int, Path]:
     flat = read_ihex(hex_path)
     n = build_number(flat)
@@ -92,6 +115,7 @@ def archive_from_hex(hex_path: Path, device: str) -> tuple[int, Path]:
     out = BUILDS_DIR / f"{device}.fw_{n}.bin"
     out.write_bytes(flat)
     print(f"[otapkg] archív: {out.name}  ({len(flat)} B, build #{n})")
+    archive_uf2_from_hex(hex_path, device, n)
     return n, out
 
 

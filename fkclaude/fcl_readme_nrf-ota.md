@@ -104,7 +104,7 @@ pio run -e ProMicro_repeater_ota
 - Gated `-D WITH_LORA_OTA=1`. Bez flagu sú nrfota súbory inertné → stock buildy nedotknuté.
 - OTA env používa `boards/nrf52840_s140_v6_extrafs.ld` (app končí 0xD4000) + **CZ preset**
   (`LORA_FREQ=869.525`, `SF=7`) aby sa nerušila SK sieť a zhodovalo sa s FK_lora bridge.
-- Pre XIAO/s140 v7: pridaj `-D OTA_SOFTDEVICE_V7` a regeneruj flasher `BOARD_FLASHER=xiao`.
+- Pre XIAO/s140 v7: pridaj `-D FOTA_SOFTDEVICE_V7` a regeneruj flasher `BOARD_FLASHER=xiao`.
 
 ---
 

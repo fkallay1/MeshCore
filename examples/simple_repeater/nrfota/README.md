@@ -41,7 +41,7 @@ PC (ota_sender.py)                     Repeater (nRF52840)
 0xF4000+          : bootloader
 ```
 Strop patchu ~40 kB (recv.log + patch.bin súčasne). Pre s140 v7 (XIAO) je
-`APP_FLASH_START=0x27000` — nastav `-D OTA_SOFTDEVICE_V7` a `BOARD_FLASHER=xiao`.
+`APP_FLASH_START=0x27000` — nastav `-D FOTA_SOFTDEVICE_V7` a `BOARD_FLASHER=xiao`.
 
 ## Build
 

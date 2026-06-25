@@ -137,7 +137,7 @@ Dôvod: FS zápis priamo v recv callbacku oneskoroval re-arm rádia.
   InternalFS na 0xED000.
 - Strop patchu ~40 kB (recv.log + patch.bin musia byť súčasne v 92 kB FS).
 - Env `ProMicro_repeater_ota` používa `boards/nrf52840_s140_v6_extrafs.ld`.
-- Pre XIAO / s140 v7: `-D OTA_SOFTDEVICE_V7` + regenerovať flasher `BOARD_FLASHER=xiao`.
+- Pre XIAO / s140 v7: `-D FOTA_SOFTDEVICE_V7` + regenerovať flasher `BOARD_FLASHER=xiao`.
 
 ---
 
@@ -304,7 +304,7 @@ pravdepodobne aj príčina §8.4 (agc sleep+calibrate = rádio v zlom stave → 
   [readme_verified_pooling.md](readme_verified_pooling.md) (spevnenie VERIFIED-pollingu).
 - **agc_reset držať na 0** (viď §8.4).
 - Cieľovo: globálny build flag pre všetky nRF52840 boardy (teraz dedikovaný env).
-- XIAO ako OTA cieľ: regenerovať `flasher_code.h` s `BOARD_FLASHER=xiao` + `-D OTA_SOFTDEVICE_V7`.
+- XIAO ako OTA cieľ: regenerovať `flasher_code.h` s `BOARD_FLASHER=xiao` + `-D FOTA_SOFTDEVICE_V7`.
 - `build_number.txt` / `gen_build_info.py` sú **dočasné testovacie lešenie** (build# vo FW na
   detekciu verzie po flashi a na zaručenie OLD≠NEW).
 

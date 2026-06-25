@@ -36,6 +36,16 @@ void ota_print_pkt(const uint8_t* plain, int plen, float rssi, float snr);
 // Stav session (len na čítanie).
 const OtaState* ota_get_state();
 
+// Reálny app base a veľkosť bežiaceho FW z linker symbolov (v6=0x26000,
+// v7=0x27000) — zdroj pravdy pre device-side SHA/verify namiesto makra.
+uint32_t ota_running_fw_base(void);
+uint32_t ota_running_fw_size(void);
+
+// Výpis FW identity (build#, image_size, trailer sha256) + dopočítaný plný
+// SHA256 bežiaceho FW — na porovnanie s old_sha256 v .otapkg.json. reply =
+// krátka odpoveď pre LoRa; detaily idú na Serial.
+void ota_print_fw_id(char* reply);
+
 // Vymaže všetky OTA súbory z CustomLFS + resetuje RAM stav.
 void ota_clear_session();
 

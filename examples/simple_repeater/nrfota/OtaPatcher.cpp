@@ -20,9 +20,19 @@
 // Streaming DEFLATE decompressor pre ZLIB dry-run
 #include "puff_stream.h"
 
-// flasher_code.h — generuj: python nrfota/tools/build_flasher.py
-#if __has_include("flasher_code.h")
-  #include "flasher_code.h"
+// Per-board flasher blob (standalone kód má app base zapečený compile-time).
+// Generuj: BOARD_FLASHER={promicro|xiao} python nrfota/tools/build_flasher.py
+//   v6 (app@0x26000) → flasher_code_v6.h   |   v7 (app@0x27000) → flasher_code_v7.h
+#if defined(FOTA_SOFTDEVICE_V7)
+  #define OTA_FLASHER_HDR "flasher_code_v7.h"
+#else
+  #define OTA_FLASHER_HDR "flasher_code_v6.h"
+#endif
+#if __has_include(OTA_FLASHER_HDR)
+  #include OTA_FLASHER_HDR
+  #define OTA_HAS_FLASHER 1
+#elif __has_include("flasher_code.h")
+  #include "flasher_code.h"   // spätná kompatibilita (starý jednotný blob = v6)
   #define OTA_HAS_FLASHER 1
 #else
   #define OTA_HAS_FLASHER 0
@@ -31,6 +41,8 @@
 extern const OtaState* ota_get_state();
 // Patch do RAM: default zostaví z recv.log, -D USE_PATCHBIN_FILE číta patch.bin
 extern uint8_t* ota_acquire_patch_ram(uint32_t* out_size);
+// App base z linker symbolu (v6=0x26000, v7=0x27000) — viac robustné než makro.
+extern uint32_t ota_running_fw_base(void);
 
 static void print_sha16(const uint8_t* h) {
     for (int i = 0; i < 16; i++) { if (h[i] < 0x10) Serial.print('0'); Serial.print(h[i], HEX); }
@@ -46,12 +58,12 @@ static bool ota_verify_old_fw() {
         Serial.println(F("[OLD] old_sha256 neznámy — kontrola base preskočená"));
         return true;
     }
-    if (st->old_fw_size > APP_FLASH_MAX) {
+    if (st->old_fw_size > (APP_FLASH_END - ota_running_fw_base())) {
         Serial.print(F("[OLD] CHYBA: old_fw_size ")); Serial.print(st->old_fw_size);
-        Serial.println(F(" > APP_FLASH_MAX")); return false;
+        Serial.println(F(" > app okno")); return false;
     }
     SHA256 sha; sha.reset();
-    sha.update((const void*)APP_FLASH_START, st->old_fw_size);
+    sha.update((const void*)ota_running_fw_base(), st->old_fw_size);
     uint8_t h[32]; sha.finalize(h, sizeof(h));
     Serial.print(F("[OLD] base app flash SHA256=")); print_sha16(h); Serial.println(F("..."));
     Serial.print(F("[OLD] očakávaný old_sha256 =")); print_sha16(st->old_sha256); Serial.println(F("..."));
@@ -134,8 +146,9 @@ typedef struct {
 static hpi_BOOL sha_read_old(hpatchi_listener_t* l,
                              hpi_pos_t pos, hpi_byte* out, hpi_size_t size) {
     (void)l;
-    if ((uint32_t)pos + (uint32_t)size > APP_FLASH_MAX) return hpi_FALSE;
-    memcpy(out, (const void*)(APP_FLASH_START + (uint32_t)pos), size);
+    uint32_t base = ota_running_fw_base();
+    if ((uint32_t)pos + (uint32_t)size > (APP_FLASH_END - base)) return hpi_FALSE;
+    memcpy(out, (const void*)(base + (uint32_t)pos), size);
     return hpi_TRUE;
 }
 static hpi_BOOL sha_write_new(hpatchi_listener_t* l,
@@ -527,8 +540,8 @@ void ota_print_flasher_debug() {
 
 // ── DEBUG: dekomprimuj patch.bin cez puff_stream, vypíš FNV celého raw ──────
 void ota_debug_decompress() {
-    Serial.print(F("[DBG] app flash @0x")); Serial.print(APP_FLASH_START, HEX); Serial.print(F("[0:16]= "));
-    const uint8_t* app = (const uint8_t*)APP_FLASH_START;
+    Serial.print(F("[DBG] app flash @0x")); Serial.print(ota_running_fw_base(), HEX); Serial.print(F("[0:16]= "));
+    const uint8_t* app = (const uint8_t*)ota_running_fw_base();
     for (int i = 0; i < 16; i++) { if (app[i] < 0x10) Serial.print('0'); Serial.print(app[i], HEX); Serial.print(' '); }
     Serial.println();
 

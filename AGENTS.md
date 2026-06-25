@@ -54,7 +54,7 @@ Disabled by default (`-w -DNDEBUG`). Uncomment `; -D MESH_DEBUG=1` or `; -D MESH
 
 ### NRF52 platform specifics
 - Custom Adafruit nRF52 Arduino fork used (see `platformio.ini` nrf52_base for URL).
-- Softdevice: s140 v6 (default) or v7 (XIAO boards, needs `-D OTA_SOFTDEVICE_V7`).
+- Softdevice: s140 v6 (default) or v7 (XIAO boards, needs `-D FOTA_SOFTDEVICE_V7`).
 - Linker scripts in `boards/`: `nrf52840_s140_v6.ld`, `nrf52840_s140_v6_extrafs.ld` (extra FS, app ends at 0xD4000).
 - OTA repeater variants use `_extrafs.ld` + `board_upload.maximum_size = 712704`.
 
