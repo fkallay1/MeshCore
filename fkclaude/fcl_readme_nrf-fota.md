@@ -19,14 +19,14 @@ z projektu **FK_lora-sniffer**. Toto je **iné** ako vstavané MeshCore „FOTA"
 Detailný popis FOTA modulu samotného: [examples/simple_repeater/nrffota/README.md](examples/simple_repeater/nrffota/README.md).
 
 **Súvisiace dokumenty:**
-- [readme_tech_nrf-ota.md](readme_tech_nrf-ota.md) — detailný technický popis (architektúra,
+- [fcl_readme_tech_nrf-fota.md](fcl_readme_tech_nrf-fota.md) — detailný technický popis (architektúra,
   flasher, krypto, **vyriešené problémy** vrátane AGC-vs-flash interakcie) pre údržbu/budúcnosť.
 - [conv_claude_20260615.md](conv_claude_20260615.md) — záznam debugovacej cesty.
-- [readme_verified_pooling.md](readme_verified_pooling.md) — spevnenie VERIFIED-pollingu v teste.
-- [readme_scope_multihop.md](readme_scope_multihop.md) — scope/route voľby odosielateľa
+- [fcl_readme_verified_pooling.md](fcl_readme_verified_pooling.md) — spevnenie VERIFIED-pollingu v teste.
+- [fcl_readme_scope_multihop.md](fcl_readme_scope_multihop.md) — scope/route voľby odosielateľa
   (`--scope` flood/zerohop/region/direct), multi-hop direct (pacing, distinct-hop pravidlo),
   bridge LBT + adaptívny resend. Overené VERIFIED až po 2-hop na živej SK sieti.
-- [e2e_runbook_nrf-ota.md](e2e_runbook_nrf-ota.md) — **runbook**: porty/zariadenia/úlohy + ako spustiť a overiť e2e.
+- [fcl_e2e_runbook_nrf-fota.md](fcl_e2e_runbook_nrf-fota.md) — **runbook**: porty/zariadenia/úlohy + ako spustiť a overiť e2e.
 
 ---
 

@@ -4,7 +4,7 @@ Popis úprav, ktoré spoľahlivo dotiahli end-to-end FOTA test (`test_nrf-fota/f
 na konzistentný **[PASS]**. Pred úpravami `run` občas zlyhal — buď nedosiahol VERIFIED (príjem),
 alebo zlyhal flash. Obe príčiny sú nižšie + ako sa riešia.
 
-> Kontext a celkový technický popis: [readme_tech_nrf-ota.md](readme_tech_nrf-ota.md).
+> Kontext a celkový technický popis: [fcl_readme_tech_nrf-fota.md](fcl_readme_tech_nrf-fota.md).
 
 ---
 
@@ -51,7 +51,7 @@ vždy prešiel** (#28→#29, #32→#33).
 `ota flash` (`fota_apply`) **hardfaultne na `malloc(patch_size)`** — t.j. heap je po dry-rune v
 stave, ktorý rozbije ďalšiu alokáciu (hardfault, nie čistý `malloc==NULL`, preto žiadna hláška;
 zariadenie sa resetne → boot OLD). Detail v
-[readme_tech_nrf-ota.md](readme_tech_nrf-ota.md) §8.2.
+[fcl_readme_tech_nrf-fota.md](fcl_readme_tech_nrf-fota.md) §8.2.
 
 **Riešenie v teste:** dry-run pred flashom je teraz **opt-in** (`--verify-first`, default **vyp**).
 `run` ide po VERIFIED rovno na `ota flash`. Bezpečnosť to neoslabuje — `ota flash` si **sám**
@@ -67,7 +67,7 @@ spustiť manuálne (`ota verify`) alebo v teste cez `--verify-first`.
 > s korektným `free()` a deklaruje „dry-run pred flashom bez hardfaultu". Standalone `ota verify` je
 > overený OK (opakovane, bit-presná rekonštrukcia). Sekvencia verify→flash v jednom boote ale NEBOLA
 > priamo retestovaná (medzi nimi sa rebootovalo) → `--verify-first` ostáva default **vyp** ako poistka.
-> Pred zapnutím over verify→flash same-boot na HW. Viď [readme_tech_nrf-ota.md](readme_tech_nrf-ota.md) §8.2.
+> Pred zapnutím over verify→flash same-boot na HW. Viď [fcl_readme_tech_nrf-fota.md](fcl_readme_tech_nrf-fota.md) §8.2.
 
 ---
 
@@ -103,7 +103,7 @@ aby `baseline` + `run` prešli **bez manuálnych flagov**:
    > teraz VAROVÁ. Skopíruj `test_key.der` z funkčného prostredia (musí matchovať pubkey
    > `c22f8ae0…5b51` zakompilovaný v `FotaReceiver_signkey.cpp`, `key_id=1`) do `test_nrf-fota/`.
 2. **`--packetorder` default `hend`** (chunky prvé, header nakoniec). SX1262 RX po čerstvom
-   boote chytí len ~4 rámce (stuck receiver, [readme_tech_nrf-ota.md](readme_tech_nrf-ota.md) §8.3);
+   boote chytí len ~4 rámce (stuck receiver, [fcl_readme_tech_nrf-fota.md](fcl_readme_tech_nrf-fota.md) §8.3);
    header/meta prežíva reboot → pri `hend` sa budget minie na chunky, nie na už-známy header.
 3. **reboot pred KAŽDÝM broadcast kolom** v `broadcast_until_verified` — čerstvé RX okno proti
    stuck-receiver (predtým loop medzi kolami nereboot → po 1. kole hluché → flaky). `recv_count`
@@ -111,6 +111,6 @@ aby `baseline` + `run` prešli **bez manuálnych flagov**:
    reboot dáva každému kolu novú šancu. Pri slabom RF (RSSI -26, ~3 rámce/okno) zvýš `--verify-wait`.
 
 > **Závislosť:** runner predpokladá fix flasher IRQ hangu (`__disable_irq` pred NVMC,
-> [readme_tech_nrf-ota.md](readme_tech_nrf-ota.md) §8.6, commit `d24c6792`) — inak `ota flash`
+> [fcl_readme_tech_nrf-fota.md](fcl_readme_tech_nrf-fota.md) §8.6, commit `d24c6792`) — inak `ota flash`
 > po VERIFIED zamrzne. Overené e2e: baseline #104 → run → VERIFIED 4/4 → `ota flash` →
 > **[PASS] #105**, bez manuálnych flagov.

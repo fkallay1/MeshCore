@@ -2,7 +2,7 @@
 
 Detailný technický popis FOTA-over-LoRa systému pre MeshCore repeater na nRF52840.
 Určené pre údržbu a budúci vývoj. Užívateľský/prehľadový popis je v
-[readme_nrf-ota.md](readme_nrf-ota.md).
+[fcl_readme_nrf-fota.md](fcl_readme_nrf-fota.md).
 
 > **TL;DR:** Aktualizácia firmvéru repeatera **malým delta-patchom cez LoRa** (nie celý FW,
 > nie BLE-DFU). Patch sa prijme cez šifrovaný GRP_DATA kanál, uloží do dedikovaného
@@ -58,7 +58,7 @@ Všetko nové je v `examples/simple_repeater/nrffota/` (podadresár), guardovan�
 | `nrffota/puff_stream.{c,h}` | standalone streaming DEFLATE dekompresor (bez libc/setjmp) |
 | `nrffota/hpatchlite/*` | lokálna kópia HPatchLite (inplaceB patcher) |
 | `nrffota/flasher/flasher.{c,ld}` | standalone in-place flasher, ORIGIN 0xEB000 |
-| `nrffota/flasher_code.h` | vygenerovaný blob flashera (4064 B) — `tools/build_flasher.py` |
+| `nrffota/flasher_code.h` | vygenerovaný blob flashera (4096 B, board-agnostický) — `tools/build_flasher.py` |
 | `nrffota/flash_layout.h` | numerické flash adresy (zdieľané FW aj flasher) |
 
 Integrácia do jadra repeatera (3 malé `#ifdef WITH_LORA_FOTA` zásahy):
@@ -301,7 +301,7 @@ pravdepodobne aj príčina §8.4 (agc sleep+calibrate = rádio v zlom stave → 
 - **Fire-and-forget príjem** niekedy potrebuje viac broadcast cyklov (strata paketov na začiatku).
   Automatický `fota_test_lora_repeater.py run` preto občas skončí pred VERIFIED a flash zlyhá na
   timingu (manuálny flash s hotovou VERIFIED session vždy prejde). → viď
-  [readme_verified_pooling.md](readme_verified_pooling.md) (spevnenie VERIFIED-pollingu).
+  [fcl_readme_verified_pooling.md](fcl_readme_verified_pooling.md) (spevnenie VERIFIED-pollingu).
 - **agc_reset držať na 0** (viď §8.4).
 - Cieľovo: globálny build flag pre všetky nRF52840 boardy (teraz dedikovaný env).
 - XIAO/SenseCap (v7) ako FOTA cieľ: nič špeciálne — jeden board-agnostický `flasher_code.h` (app base runtime z linker symbolu); HOTOVÉ 2026-06-25.
