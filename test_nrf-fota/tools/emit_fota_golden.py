@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Emit byte-exact OTA golden vectors for the Flutter Dart tests.
 Uses FIXED synthetic inputs (no hdiffi needed). Run from MeshCore repo root:
-    <penv>/python.exe test_nrf-ota/tools/emit_ota_golden.py <out_json>
+    <penv>/python.exe test_nrf-fota/tools/emit_ota_golden.py <out_json>
 """
 import json, struct, sys, hashlib
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # test_nrf-ota/
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # test_nrf-fota/
 import fota_sender as S
 from Crypto.PublicKey import ECC
 

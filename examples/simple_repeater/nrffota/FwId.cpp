@@ -2,7 +2,7 @@
 // FwId.cpp — definícia zapečeného FW identity traileru.
 //
 // image_size a sha256 sú placeholdery (0) — vyplní ich POST-build skript
-// test_nrf-ota/gen_fw_trailer.py vo firmware.hex podľa magicu. build_number
+// test_nrf-fota/gen_fw_trailer.py vo firmware.hex podľa magicu. build_number
 // je compile-time z build_info.h (generuje pre:gen_build_info.py).
 //
 // __attribute__((used)) zabráni odstráneniu pri --gc-sections; sekcia
@@ -10,7 +10,7 @@
 // =====================================================================
 #ifdef WITH_LORA_FOTA
 #include "FwId.h"
-#include "build_info.h"   // FW_BUILD_NUMBER (-I test_nrf-ota)
+#include "build_info.h"   // FW_BUILD_NUMBER (-I test_nrf-fota)
 
 __attribute__((used, section(".rodata.fwid")))
 const FwIdTrailer fw_id_trailer = {

@@ -6,7 +6,7 @@
 #include "nrffota/FotaPatcher.h"
 extern RADIO_CLASS radio;   // surový RadioLib SX1262 (z target.cpp) — pre AGC register read ('ota agc')
 #if __has_include("build_info.h")
-  #include "build_info.h"   // DOČASNÉ: test_nrf-ota/gen_build_info.py (pre-script)
+  #include "build_info.h"   // DOČASNÉ: test_nrf-fota/gen_build_info.py (pre-script)
 #endif
 #ifndef FW_BUILD_NUMBER
   #define FW_BUILD_NUMBER 0

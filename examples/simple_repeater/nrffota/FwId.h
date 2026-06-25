@@ -4,7 +4,7 @@
 //
 // Štruktúra leží v .rodata (flash) — BEZ zmeny ld scriptu. Nájde sa podľa
 // 8-bajtového magicu (FWID_MAGIC). Polia image_size a sha256 vyplní POST-build
-// skript test_nrf-ota/gen_fw_trailer.py priamo vo firmware.hex (pred tým, než
+// skript test_nrf-fota/gen_fw_trailer.py priamo vo firmware.hex (pred tým, než
 // z neho PackageDfu vyrobí .zip / uf2conv .uf2 — takže ich nesú všetky artefakty).
 //
 // KONVENCIA SHA256 (musí sedieť skript aj device-side overenie):
