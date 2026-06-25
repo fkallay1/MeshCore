@@ -1,9 +1,9 @@
 #include "MyMesh.h"
 #include <algorithm>
 
-#ifdef WITH_LORA_OTA
-#include "nrfota/OtaReceiver.h"
-#include "nrfota/OtaPatcher.h"
+#ifdef WITH_LORA_FOTA
+#include "nrffota/FotaReceiver.h"
+#include "nrffota/FotaPatcher.h"
 extern RADIO_CLASS radio;   // surový RadioLib SX1262 (z target.cpp) — pre AGC register read ('ota agc')
 #if __has_include("build_info.h")
   #include "build_info.h"   // DOČASNÉ: test_nrf-ota/gen_build_info.py (pre-script)
@@ -476,7 +476,7 @@ const char *MyMesh::getLogDateTime() {
 }
 
 void MyMesh::logRxRaw(float snr, float rssi, const uint8_t raw[], int len) {
-#ifdef WITH_LORA_OTA
+#ifdef WITH_LORA_FOTA
   // RAW indikátor: každý surový (CRC-OK) rámec, ktorý rádio prijme, EŠTE PRED
   // dekódovaním typu/route a dešifrovaním. Toto je odpoveď na otázku "prichádzajú
   // na repeater hocijaké pakety?" — ak toto rastie ale GRP_DATA/onGroupDataRecv
@@ -485,7 +485,7 @@ void MyMesh::logRxRaw(float snr, float rssi, const uint8_t raw[], int len) {
   _ota_raw_last_len  = (uint32_t)len;
   _ota_raw_last_rssi = rssi;
   _ota_raw_last_snr  = snr;
-  Serial.print(F("[OTA] RAW #")); Serial.print(_ota_raw_rx);
+  Serial.print(F("[FOTA] RAW #")); Serial.print(_ota_raw_rx);
   Serial.print(F(" len="));  Serial.print(len);
   Serial.print(F(" rssi=")); Serial.print((int)rssi);
   Serial.print(F(" snr="));  Serial.print(snr, 1);
@@ -862,9 +862,9 @@ void MyMesh::onControlDataRecv(mesh::Packet* packet) {
   }
 }
 
-#ifdef WITH_LORA_OTA
+#ifdef WITH_LORA_FOTA
 // Repeater "subscribne" jediný OTA kanál — keď sa channel_hash zhoduje,
-// MeshCore dešifruje GRP_DATA cez ota_channel.secret a zavolá onGroupDataRecv().
+// MeshCore dešifruje GRP_DATA cez fota_channel.secret a zavolá onGroupDataRecv().
 int MyMesh::searchChannelsByHash(const uint8_t* hash, mesh::GroupChannel channels[], int max_matches) {
   if (_ota_ready && max_matches > 0 && hash[0] == _ota_channel.hash[0]) {
     channels[0] = _ota_channel;
@@ -873,24 +873,24 @@ int MyMesh::searchChannelsByHash(const uint8_t* hash, mesh::GroupChannel channel
   return 0;
 }
 
-// Dešifrovaný GRP_DATA payload: [ts 4B LE][ota_type 1B][...]. OTA payload
-// začína za 4B timestampom (zhodné s ota_sender.py meshcore_grp_data_packet).
+// Dešifrovaný GRP_DATA payload: [ts 4B LE][fota_type 1B][...]. OTA payload
+// začína za 4B timestampom (zhodné s fota_sender.py meshcore_grp_data_packet).
 void MyMesh::onGroupDataRecv(mesh::Packet* packet, uint8_t type, const mesh::GroupChannel& channel,
                              uint8_t* data, size_t len) {
   if (type != PAYLOAD_TYPE_GRP_DATA) return;
   if (channel.hash[0] != _ota_channel.hash[0]) return;   // nie náš OTA kanál
-  // Zjednotený OTA formát: štandardný GRP_DATA plaintext = [data_type 2B][len 1B][ts 4B][ota_payload].
-  // Odlúpni [data_type][len]; ak data_type != OTA_MAGIC, nie je to OTA. Po odlúpnutí má
-  // buffer tvar [ts 4B][ota_payload] — zvyšok pipeline (loop +4) ostáva nezmenený.
+  // Zjednotený OTA formát: štandardný GRP_DATA plaintext = [data_type 2B][len 1B][ts 4B][fota_payload].
+  // Odlúpni [data_type][len]; ak data_type != FOTA_MAGIC, nie je to OTA. Po odlúpnutí má
+  // buffer tvar [ts 4B][fota_payload] — zvyšok pipeline (loop +4) ostáva nezmenený.
   if (len < 3 + 5) return;                               // [dt2][len1] + [ts4][type1]
   uint16_t dtype = (uint16_t)data[0] | ((uint16_t)data[1] << 8);
-  if (dtype != OTA_MAGIC) return;                        // nie náš OTA data_type
-  // data[2] = pravá dĺžka [ts4][ota_payload]. MACThenDecrypt vracia AES-padovanú
+  if (dtype != FOTA_MAGIC) return;                        // nie náš OTA data_type
+  // data[2] = pravá dĺžka [ts4][fota_payload]. MACThenDecrypt vracia AES-padovanú
   // (16B) dĺžku, preto NEporovnávaj s len; použi data[2] na strhnutie paddingu.
   uint8_t inner = data[2];
   if (inner < 5 || (size_t)(3 + inner) > len) return;    // sanity vs padded buffer
-  data += 3; len = inner;                                // → presné [ts4][ota_payload]
-#ifdef OTA_GDR_DIAG
+  data += 3; len = inner;                                // → presné [ts4][fota_payload]
+#ifdef FOTA_GDR_DIAG
   Serial.print(F("[DIAG] GDR otatype=0x")); Serial.print(data[4], HEX);
   Serial.print(F(" len=")); Serial.print((int)len);
   Serial.print(F(" pending=")); Serial.println(_ota_pending_len);
@@ -907,7 +907,7 @@ void MyMesh::onGroupDataRecv(mesh::Packet* packet, uint8_t type, const mesh::Gro
     _ota_pending_rssi = (float)radio_driver.getLastRSSI();
     _ota_pending_snr  = packet->getSNR();
   } else {
-    Serial.println(F("[OTA] WARN pending busy, paket zahodený"));
+    Serial.println(F("[FOTA] WARN pending busy, paket zahodený"));
   }
 }
 #endif
@@ -1009,8 +1009,8 @@ MyMesh::MyMesh(mesh::MainBoard &board, mesh::Radio &radio, mesh::MillisecondCloc
 }
 
 void MyMesh::begin(FILESYSTEM *fs) {
-#ifdef WITH_LORA_OTA
-  ota_check_flasher_debug();   // prečítaj GPREGRET2/RESETREAS čo najskôr po boote
+#ifdef WITH_LORA_FOTA
+  fota_check_flasher_debug();   // prečítaj GPREGRET2/RESETREAS čo najskôr po boote
   _ota_ready = false;
   _ota_pending_len = 0;
   _ota_raw_rx = 0;
@@ -1068,12 +1068,12 @@ void MyMesh::begin(FILESYSTEM *fs) {
   applyGpsPrefs();
 #endif
 
-#ifdef WITH_LORA_OTA
-  ota_init();                      // mount CustomLFS @ 0xD4000 + resume
-  ota_build_channel(_ota_channel); // OTA GRP_DATA kanál z PSK
+#ifdef WITH_LORA_FOTA
+  fota_init();                      // mount CustomLFS @ 0xD4000 + resume
+  fota_build_channel(_ota_channel); // OTA GRP_DATA kanál z PSK
   _ota_ready = true;
-  ota_print_flasher_debug();       // ak sa práve vrátil z flashera
-  Serial.print(F("[OTA] build #")); Serial.print(FW_BUILD_NUMBER);
+  fota_print_flasher_debug();       // ak sa práve vrátil z flashera
+  Serial.print(F("[FOTA] build #")); Serial.print(FW_BUILD_NUMBER);
   Serial.print(F("  freq=")); Serial.print(_prefs.freq, 3);
   Serial.print(F(" sf=")); Serial.print(_prefs.sf);
   Serial.print(F(" bw=")); Serial.println(_prefs.bw, 1);
@@ -1361,9 +1361,13 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
       sendNodeDiscoverReq();
       strcpy(reply, "OK - Discover sent");
     }
-#ifdef WITH_LORA_OTA
-  } else if (memcmp(command, "ota", 3) == 0 && (command[3] == 0 || command[3] == ' ')) {
-    if (strcmp(command + 3, " agc") == 0) {
+#ifdef WITH_LORA_FOTA
+  // FOTA CLI: prijíma 'fota ...' aj legacy 'ota ...'. MIGRÁCIA: keď Flutter/meshcore_py
+  // prejdú na 'fota', zmaž 'ota' vetvu — všetky miesta označené FOTA-CLI-ALIAS.
+  } else if ((memcmp(command, "fota", 4) == 0 && (command[4] == 0 || command[4] == ' '))
+          || (memcmp(command, "ota", 3) == 0 && (command[3] == 0 || command[3] == ' '))) {  // FOTA-CLI-ALIAS
+    const char* fargs = command + ((command[0] == 'f') ? 4 : 3);   // FOTA-CLI-ALIAS: 'ota'→+3, 'fota'→+4
+    if (strcmp(fargs, " agc") == 0) {
       // AGC/gain diagnostika rádia (READ-ONLY — nemení konfiguráciu rádia, žiadny
       // dopad na kompatibilitu s inými MeshCore zariadeniami). Pri point-blank
       // (RSSI ~-23) overuje či sa receiver nedesenzitizoval / aký má gain mód.
@@ -1371,7 +1375,7 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
       radio.readRegister(0x08AC, &rxgain, 1);   // RADIOLIB_SX126X_REG_RX_GAIN
       float inst_rssi = radio.getRSSI(false);   // okamžité RSSI kanála (GetRssiInst)
       const char* gm = (rxgain == 0x96) ? "boosted" : (rxgain == 0x94 ? "power-save" : "?");
-      Serial.print(F("[OTA] AGC rxgain_reg=0x")); Serial.print(rxgain, HEX);
+      Serial.print(F("[FOTA] AGC rxgain_reg=0x")); Serial.print(rxgain, HEX);
       Serial.print(F(" ")); Serial.print(gm);
       Serial.print(F("  boost_pref=")); Serial.print(radio_driver.getRxBoostedGainMode() ? "on" : "off");
       Serial.print(F("  inst_rssi=")); Serial.print(inst_rssi, 1);
@@ -1388,7 +1392,7 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
       // 'ota flash' zlyhá (flasher sa zastaví po "Komprimovany format", repeater
       // nabehne na OLD). Pri agc_reset=0 funguje príjem aj flash spoľahlivo.
       // (Overené 2026-06-15: agc=0 #28→#29 PASS; agc=8 #28→#29 aj #30→#31 FAIL.)
-      ota_handle_command(command + 3, reply);   // LoRa-OTA: status|verify|flash|clear|...
+      fota_handle_command(fargs, reply);   // LoRa-FOTA: status|verify|flash|clear|id|...
     }
 #endif
   } else{
@@ -1440,13 +1444,13 @@ void MyMesh::loop() {
   uptime_millis += now - last_millis;
   last_millis = now;
 
-#ifdef WITH_LORA_OTA
+#ifdef WITH_LORA_FOTA
   // Odložené OTA spracovanie — mesh::Mesh::loop() vyššie už re-armol rádio do RX,
   // takže pomalé CustomLFS I/O tu už nezablokuje príjem ďalšieho paketu.
   if (_ota_pending_len > 0) {
     int n = _ota_pending_len;
-    ota_print_pkt(_ota_pending + 4, n - 4, _ota_pending_rssi, _ota_pending_snr);
-    ota_process(_ota_pending + 4, n - 4);
+    fota_print_pkt(_ota_pending + 4, n - 4, _ota_pending_rssi, _ota_pending_snr);
+    fota_process(_ota_pending + 4, n - 4);
     _ota_pending_len = 0;   // uvoľni buffer až po spracovaní
   }
 
@@ -1454,7 +1458,7 @@ void MyMesh::loop() {
   static unsigned long s_next_build_print = 0;
   if (s_next_build_print == 0 || millisHasNowPassed(s_next_build_print)) {
     s_next_build_print = futureMillis(5000);
-    Serial.print(F("[OTA] AALIVE build #")); Serial.print(FW_BUILD_NUMBER);
+    Serial.print(F("[FOTA] AALIVE build #")); Serial.print(FW_BUILD_NUMBER);
     Serial.print(F("  freq=")); Serial.print(_prefs.freq, 3);
     Serial.print(F(" sf="));    Serial.print(_prefs.sf);
     Serial.print(F(" rawrx=")); Serial.print(_ota_raw_rx);       // surové rámce (pred dekódom)

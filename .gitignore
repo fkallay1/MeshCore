@@ -19,17 +19,17 @@ venv/
 platformio.local.ini
 
 # OTA test scaffolding (auto-generated)
-test_nrf-ota/build_info.h
-test_nrf-ota/lora_old.bin
-test_nrf-ota/lora_new.bin
-test_nrf-ota/ota_patch.bin
+test_nrf-fota/build_info.h
+test_nrf-fota/lora_old.bin
+test_nrf-fota/lora_new.bin
+test_nrf-fota/ota_patch.bin
 /ota_patch.bin
 # OTA pkg generátor: archív buildov + smerové patch tempy + generované balíky (artefakty)
-test_nrf-ota/builds/
-test_nrf-ota/ota_patch_fwd.bin
-test_nrf-ota/ota_patch_rev.bin
-test_nrf-ota/*.otapkg.json
-test_nrf-ota/fotapkg_json/
+test_nrf-fota/builds/
+test_nrf-fota/ota_patch_fwd.bin
+test_nrf-fota/ota_patch_rev.bin
+test_nrf-fota/*.otapkg.json
+test_nrf-fota/fotapkg_json/
 /ota_patch_rev.bin
 __pycache__/
 
@@ -37,5 +37,5 @@ __pycache__/
 .claude/
 
 # OTA test private key + pycache (never commit)
-test_nrf-ota/test_key.der
-test_nrf-ota/__pycache__/
+test_nrf-fota/test_key.der
+test_nrf-fota/__pycache__/

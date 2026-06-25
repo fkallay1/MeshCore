@@ -35,8 +35,8 @@
 #include <helpers/RegionMap.h>
 #include "RateLimiter.h"
 
-#ifdef WITH_LORA_OTA
-#include "nrfota/OtaMesh.h"
+#ifdef WITH_LORA_FOTA
+#include "nrffota/FotaMesh.h"
 #endif
 
 #ifdef WITH_BRIDGE
@@ -177,7 +177,7 @@ protected:
   bool onPeerPathRecv(mesh::Packet* packet, int sender_idx, const uint8_t* secret, uint8_t* path, uint8_t path_len, uint8_t extra_type, uint8_t* extra, uint8_t extra_len) override;
   void onControlDataRecv(mesh::Packet* packet) override;
 
-#ifdef WITH_LORA_OTA
+#ifdef WITH_LORA_FOTA
   mesh::GroupChannel _ota_channel;
   bool _ota_ready;
   // Deferred OTA spracovanie: onGroupDataRecv (volané z recv cesty) len ODLOŽÍ

@@ -64,21 +64,23 @@ Disabled by default (`-w -DNDEBUG`). Uncomment `; -D MESH_DEBUG=1` or `; -D MESH
 - SX1262: `USE_SX1262` + `CustomSX1262` radio + `CustomSX1262Wrapper`.
 - Preamble: SF≤8 → 32, SF>8 → 16 (set in `RadioLibWrappers`).
 
-## LoRa-OTA (nRF52840 only)
-Located in `examples/simple_repeater/nrfota/`, gated by `-D WITH_LORA_OTA=1`.
+## LoRa-FOTA (nRF52840 only)
+Located in `examples/simple_repeater/nrffota/`, gated by `-D WITH_LORA_FOTA=1`.
+(Formerly "OTA"; renamed to FOTA — wire protocol unchanged, see `fkclaude/docs/fota-rename-handoff.md`.)
 
 **Build order**:
-1. `python examples/simple_repeater/nrfota/tools/build_flasher.py` — generates `nrfota/flasher_code.h` (only needed once or after `flasher.c` changes).
-2. `pio run -e ProMicro_repeater_ota` — builds with OTA support.
+1. `BOARD_FLASHER={promicro|xiao} python examples/simple_repeater/nrffota/tools/build_flasher.py` — generates per-SoftDevice `nrffota/flasher_code_v6.h` (s140 v6, app@0x26000) / `flasher_code_v7.h` (s140 v7, app@0x27000). Only needed once or after `flasher.c` changes.
+2. `pio run -e ProMicro_repeater_fota` (v6) or `pio run -e SenseCap_Solar_repeater_fota` (v7) — builds with FOTA support. v7 boards MUST set `-D FOTA_SOFTDEVICE_V7=1` (app base 0x27000; OtaPatcher selects the v7 flasher blob).
 
-CLI commands: `ota status | verify | flash | clear | decompress | nack | dbg | agc`
+CLI commands: `fota status | verify | flash | clear | decompress | nack | dbg | id | agc` (legacy `ota …` alias still accepted; marked `FOTA-CLI-ALIAS`).
 
 **Critical constraints**:
-- `agc_reset_interval` must be 0 (MeshCore default) — **NEVER use non-zero value with OTA flash**. AGC resets during OTA session cause `ota flash` to fail (flasher stops at "Komprimovany format").
-- `ota verify` (dry-run) before `ota flash` causes heap hardfault on some boards — skip dry-run for reliability, or use `--verify-first` opt-in.
-- Flash layout: app 0x26000–0xD4000, OTA FS 0xD4000–0xEB000, flasher 0xEB000–0xEC000, reserved 0xEC000–0xED000, MeshCore InternalFS 0xED000–0xF4000, bootloader 0xF4000+.
+- `agc_reset_interval` must be 0 (MeshCore default) — **NEVER use non-zero value with FOTA flash**. AGC resets during a session cause `fota flash` to fail (flasher stops at "Komprimovany format").
+- `fota verify` (dry-run) before `fota flash` causes heap hardfault on some boards — skip dry-run for reliability, or use `--verify-first` opt-in.
+- Flash layout (v6): app 0x26000–0xD4000, FOTA FS 0xD4000–0xEB000, flasher 0xEB000–0xEC000, reserved 0xEC000–0xED000, MeshCore InternalFS 0xED000–0xF4000, bootloader 0xF4000+. On v7 the app base is 0x27000 (FS window above 0xD4000 is unchanged).
+- Device-side base FW SHA is read from the linker symbol `__flash_arduino_start` (`fota_running_fw_base()`), not the `APP_FLASH_START` macro.
 
-**End-to-end tests** in `test_nrf-ota/` require `hdiffi.exe`, `pyserial`, `pycryptodome` in PlatformIO's virtualenv.
+**End-to-end tests** in `test_nrf-fota/` require `hdiffi.exe`, `pyserial`, `pycryptodome` in PlatformIO's virtualenv.
 
 ## Testing
 - Root `platformio.ini` has `[env:native]` section with googletest. Currently only `src/Utils.cpp` is included:
@@ -86,7 +88,7 @@ CLI commands: `ota status | verify | flash | clear | decompress | nack | dbg | a
   pio test -e native
   ```
 - No automated integration/hardware tests in CI (embedded platform).
-- LoRa-OTA end-to-end tests are manual CLI in `test_nrf-ota/`.
+- LoRa-FOTA end-to-end tests are manual CLI in `test_nrf-fota/`.
 
 ## Docs
 - mkdocs config at root `mkdocs.yml` → docs served at `docs/` (GitHub Pages via `meshcore-dev.github.io/meshcore/`).
