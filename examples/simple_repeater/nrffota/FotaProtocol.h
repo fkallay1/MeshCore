@@ -23,7 +23,7 @@
 #define FOTA_PKT_NACK     0x21   // zariadenie → PC: chýbajúce chunky
 
 // Zjednotený OTA formát v0 (bridge aj companion) — viď
-// docs/superpowers/specs/2026-06-23-ota-companion-mcpy-design.md
+// docs/superpowers/specs/2026-06-23-fota-companion-mcpy-design.md
 #define FOTA_MAGIC         0x07A0 // GRP_DATA data_type pre OTA (gating diskriminátor)
 #define FOTA_PROT_INF_V0   0x00   // verzia OTA protokolu/štruktúr
 
