@@ -1460,6 +1460,15 @@ void MyMesh::loop() {
     Serial.print(F(" rawrx=")); Serial.print(_ota_raw_rx);       // surové rámce (pred dekódom)
     Serial.print(F(" rxpkts=")); Serial.print(radio_driver.getPacketsRecv());
     Serial.print(F(" rxerr=")); Serial.print(radio_driver.getPacketsRecvErrors());
+#ifdef FK_DEBUG
+    // [FK_DEBUG] Odhad zahodených/prepísaných paketov v rádiu (RxDone IRQ bez prečítania):
+    //   miss = isr_events - TX_sent - rx_ok - rx_crc_err
+    Serial.print(F(" isr=")); Serial.print(radio_driver.getIsrEvents());
+    Serial.print(F(" miss=")); Serial.print((long)radio_driver.getIsrEvents()
+        - (long)radio_driver.getPacketsSent()
+        - (long)radio_driver.getPacketsRecv()
+        - (long)radio_driver.getPacketsRecvErrors());
+#endif
     Serial.print(F(" nf=")); Serial.println((int)_radio->getNoiseFloor());
   }
 #endif

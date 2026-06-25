@@ -56,6 +56,10 @@ public:
   uint32_t getPacketsRecv() const { return n_recv; }
   uint32_t getPacketsRecvErrors() const { return n_recv_errors; }
   uint32_t getPacketsSent() const { return n_sent; }
+#ifdef FK_DEBUG
+  // [FK_DEBUG] ISR udalosti (RxDone+TxDone). missed ≈ getIsrEvents()-n_sent-n_recv-n_recv_errors
+  uint32_t getIsrEvents() const;
+#endif
   void resetStats() { n_recv = n_sent = n_recv_errors = 0; }
 
   virtual float getLastRSSI() const override;

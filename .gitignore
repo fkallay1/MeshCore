@@ -24,6 +24,13 @@ test_nrf-ota/lora_old.bin
 test_nrf-ota/lora_new.bin
 test_nrf-ota/ota_patch.bin
 /ota_patch.bin
+# OTA pkg generátor: archív buildov + smerové patch tempy + generované balíky (artefakty)
+test_nrf-ota/builds/
+test_nrf-ota/ota_patch_fwd.bin
+test_nrf-ota/ota_patch_rev.bin
+test_nrf-ota/*.otapkg.json
+/ota_patch_rev.bin
+__pycache__/
 
 # Claude Code agent/memory dir
 .claude/

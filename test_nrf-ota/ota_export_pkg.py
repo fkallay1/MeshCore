@@ -8,6 +8,35 @@ import ota_sender as S
 from ota_sender import (make_patch, build_meta_payload, build_sig_payload,
                         load_ed25519_privkey, OTA_CHANNEL_NAME, OTA_CHUNK_DATA)
 
+def build_pkg(old, new, patch_path, *, channel_name=OTA_CHANNEL_NAME, channel_idx=1,
+              freq=869.618, bw=62.5, sf=8, cr=5, scope='zerohop', path='',
+              privkey=None, keyid=1, created="1970-01-01T00:00:00Z"):
+    """Zostaví .otapkg dict (old→new delta patch). privkey (cesta) → pridá 'signed' blok.
+    Reuse-uje ota_sender.make_patch / build_meta_payload / build_sig_payload."""
+    patch, patch_sha256, new_sha256, old_sha256, old_fw_size = \
+        make_patch(Path(old), Path(new), Path(patch_path))
+    pkg = {
+        "format": "mc-fotanrf-otapkg/1",
+        "created": created,
+        "channel": {"name": channel_name, "idx": channel_idx},
+        "radio": {"freq": freq, "bw": bw, "sf": sf, "cr": cr},
+        "scope": scope, "path": path,
+        "fw": {"old_sha256": old_sha256.hex(), "new_sha256": new_sha256.hex(),
+               "old_fw_size": old_fw_size, "patch_sha256": patch_sha256.hex(),
+               "patch_len": len(patch)},
+        "patch_b64": base64.b64encode(patch).decode(),
+    }
+    if privkey:
+        pk = load_ed25519_privkey(Path(privkey))
+        total = (len(patch) + OTA_CHUNK_DATA - 1) // OTA_CHUNK_DATA
+        meta = build_meta_payload(total, len(patch), patch_sha256, new_sha256, old_sha256)
+        sig = build_sig_payload(meta, pk, keyid)
+        pkg["signed"] = {"key_id": keyid,
+                         "meta_b64": base64.b64encode(meta).decode(),
+                         "sig_b64": base64.b64encode(sig).decode()}
+    return pkg
+
+
 def main():
     ap = argparse.ArgumentParser(description="Export .otapkg.json for the Flutter OTA app")
     ap.add_argument('--old', required=True); ap.add_argument('--new', required=True)
@@ -22,29 +51,12 @@ def main():
     ap.add_argument('--privkey'); ap.add_argument('--keyid', type=int, default=1)
     args = ap.parse_args()
 
-    patch, patch_sha256, new_sha256, old_sha256, old_fw_size = \
-        make_patch(Path(args.old), Path(args.new), Path(args.patch))
-    pkg = {
-        "format": "mc-fotanrf-otapkg/1",
-        "created": "1970-01-01T00:00:00Z",
-        "channel": {"name": args.channel_name, "idx": args.channel_idx},
-        "radio": {"freq": args.freq, "bw": args.bw, "sf": args.sf, "cr": args.cr},
-        "scope": args.scope, "path": args.path,
-        "fw": {"old_sha256": old_sha256.hex(), "new_sha256": new_sha256.hex(),
-               "old_fw_size": old_fw_size, "patch_sha256": patch_sha256.hex(),
-               "patch_len": len(patch)},
-        "patch_b64": base64.b64encode(patch).decode(),
-    }
-    if args.privkey:
-        privkey = load_ed25519_privkey(Path(args.privkey))
-        total = (len(patch) + OTA_CHUNK_DATA - 1) // OTA_CHUNK_DATA
-        meta = build_meta_payload(total, len(patch), patch_sha256, new_sha256, old_sha256)
-        sig = build_sig_payload(meta, privkey, args.keyid)
-        pkg["signed"] = {"key_id": args.keyid,
-                         "meta_b64": base64.b64encode(meta).decode(),
-                         "sig_b64": base64.b64encode(sig).decode()}
+    pkg = build_pkg(args.old, args.new, args.patch, channel_name=args.channel_name,
+                    channel_idx=args.channel_idx, freq=args.freq, bw=args.bw, sf=args.sf,
+                    cr=args.cr, scope=args.scope, path=args.path,
+                    privkey=args.privkey, keyid=args.keyid)
     Path(args.out).write_text(json.dumps(pkg, indent=2))
-    print(f"[export] {args.out}: patch={len(patch)}B signed={'signed' in pkg}")
+    print(f"[export] {args.out}: patch={pkg['fw']['patch_len']}B signed={'signed' in pkg}")
 
 if __name__ == '__main__':
     main()

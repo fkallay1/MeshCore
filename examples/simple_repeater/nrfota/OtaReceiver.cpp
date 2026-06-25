@@ -581,6 +581,13 @@ static void handle_meta(const uint8_t* plain, int plen) {
         return;
     }
 
+    // Re-send identickej META? Spočítaj PRED prípadným ota_clear (ten zeruje
+    // patch_sha256). Ak je to DUP, preskočíme save_meta() — flash-zápis blokuje
+    // RX cestu (nRF52 NVMC halt) a spôsobí stratu nasledujúceho SIG/APPLY paketu.
+    bool dup_meta = ota.meta_recv && (ota.status & OTA_ST_RECEIVING)
+                 && ota.patch_size == pkt->patch_size
+                 && memcmp(ota.patch_sha256, pkt->patch_sha256, 32) == 0;
+
     bool partial = (ota.status & OTA_ST_RECEIVING) && ota.total_chunks == 0;
     bool other_patch = (ota.status & OTA_ST_RECEIVING) && ota.total_chunks > 0 &&
                        memcmp(ota.patch_sha256, pkt->patch_sha256, 32) != 0;
@@ -601,11 +608,13 @@ static void handle_meta(const uint8_t* plain, int plen) {
     memcpy(ota.new_sha256,   pkt->new_sha256,   32);
     memcpy(ota.old_sha256,   pkt->old_sha256,   32);
     ota.meta_recv = 1;
-    save_meta();
+    if (!dup_meta) save_meta();   // DUP re-send → žiadny flash zápis (nestalluj RX)
     Serial.print(F("[OTA] META prijaté patch_size=")); Serial.print(pkt->patch_size);
     Serial.print(F("B  patch_sha256="));
     for (int i = 0; i < 6; i++) { if (pkt->patch_sha256[i] < 0x10) Serial.print('0'); Serial.print(pkt->patch_sha256[i], HEX); }
-    Serial.println(F("..."));
+    Serial.print(F("..."));
+    Serial.println(dup_meta ? F("  meta_recv=1 DUP → skip save")
+                            : F("  NEW/CHANGED → save"));
     try_verify_header();
 }
 
@@ -623,11 +632,16 @@ static void handle_sig(const uint8_t* plain, int plen) {
     }
     if (!(ota.status & OTA_ST_RECEIVING)) { ota.status = OTA_ST_RECEIVING; ota.total_chunks = 0; }
 
+    // Re-send identického SIG? DUP → preskoč save_meta() (rovnaký dôvod ako META).
+    bool dup_sig = ota.sig_recv && ota.hdr_key_id == pkt->key_id
+                && memcmp(ota.hdr_sig, pkt->signature, 64) == 0;
     ota.hdr_key_id = pkt->key_id;
     memcpy(ota.hdr_sig, pkt->signature, 64);
     ota.sig_recv = 1;
-    save_meta();
-    Serial.print(F("[OTA] SIG prijaté key_id=0x")); Serial.println(pkt->key_id, HEX);
+    if (!dup_sig) save_meta();   // DUP re-send → žiadny flash zápis (nestalluj RX)
+    Serial.print(F("[OTA] SIG prijaté key_id=0x")); Serial.print(pkt->key_id, HEX);
+    Serial.println(dup_sig ? F("  sig_recv=1 DUP → skip save")
+                           : F("  NEW/CHANGED → save"));
     try_verify_header();
 }
 

@@ -13,14 +13,25 @@
 
 static volatile uint8_t state = STATE_IDLE;
 
+#ifdef FK_DEBUG
+// [FK_DEBUG] Počítadlo ISR udalostí (RxDone + TxDone). state |= INT_READY je len
+// bit, takže ak dorazia dva pakety pred prečítaním, druhý prepíše FIFO a strata
+// je ticho. Tento counter pripočíta KAŽDÉ IRQ → derivovaný odhad zahodených:
+//   missed ≈ isr_event_count - n_sent(TX) - n_recv - n_recv_errors
+static volatile uint32_t isr_event_count = 0;
+#endif
+
 // this function is called when a complete packet
 // is transmitted by the module
-static 
+static
 #if defined(ESP8266) || defined(ESP32)
   ICACHE_RAM_ATTR
 #endif
 void setFlag(void) {
   // we sent a packet, set the flag
+#ifdef FK_DEBUG
+  isr_event_count++;
+#endif
   state |= STATE_INT_READY;
 }
 
@@ -45,6 +56,10 @@ void RadioLibWrapper::begin() {
 uint32_t RadioLibWrapper::getRngSeed() {
   return _radio->random(0x7FFFFFFF);
 }
+
+#ifdef FK_DEBUG
+uint32_t RadioLibWrapper::getIsrEvents() const { return isr_event_count; }
+#endif
 
 void RadioLibWrapper::setTxPower(int8_t dbm) {
   _radio->setOutputPower(dbm);
@@ -125,6 +140,12 @@ int RadioLibWrapper::recvRaw(uint8_t* bytes, int sz) {
       int err = _radio->readData(bytes, len);
       if (err != RADIOLIB_ERR_NONE) {
         MESH_DEBUG_PRINTLN("RadioLibWrapper: error: readData(%d)", err);
+      #ifdef FK_DEBUG
+        Serial.print(F("[RADIO] readData ERR=")); Serial.print(err);
+        Serial.print(F(" len=")); Serial.print(len);
+        if (err == RADIOLIB_ERR_CRC_MISMATCH) Serial.print(F(" (CRC_MISMATCH)"));
+        Serial.println();
+      #endif
         len = 0;
         n_recv_errors++;
       } else {
