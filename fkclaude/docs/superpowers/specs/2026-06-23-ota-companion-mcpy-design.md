@@ -3,7 +3,7 @@
 - **Dátum:** 2026-06-23
 - **Vetva:** `features/nrf-ota`
 - **Autor:** Fedor Kallay + Claude
-- **Súvisí:** `fkclaude/fcl_readme_nrf-ota.md`, `examples/simple_repeater/nrfota/`, pamäte `ota_meshcore_integration`, `ota_sender_scope`, `e2e_ota_session_20260621`
+- **Súvisí:** `fkclaude/fcl_readme_nrf-fota.md`, `examples/simple_repeater/nrfota/`, pamäte `ota_meshcore_integration`, `ota_sender_scope`, `e2e_ota_session_20260621`
 
 ## 1. Cieľ
 

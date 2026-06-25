@@ -1,17 +1,17 @@
-# OTA scope (smerovanie) + multi-hop cez LoRa — popis a ladenie
+# FOTA scope (smerovanie) + multi-hop cez LoRa — popis a ladenie
 
-Doplnenie **scope/route volieb** do OTA odosielateľa (`test_nrf-ota/ota_sender.py`), aby
+Doplnenie **scope/route volieb** do FOTA odosielateľa (`test_nrf-fota/fota_sender.py`), aby
 repeatre vedeli, či majú alebo nemajú paket preposielať (a tým sa zbytočne nezahlcovala sieť),
-plus rozchodenie **multi-hop direct OTA** na živej SK sieti. Nadväzuje na
-[fcl_readme_nrf-ota.md](fcl_readme_nrf-ota.md) (samotný OTA systém) a
-[fcl_e2e_runbook_nrf-ota.md](fcl_e2e_runbook_nrf-ota.md) (ako spustiť test).
+plus rozchodenie **multi-hop direct FOTA** na živej SK sieti. Nadväzuje na
+[fcl_readme_nrf-fota.md](fcl_readme_nrf-fota.md) (samotný FOTA systém) a
+[fcl_e2e_runbook_nrf-fota.md](fcl_e2e_runbook_nrf-fota.md) (ako spustiť test).
 
 ---
 
 ## 1. Scope režimy (`--scope`)
 
 MeshCore má 2-bitový route type (header bity 0-1, `PH_ROUTE_MASK`). Z neho odvodzujeme
-4 použiteľné režimy pre `PAYLOAD_TYPE_GRP_DATA`. `ota_sender.py --scope`:
+4 použiteľné režimy pre `PAYLOAD_TYPE_GRP_DATA`. `fota_sender.py --scope`:
 
 | `--scope` | route type | repeater správanie | header bajt | wire (za GRP_DATA payloadom) |
 |---|---|---|---|---|
@@ -62,9 +62,9 @@ Relay **1-hop otočka** (čas medzi originálom a forwardom) ≈ **1.5 s** (1.1�
 - Posledný hop spraví count-0 broadcast → cieľ (jeho sused) paket prijme a spracuje.
 
 ### Akumulácia naprieč kolami (test harness)
-`broadcast_until_verified` (`ota_test_lora_repeater.py`) rebootuje DUT **len v 1. kole**
+`broadcast_until_verified` (`fota_test_lora_repeater.py`) rebootuje DUT **len v 1. kole**
 (čistý štart); ďalšie kolá kumulujú session v RAM. Reboot-per-kolo **mazal** <8-chunk session
-(bitmap sa ukladá až od `OTA_BITMAP_SAVE_EVERY=8`) — preto sa progres nikdy nenakumuloval.
+(bitmap sa ukladá až od `FOTA_BITMAP_SAVE_EVERY=8`) — preto sa progres nikdy nenakumuloval.
 (Pôvodný „stuck SX1262 receiver" dôvod reboot-u bola reálne anténa.)
 
 ---
@@ -94,7 +94,7 @@ Build/flash (z `FK_lora-sniffer`): `pio run -e Xiao_bridge -t upload --upload-po
 | direct s opakovaným uzlom (6363,216D,6363) | ❌ slučka (`hasSeen`) — nedoručiteľné |
 
 ### Diagnostické fakty (aby sa neopakovali zlé závery)
-- **`[OTA] ... crc BAD`** v logu = artefakt trace printera `ota_print_pkt` (`OtaReceiver.cpp`),
+- **`[FOTA] ... crc BAD`** v logu = artefakt trace printera `fota_print_pkt` (`FotaReceiver.cpp`),
   ktorý počíta crc cez **AES-padovanú** dĺžku. Reálny `handle_chunk` klampuje na `exp_len`.
   **Nie je to RF korupcia ani reálny drop** — RF chybu by zachytil LoRa PHY CRC / MAC pred dešifrovaním.
 - **Header NIE je väčší než plný chunk** — oba 181 B na drôte (count-0); header bol problém len
@@ -111,7 +111,7 @@ PENV="D:/FkDev/.platformio/penv/Scripts/python.exe"
 PSK=$(python -c "print(b'meshcore-ota-key'.hex())")
 
 # zero-hop (default) — priami susedia, nikto nerepeatuje
-"$PENV" test_nrf-ota/ota_sender.py --old old.bin --new new.bin --port COM3 --mode meshcore --psk $PSK --privkey test_nrf-ota/test_key.der
+"$PENV" test_nrf-fota/fota_sender.py --old old.bin --new new.bin --port COM3 --mode meshcore --psk $PSK --privkey test_nrf-fota/test_key.der
 
 # region sk-ota — flood len v regióne
 "$PENV" ... --scope region --scope-name sk-ota
@@ -120,5 +120,5 @@ PSK=$(python -c "print(b'meshcore-ota-key'.hex())")
 "$PENV" ... --scope direct --path 6363,6868 --path-hashsize 2 --delay 5 --header-every 2
 ```
 
-Súvisí: [fcl_e2e_runbook_nrf-ota.md](fcl_e2e_runbook_nrf-ota.md),
+Súvisí: [fcl_e2e_runbook_nrf-fota.md](fcl_e2e_runbook_nrf-fota.md),
 [fcl_readme_verified_pooling.md](fcl_readme_verified_pooling.md).

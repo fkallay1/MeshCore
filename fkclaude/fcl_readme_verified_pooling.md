@@ -1,6 +1,6 @@
-# Spevnenie testu `ota_test_lora_repeater.py` — VERIFIED-polling + flash
+# Spevnenie testu `fota_test_lora_repeater.py` — VERIFIED-polling + flash
 
-Popis úprav, ktoré spoľahlivo dotiahli end-to-end OTA test (`test_nrf-ota/ota_test_lora_repeater.py`)
+Popis úprav, ktoré spoľahlivo dotiahli end-to-end FOTA test (`test_nrf-fota/fota_test_lora_repeater.py`)
 na konzistentný **[PASS]**. Pred úpravami `run` občas zlyhal — buď nedosiahol VERIFIED (príjem),
 alebo zlyhal flash. Obe príčiny sú nižšie + ako sa riešia.
 
@@ -46,9 +46,9 @@ zlyhal — flasher sa zastavil hneď po `[FLASHER] Komprimovany format`, **bez**
 repeater nabehol na **OLD** build. Naproti tomu **manuálny `ota flash` bez predošlého dry-runu
 vždy prešiel** (#28→#29, #32→#33).
 
-**Príčina:** `ota verify` (`ota_patch_to_file`) spraví `malloc` + **streaming rekonštrukciu celého
+**Príčina:** `ota verify` (`fota_patch_to_file`) spraví `malloc` + **streaming rekonštrukciu celého
 ~442 kB FW** (puff_stream + hpatch_lite_patch + 2 kB stack cache). Po ňom nasledujúci
-`ota flash` (`ota_apply`) **hardfaultne na `malloc(patch_size)`** — t.j. heap je po dry-rune v
+`ota flash` (`fota_apply`) **hardfaultne na `malloc(patch_size)`** — t.j. heap je po dry-rune v
 stave, ktorý rozbije ďalšiu alokáciu (hardfault, nie čistý `malloc==NULL`, preto žiadna hláška;
 zariadenie sa resetne → boot OLD). Detail v
 [readme_tech_nrf-ota.md](readme_tech_nrf-ota.md) §8.2.
@@ -63,7 +63,7 @@ spustiť manuálne (`ota verify`) alebo v teste cez `--verify-first`.
 |-----|---------|-------|
 | `--verify-first` | (vyp) | spustiť `ota verify` (dry-run) pred ostrým flashom; default vyp kvôli heap hardfaultu |
 
-> **Stav (2026-06-21):** commit `5d4f23df` (RAM-assembly) prerobil obe cesty na `ota_acquire_patch_ram`
+> **Stav (2026-06-21):** commit `5d4f23df` (RAM-assembly) prerobil obe cesty na `fota_acquire_patch_ram`
 > s korektným `free()` a deklaruje „dry-run pred flashom bez hardfaultu". Standalone `ota verify` je
 > overený OK (opakovane, bit-presná rekonštrukcia). Sekvencia verify→flash v jednom boote ale NEBOLA
 > priamo retestovaná (medzi nimi sa rebootovalo) → `--verify-first` ostáva default **vyp** ako poistka.
@@ -77,8 +77,8 @@ na NEW build). Príklad spustenia:
 
 ```bash
 PENV=~/.platformio/penv/Scripts/python.exe
-$PENV test_nrf-ota/ota_test_lora_repeater.py baseline --bridge-port COM3 --target-port COM5
-$PENV test_nrf-ota/ota_test_lora_repeater.py run      --bridge-port COM3 --target-port COM5 --verify-wait 70
+$PENV test_nrf-fota/fota_test_lora_repeater.py baseline --bridge-port COM3 --target-port COM5
+$PENV test_nrf-fota/fota_test_lora_repeater.py run      --bridge-port COM3 --target-port COM5 --verify-wait 70
 # voliteľne pridať bezpečnostný dry-run pred flashom (pozor na heap hardfault):
 #   ... run ... --verify-first
 ```
@@ -90,18 +90,18 @@ Pozn.: pri reflashe OLD (baseline) sa raz prefs repeatera vrátili na SK preset 
 
 ## Samobežný runner (2026-06-21) — 3 zmeny
 
-Po pridaní podpísaného OTA HEADER-u runner prestal dosahovať VERIFIED (posielal nepodpísaný
-header → firmware ho zamietol). Tri zmeny v `ota_test_lora_repeater.py` (commit `d487a3dd`),
+Po pridaní podpísaného FOTA HEADER-u runner prestal dosahovať VERIFIED (posielal nepodpísaný
+header → firmware ho zamietol). Tri zmeny v `fota_test_lora_repeater.py` (commit `d487a3dd`),
 aby `baseline` + `run` prešli **bez manuálnych flagov**:
 
-1. **auto `--privkey`** = `test_nrf-ota/test_key.der`. Firmware vyžaduje podpísaný
-   HEADER (Ed25519 key_id=1, [OtaReceiver_signkey.cpp](examples/simple_repeater/nrfota/OtaReceiver_signkey.cpp));
+1. **auto `--privkey`** = `test_nrf-fota/test_key.der`. Firmware vyžaduje podpísaný
+   HEADER (Ed25519 key_id=1, [FotaReceiver_signkey.cpp](examples/simple_repeater/nrffota/FotaReceiver_signkey.cpp));
    bez kľúča → `CHYBA=0x6`, `total_chunks=0`, session sa nedokončí. (Toto bola príčina, prečo
    test „nešiel" po pridaní podpisu.)
    > ⚠️ **`test_key.der` je GITIGNORED** (`.gitignore`) — súkromný kľúč sa necommituje, takže na
    > **čerstvom klone / po presune projektu CHÝBA** a test ticho nedosiahne VERIFIED. Runner na to
    > teraz VAROVÁ. Skopíruj `test_key.der` z funkčného prostredia (musí matchovať pubkey
-   > `c22f8ae0…5b51` zakompilovaný v `OtaReceiver_signkey.cpp`, `key_id=1`) do `test_nrf-ota/`.
+   > `c22f8ae0…5b51` zakompilovaný v `FotaReceiver_signkey.cpp`, `key_id=1`) do `test_nrf-fota/`.
 2. **`--packetorder` default `hend`** (chunky prvé, header nakoniec). SX1262 RX po čerstvom
    boote chytí len ~4 rámce (stuck receiver, [readme_tech_nrf-ota.md](readme_tech_nrf-ota.md) §8.3);
    header/meta prežíva reboot → pri `hend` sa budget minie na chunky, nie na už-známy header.
