@@ -37,6 +37,7 @@ OFF_BUILD = 12  # uint32 LE za magicom (zhodné s gen_fw_trailer.py)
 
 DEFAULT_HEX = HERE.parent / ".pio" / "build" / "ProMicro_repeater_ota" / "firmware.hex"
 BUILDS_DIR = HERE / "builds"
+FOTAPKG_DIR = HERE / "fotapkg_json"  # default cieľ pre vygenerované .otapkg.json
 
 
 # ---- Intel HEX → flat app image (rovnaká logika ako gen_fw_trailer.read_ihex) ----
@@ -146,7 +147,8 @@ def main():
     ap.add_argument('--auto', action='store_true', help="2 najnovšie buildy z builds/")
     ap.add_argument('--old', help="explicitný old .bin")
     ap.add_argument('--new', help="explicitný new .bin")
-    ap.add_argument('--out-dir', default=str(HERE), help="kam zapísať json (default test_nrf-ota/)")
+    ap.add_argument('--out-dir', default=str(FOTAPKG_DIR),
+                    help="kam zapísať json (default test_nrf-ota/fotapkg_json/)")
     ap.add_argument('--device', default='promicro', help="názov zariadenia v archíve+json (default promicro)")
     ap.add_argument('--channel-name', default=OTA_CHANNEL_NAME)
     ap.add_argument('--channel-idx', type=int, default=1)
@@ -160,6 +162,7 @@ def main():
     if args.privkey == '':
         args.privkey = None
     out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     if args.old and args.new:
         old_bin, new_bin = Path(args.old), Path(args.new)
