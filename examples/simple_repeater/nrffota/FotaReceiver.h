@@ -29,6 +29,18 @@ bool fota_apply();
 void fota_print_status();
 void fota_send_nack();
 
+// Chýbajúce chunky. fota_calc_missing vráti celkový počet (-1 = zero info yet) a
+// naplní out[] prvými max_out indexmi (*out_n). fota_print_missing vypíše na Serial
+// (limit<=0 = všetky). Rozsah: HEADER známy → [0..total-1]; inak okno prijatých.
+int  fota_calc_missing(uint16_t* out, int max_out, int* out_n);
+void fota_print_missing(int limit);
+
+// Odložený flash: 'fota flash' najprv pošle ACK „accepted", flash (fota_apply) sa
+// spustí z loop() AŽ keď ACK reálne odíde (inak reboot skôr než sa ACK odvysiela).
+void fota_request_apply();
+bool fota_apply_pending();
+void fota_clear_apply_pending();
+
 // Výpis dekódovaného OTA paketu (diagnostika pred spracovaním).
 // plain = pointer na OTA paket (začína typovým bajtom FOTA_PKT_*).
 void fota_print_pkt(const uint8_t* plain, int plen, float rssi, float snr);

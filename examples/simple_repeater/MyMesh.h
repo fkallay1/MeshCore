@@ -205,6 +205,7 @@ protected:
   // FotaBuffer — žiadny veľký permanentný člen v MyMesh.
   bool     _fota_cli_pending;
   uint8_t* _fota_cli_buf;       // požičaný FotaBuffer so snapshotom (NULL = nič)
+  unsigned long _fota_apply_deadline;  // 0=neaktívne; safety net pre odložený flash
   bool deferFotaCli(const ClientInfo* client, const uint8_t* secret,
                     const char* fargs, uint8_t path_hash_size);
   void runFotaCli(const char* fargs, char* reply);

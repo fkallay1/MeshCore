@@ -47,9 +47,15 @@ void fota_handle_command(const char* args, char* reply) {
         if (reason[0]) sprintf(reply, "FOTA dry-run %s: %s", tag, reason);
         else           sprintf(reply, "FOTA dry-run %s", tag);
     } else if (strcmp(args, "flash") == 0 || strcmp(args, "apply") == 0) {
-        // fota_apply() sa pri úspechu NEVRÁTI (skok na flasher + reboot)
-        fota_apply();
-        strcpy(reply, "FOTA flash FAIL (pozri serial)");
+        // NEFLASHUJ tu: fota_apply() sa pri úspechu NEVRÁTI (skok na flasher + reboot),
+        // takže by sa ACK nikdy neodvysielal. Najprv pošli „accepted", flash spustí
+        // loop() AŽ keď ACK reálne odíde z outbound queue (fota_apply_pending()).
+        if (fota_get_state()->status & FOTA_ST_VERIFIED) {
+            fota_request_apply();
+            strcpy(reply, "FOTA flash accepted");
+        } else {
+            strcpy(reply, "FOTA flash: nie je VERIFIED (najprv prijmi chunky + verify)");
+        }
     } else if (strcmp(args, "clear") == 0) {
         fota_clear_session();
         strcpy(reply, "FOTA cleared");
@@ -59,13 +65,64 @@ void fota_handle_command(const char* args, char* reply) {
     } else if (strcmp(args, "nack") == 0) {
         fota_send_nack();
         strcpy(reply, "FOTA nack -> serial");
+    } else if (strcmp(args, "miss") == 0 || strcmp(args, "miss10") == 0) {
+        // Chýbajúce: na začiatku H (META) a S (SIG) ak chýbajú, potom chunky (od 0).
+        // miss = celý zoznam (koľko sa zmestí do reply); miss10 = prvých 10 položiek.
+        // Oba ukážu CELKOVÝ počet. "Zero info yet" len ak neprišlo vôbec nič.
+        bool only10 = (args[4] == '1');                 // "miss10" má '1' na args[4]
+        const FotaState* st = fota_get_state();
+        bool miss_h = !st->meta_recv;
+        bool miss_s = !st->sig_recv;
+        uint16_t miss[64];
+        int n = 0;
+        int chunk_missing = fota_calc_missing(miss, (int)(sizeof(miss) / sizeof(miss[0])), &n);
+
+        bool any_info = st->meta_recv || st->sig_recv || st->recv_count > 0 || st->total_chunks > 0;
+        if (!any_info) {
+            Serial.println(F("[FOTA] miss Zero info yet"));
+            strcpy(reply, "FOTA miss: Zero info yet");
+        } else {
+            int chunk_total = (chunk_missing < 0) ? 0 : chunk_missing;
+            int hs = (miss_h ? 1 : 0) + (miss_s ? 1 : 0);
+            int total = hs + chunk_total;
+
+            // Serial: plný detail (H/S + všetky/prvých 10 chunkov)
+            Serial.print(F("[FOTA] miss ")); Serial.print(total);
+            if (st->total_chunks > 0) { Serial.print('/'); Serial.print(st->total_chunks); }
+            else                        Serial.print(F(" (pred HEADER)"));
+            Serial.print(F(": "));
+            int hs_shown = 0;
+            if (miss_h) { Serial.print(F("H ")); hs_shown++; }
+            if (miss_s) { Serial.print(F("S ")); hs_shown++; }
+            int chunk_lim = only10 ? (10 - hs_shown) : 0;   // 0 = všetky (pre 'miss')
+            if (!(only10 && chunk_lim <= 0)) fota_print_missing(chunk_lim);
+            Serial.println();
+
+            // Reply (LoRa aj Serial CLI): počet + zoznam, capnutý na dĺžku paketu
+            char* p = reply;
+            p += sprintf(p, "FOTA miss=%d", total);
+            if (st->total_chunks > 0) p += sprintf(p, "/%u", (unsigned)st->total_chunks);
+            else                       p += sprintf(p, "(no hdr)");
+            if (total > 0) *p++ = ':';
+            int show = only10 ? 10 : (2 + n);            // max položiek (H+S+buf chunky)
+            int shown = 0;
+            if (miss_h && shown < show) { p += sprintf(p, " H"); shown++; }
+            if (miss_s && shown < show) { p += sprintf(p, " S"); shown++; }
+            for (int i = 0; i < n && shown < show; i++) {
+                if ((int)(p - reply) > 140) break;       // dĺžkový strop (LoRa ~160 B)
+                p += sprintf(p, " %u", (unsigned)miss[i]);
+                shown++;
+            }
+            if (shown < total) p += sprintf(p, " +%d", total - shown);
+            *p = 0;
+        }
     } else if (strcmp(args, "dbg") == 0) {
         fota_print_flasher_debug();
         strcpy(reply, "FOTA dbg -> serial");
     } else if (strcmp(args, "id") == 0 || strcmp(args, "fwid") == 0) {
         fota_print_fw_id(reply);   // build#, image_size, plný running sha256 -> serial
     } else {
-        strcpy(reply, "FOTA: status|verify|flash|clear|decompress|nack|dbg|id");
+        strcpy(reply, "FOTA: status|verify|flash|clear|decompress|nack|miss|miss10|dbg|id");
     }
 }
 

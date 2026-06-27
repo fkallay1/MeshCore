@@ -555,11 +555,40 @@ void MyMesh::logRxRaw(float snr, float rssi, const uint8_t raw[], int len) {
   if (len > 0) {
     // PAYLOAD_TYPE = (hdr >> 2) & 0x0F (NIE dolné 4 bity — tie sú route+časť typu);
     // route = hdr & 0x03.  (4=ADVERT, 7=ANON_REQ, 2=TXT, 1=RESPONSE, 5=GRP_TXT, 6=GRP_DATA)
-    uint8_t pt = (raw[0] >> 2) & 0x0F;
+    uint8_t pt    = (raw[0] >> 2) & 0x0F;
+    uint8_t route = raw[0] & 0x03;
+    // Replikácia tryParsePacket() offsetov, aby sme vedeli vypísať CESTU a rozoznať
+    // FOTA bez dešifrovania:  [hdr][?transport 4B][path_len][path…][payload].
+    int i = 1;
+    if (route == ROUTE_TYPE_TRANSPORT_FLOOD || route == ROUTE_TYPE_TRANSPORT_DIRECT) i += 4;
+    int path_count = -1, path_off = i + 1, path_byte_len = 0, payload_off = -1;
+    if (i < len) {
+      uint8_t plen  = raw[i];
+      uint8_t hsize = (plen >> 6) + 1;       // path hash size (1 alebo 2 B)
+      path_count    = plen & 63;             // počet hopov (0 = zero-hop / čerstvý flood)
+      path_byte_len = path_count * hsize;
+      payload_off   = path_off + path_byte_len;
+    }
+    // Naša FOTA? GRP_DATA na našom OTA kanáli — channel_hash je 1. bajt payloadu
+    // (Mesh.cpp: channel_hash = payload[0]); čitateľné už tu, pred dešifrovaním.
+    bool is_fota = (pt == PAYLOAD_TYPE_GRP_DATA && _ota_ready
+                    && payload_off >= 0 && payload_off < len
+                    && raw[payload_off] == _ota_channel.hash[0]);
     Serial.print(F(" type=")); Serial.print(pt);
-    Serial.print('('); Serial.print(payload_type_name(pt)); Serial.print(')');
-    Serial.print(F(" route=")); Serial.print(raw[0] & 0x03);
+    Serial.print('('); Serial.print(payload_type_name(pt));
+    if (is_fota) Serial.print(F("/FOTA"));
+    Serial.print(')');
+    Serial.print(F(" route=")); Serial.print(route);
     Serial.print(F(" hdr=0x")); Serial.print(raw[0], HEX);
+    // Cesta: počet hopov + hash bajty.  path[0] = zero-hop alebo čerstvý flood od
+    // zdroja; každý preposielajúci repeater pripojí svoj hash → path[N] dlhšia.
+    if (path_count >= 0) {
+      Serial.print(F(" path[")); Serial.print(path_count); Serial.print(']');
+      if (path_byte_len > 0 && (path_off + path_byte_len) <= len) {
+        Serial.print('=');
+        mesh::Utils::printHex(Serial, &raw[path_off], path_byte_len);
+      }
+    }
   }
   Serial.print(F(" first="));
   mesh::Utils::printHex(Serial, raw, len < 8 ? len : 8);
@@ -836,7 +865,14 @@ void MyMesh::onPeerDataRecv(mesh::Packet *packet, uint8_t type, int sender_idx, 
         if (_fota_cli_pending) {
           strcpy(reply, "FOTA: zaneprázdnené, skús neskôr");
         } else if (deferFotaCli(client, secret, fargs, packet->getPathHashSize())) {
+#ifdef FOTA_INFO_MSG
+          // Voliteľný medzi-paket "spracúvam". DEFAULT VYP: cez repeater idú dva
+          // pakety (tento + výsledok z loop()) tesne za sebou a druhý — podstatný
+          // — sa môže stratiť. Bez flagu pošleme len jeden paket: finálny výsledok.
           strcpy(reply, "FOTA: spracúvam, výsledok o chvíľu...");
+#else
+          *reply = 0;   // žiadny medzi-paket; odpoveď príde len raz, z loop()
+#endif
         } else {
           strcpy(reply, "FOTA: defer zlyhal (buffer)");
         }
@@ -1102,6 +1138,7 @@ void MyMesh::begin(FILESYSTEM *fs) {
   _ota_pending_len = 0;
   _fota_cli_pending = false;
   _fota_cli_buf = nullptr;
+  _fota_apply_deadline = 0;
   _ota_raw_rx = 0;
   _ota_raw_last_len = 0;
   _ota_raw_last_rssi = _ota_raw_last_snr = 0;
@@ -1613,6 +1650,22 @@ void MyMesh::loop() {
     runFotaCli(snap.fargs, reply);   // ťažká práca (verify=hpatch+SHA) na plytkom stacku
     sendDeferredCliReply(snap.dest_pub, snap.secret, snap.out_path,
                          snap.out_path_len, snap.path_hash_size, reply);
+  }
+
+  // Odložený flash: 'fota flash' nastaví fota_apply_pending() a pošle ACK „accepted".
+  // Skutočný flash (fota_apply, NEVRÁTI sa) spustíme AŽ keď ACK reálne odíde z
+  // outbound queue — inak by reboot prišiel skôr než sa ACK odvysiela a odosielateľ
+  // by nič nedostal (presne to sa stalo). Safety net: deadline, aby flash nečakal
+  // donekonečna pri inej premávke v queue.
+  if (fota_apply_pending()) {
+    if (_fota_apply_deadline == 0) _fota_apply_deadline = futureMillis(6000);
+    if (_mgr->getOutboundTotal() == 0 || millisHasNowPassed(_fota_apply_deadline)) {
+      fota_clear_apply_pending();
+      _fota_apply_deadline = 0;
+      Serial.println(F("[FOTA] ACK odoslaný — spúšťam flash"));
+      fota_apply();   // NEVRÁTI sa pri úspechu (skok na flasher + reboot)
+      Serial.println(F("[FOTA] flash zlyhal pred skokom (pozri vyššie)"));
+    }
   }
 
 #ifdef FK_DEBUG

@@ -176,6 +176,21 @@ static bool fota_base_fw_check_full(uint32_t fw_size, const uint8_t* sha256_full
     return memcmp(h, sha256_full, 32) == 0;
 }
 
+// Base FW gating pre META/SIG — tie nesú plný old_sha256[32] ale NIE old_fw_size.
+// Over ho voči bežiacemu FW VŽDY (aj keď HEADER/SIG príde PRED akýmkoľvek chunkom):
+//  - ak už máme cache (base_fw_size>0, naplnené chunkom/skorším META) → porovnaj lacno
+//    bez nového SHA (base_fw_sha256 == SHA bežiaceho FW; base_fw_size je vždy ==
+//    fw_image_size, lebo fota_fw_size_matches to gat­uje pred cache zápisom);
+//  - inak doráta SHA nad celým bežiacim image (fw_image_size). Pre legitímny patch
+//    platí old_fw_size == fw_image_size (invariant z FwId.h), takže to sedí.
+// Bez tohto sa pri HEADER-first / SIG-first zakladala session pre CUDZÍ patch.
+static bool fota_meta_base_ok(const uint8_t* old_sha256_full) {
+    if (ota.base_fw_size > 0) {
+        return memcmp(ota.base_fw_sha256, old_sha256_full, 32) == 0;
+    }
+    return fota_base_fw_check_full(fw_image_size(), old_sha256_full);
+}
+
 // =====================================================================
 // Interné pomocné funkcie
 // =====================================================================
@@ -535,6 +550,63 @@ void fota_send_nack() {
     Serial.println();
 }
 
+// Rozsah na počítanie chýbajúcich chunkov [*lo .. *hi].
+//  - HEADER známy (total_chunks>0): [0 .. total_chunks-1].
+//  - HEADER neznámy (total_chunks==0): okno [najnižší .. najvyšší prijatý] z bitmapy
+//    (chunky pod najnižším prijatým nevieme bez HEADER-a spoľahlivo nárokovať).
+// Vracia false = "zero info yet" (žiaden chunk a žiaden HEADER).
+static bool fota_missing_range(uint16_t* lo, uint16_t* hi) {
+    if (ota.total_chunks > 0) { *lo = 0; *hi = (uint16_t)(ota.total_chunks - 1u); return true; }
+    // HEADER neznámy — počítaj diery od chunku 0 po NAJVYŠŠÍ prijatý (chunky pod
+    // najnižším prijatým reálne existujú a chýbajú, preto počítame od 0).
+    int fhi = -1;
+    for (uint16_t i = 0; i < FOTA_MAX_CHUNKS; i++)
+        if (FOTA_BIT_GET(ota.bitmap, i)) fhi = (int)i;
+    if (fhi < 0) return false;   // žiaden chunk
+    *lo = 0; *hi = (uint16_t)fhi; return true;
+}
+
+// Vypočíta chýbajúce chunky v rozsahu z fota_missing_range().
+// Návratová hodnota: celkový počet chýbajúcich; -1 = "zero info yet".
+// out[] (ak != NULL) sa naplní prvými max_out indexmi, *out_n = koľko ich tam je.
+int fota_calc_missing(uint16_t* out, int max_out, int* out_n) {
+    if (out_n) *out_n = 0;
+    uint16_t lo, hi;
+    if (!fota_missing_range(&lo, &hi)) return -1;
+    int n = 0, total = 0;
+    for (uint16_t i = lo; ; i++) {
+        if (!FOTA_BIT_GET(ota.bitmap, i)) {
+            if (out && n < max_out) out[n++] = i;
+            total++;
+        }
+        if (i == hi) break;   // bezpečné aj pre uint16_t (hi môže byť 0/65535)
+    }
+    if (out_n) *out_n = n;
+    return total;
+}
+
+// Vypíše chýbajúce CHUNKY na Serial (bez prefixu/newline; H/S a riadok rieši volajúci).
+// limit<=0 → všetky; inak prvých 'limit' (+zvyšok ako "+N"). Nič netlačí ak niet rozsahu.
+void fota_print_missing(int limit) {
+    uint16_t lo, hi;
+    if (!fota_missing_range(&lo, &hi)) return;
+    int shown = 0, total = 0;
+    for (uint16_t i = lo; ; i++) {
+        if (!FOTA_BIT_GET(ota.bitmap, i)) {
+            total++;
+            if (limit <= 0 || shown < limit) { Serial.print(i); Serial.print(' '); shown++; }
+        }
+        if (i == hi) break;
+    }
+    if (limit > 0 && total > shown) { Serial.print('+'); Serial.print(total - shown); }
+}
+
+// ---- Odložená žiadosť o flash (ACK „accepted" musí odísť PRED rebootom) ----
+static bool s_apply_pending = false;
+void fota_request_apply()      { s_apply_pending = true; }
+bool fota_apply_pending()      { return s_apply_pending; }
+void fota_clear_apply_pending(){ s_apply_pending = false; }
+
 // Postav STATUS paket (6B). Vždy dostupný ak je session.
 int fota_build_status(uint8_t* out) {
     if (ota.total_chunks == 0) return 0;
@@ -629,10 +701,12 @@ static void handle_meta(const uint8_t* plain, int plen) {
     if (plen < (int)sizeof(FotaHeaderPkt)) { Serial.println(F("[FOTA] META: krátky")); return; }
     const FotaHeaderPkt* pkt = (const FotaHeaderPkt*)plain;
 
-    // Base FW gating cez cache (META.old_sha256 musí sedieť s bežiacim FW)
-    if (ota.base_fw_size > 0 && !fota_base_fw_check_full(ota.base_fw_size, pkt->old_sha256)) {
-        Serial.println(F("[FOTA] META: base FW nezhoda — iný FW beží na zariadení"));
-        fota_set_error(FOTA_ERR_BASEFW);
+    // Base FW gating — META.old_sha256 MUSÍ sedieť s bežiacim FW, inak patch nepatrí
+    // tomuto zariadeniu. Platí AJ keď HEADER príde pred prvým chunkom (vtedy
+    // base_fw_size==0 a SHA sa doráta nad fw_image_size). Drop (nie ERROR) — cudzí
+    // paket nesmie zhodiť ani založiť NAŠU session. Vypíš (ako pri chunku).
+    if (!fota_meta_base_ok(pkt->old_sha256)) {
+        Serial.println(F("[FOTA] META: base FW nezhoda — patch nie je pre toto zariadenie, drop"));
         return;
     }
 
@@ -682,8 +756,10 @@ static void handle_sig(const uint8_t* plain, int plen) {
         if (memcmp(ota.old_sha256, pkt->old_sha256, 32) != 0) {
             Serial.println(F("[FOTA] SIG: old_sha256 nezhoda s META — drop")); return;
         }
-    } else if (ota.base_fw_size > 0 && !fota_base_fw_check_full(ota.base_fw_size, pkt->old_sha256)) {
-        Serial.println(F("[FOTA] SIG: base FW nezhoda — drop")); return;
+    } else if (!fota_meta_base_ok(pkt->old_sha256)) {
+        // SIG prišiel pred META — over base FW VŽDY (aj pri base_fw_size==0), inak by
+        // SIG-first založil session pre cudzí patch. (SIG.old_sha256 = "gating patrí mne".)
+        Serial.println(F("[FOTA] SIG: base FW nezhoda — patch nie je pre toto zariadenie, drop")); return;
     }
     if (!(ota.status & FOTA_ST_RECEIVING)) { ota.status = FOTA_ST_RECEIVING; ota.total_chunks = 0; }
 
