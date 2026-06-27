@@ -1,0 +1,80 @@
+{
+    // PlatformIO custom tasks.
+    //  • "options.statusbar" → tlačidlo v dolnej lište (rozšírenie actboy168.tasks)
+    //  • input "pickBuiltEnv" → picker zo zbuildovaných envov v .pio/build/
+    //                           (rozšírenie augustocdias.tasks-shell-input → shellCommand.execute)
+    //
+    // POZN k "no build" uploadu na nRF52 (DFU/nrfutil): `pio run -t nobuild -t upload`
+    // platforma rozbíja — pošle firmware.HEX namiesto firmware.ZIP (DFU balík) →
+    // "File is not a zip file". nrfutil ale otvára -pkg ako ZIP bez ohľadu na príponu,
+    // takže pred uploadom skopírujeme firmware.zip -> firmware.hex a necháme PlatformIO
+    // spraviť jeho (funkčný) 1200bps reset + re-enumeráciu bootloader portu + upload.
+    // firmware.hex sa aj tak pri ďalšom full builde prepíše späť.
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "PIO Upload (no build)",
+            "detail": "Vyber zbuildovaný env a nahraj jeho posledný DFU balík bez prekladu",
+            "type": "shell",
+            "command": "$e='${input:pickBuiltEnv}'; Copy-Item \".pio/build/$e/firmware.zip\" \".pio/build/$e/firmware.hex\" -Force -ErrorAction Stop; pio run -e $e -t nobuild -t upload",
+            "options": {
+                "shell": { "executable": "powershell.exe", "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"] },
+                "statusbar": {
+                    "label": "$(cloud-upload) NoBuild↑",
+                    "tooltip": "Upload bez buildu — vyber env z .pio/build",
+                    "color": "#7fd1b9"
+                }
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared",
+                "clear": true
+            }
+        },
+        {
+            "label": "PIO Upload UF2 (no build)",
+            "detail": "Vyber .uf2 z test_nrf-fota/builds a flashni cez UF2 bootloader (rýchlejšie, bez bumpu #)",
+            "type": "shell",
+            "command": "& \"test_nrf-fota/fk_uf2_upload.ps1\" -Uf2 \"${input:pickUf2}\"",
+            "options": {
+                "shell": { "executable": "powershell.exe", "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command"] },
+                "statusbar": {
+                    "label": "$(zap) UF2↑",
+                    "tooltip": "NoBuild UF2 flash — vyber .uf2 z test_nrf-fota/builds",
+                    "color": "#ffb454"
+                }
+            },
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared",
+                "clear": true
+            }
+        }
+    ],
+    "inputs": [
+        {
+            // Vypíše názvy podadresárov v .pio/build/ (= zbuildované envy) ako quick-pick.
+            "id": "pickBuiltEnv",
+            "type": "command",
+            "command": "shellCommand.execute",
+            "args": {
+                "command": "powershell -NoProfile -Command \"Get-ChildItem -Directory .pio/build | Sort-Object LastWriteTime -Descending | ForEach-Object Name\"",
+                "cwd": "${workspaceFolder}",
+                "description": "Vyber build (env) na upload — zoradené od najnovšieho"
+            }
+        },
+        {
+            // Vypíše .uf2 z test_nrf-fota/builds (najnovšie navrch) ako quick-pick (plné cesty).
+            "id": "pickUf2",
+            "type": "command",
+            "command": "shellCommand.execute",
+            "args": {
+                "command": "powershell -NoProfile -Command \"Get-ChildItem test_nrf-fota/builds/*.uf2 | Sort-Object LastWriteTime -Descending | ForEach-Object FullName\"",
+                "cwd": "${workspaceFolder}",
+                "description": "Vyber .uf2 na UF2 flash — zoradené od najnovšieho"
+            }
+        }
+    ]
+}

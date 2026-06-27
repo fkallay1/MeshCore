@@ -41,8 +41,11 @@ void fota_handle_command(const char* args, char* reply) {
                 (unsigned)st->err_code);
         fota_print_status();
     } else if (strcmp(args, "verify") == 0 || strcmp(args, "dryrun") == 0) {
-        bool ok = fota_patch_to_file();
-        strcpy(reply, ok ? "FOTA dry-run OK" : "FOTA dry-run FAIL");
+        char reason[48]; reason[0] = 0;
+        bool ok = fota_patch_to_file(reason, sizeof(reason));
+        const char* tag = ok ? "OK" : "FAIL";
+        if (reason[0]) sprintf(reply, "FOTA dry-run %s: %s", tag, reason);
+        else           sprintf(reply, "FOTA dry-run %s", tag);
     } else if (strcmp(args, "flash") == 0 || strcmp(args, "apply") == 0) {
         // fota_apply() sa pri úspechu NEVRÁTI (skok na flasher + reboot)
         fota_apply();

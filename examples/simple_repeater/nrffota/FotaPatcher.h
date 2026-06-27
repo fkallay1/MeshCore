@@ -23,12 +23,14 @@
 
 #include "FotaState.h"
 #include <stdint.h>
+#include <stddef.h>   // size_t
 
 #include "flash_layout.h"   // APP_FLASH_START/MAX, FLASH_PAGE_SIZE
 
 // Verifikuje príjem: aplikuje patch → SHA256 (bez zápisu do flash).
 // Vracia true ak patch OK a SHA256 sedí.
-bool fota_patch_to_file();
+// err/err_sz (voliteľné): krátky ASCII dôvod FAIL (príp. poznámka pri OK) pre CLI.
+bool fota_patch_to_file(char* err = nullptr, size_t err_sz = 0);
 
 // FS-region flasher: patch→RAM→jump na flasher@0xEB000.
 // TÁTO FUNKCIA SA NEVRÁTI ak uspeje. Vracia false len pri chybe (pred skokom).

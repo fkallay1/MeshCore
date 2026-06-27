@@ -195,6 +195,22 @@ protected:
   float             _ota_raw_last_rssi, _ota_raw_last_snr;
   int searchChannelsByHash(const uint8_t* hash, mesh::GroupChannel channels[], int max_matches) override;
   void onGroupDataRecv(mesh::Packet* packet, uint8_t type, const mesh::GroupChannel& channel, uint8_t* data, size_t len) override;
+
+  // ── Deferred FOTA CLI ─────────────────────────────────────────────────
+  // LoRa FOTA CLI príkazy by inak bežali HLBOKO v RX callstacku (Mesh
+  // dešifrovanie + temp[166]); ťažké (verify = hpatch + SHA256) by pretiekli
+  // 4 kB loop-task stack a TICHO prepísali susedný heap = stav rádia (rádio
+  // zamrzne, CPU/Serial bežia ďalej). Preto sa spracovanie odloží do loop()
+  // (plytký stack ako Serial). Snapshot klienta parkujeme do zdieľaného
+  // FotaBuffer — žiadny veľký permanentný člen v MyMesh.
+  bool     _fota_cli_pending;
+  uint8_t* _fota_cli_buf;       // požičaný FotaBuffer so snapshotom (NULL = nič)
+  bool deferFotaCli(const ClientInfo* client, const uint8_t* secret,
+                    const char* fargs, uint8_t path_hash_size);
+  void runFotaCli(const char* fargs, char* reply);
+  void sendDeferredCliReply(const uint8_t* dest_pub, const uint8_t* secret,
+                            const uint8_t* out_path, uint8_t out_path_len,
+                            uint8_t path_hash_size, const char* text);
 #endif
 
   void sendFloodReply(mesh::Packet* packet, unsigned long delay_millis, uint8_t path_hash_size);

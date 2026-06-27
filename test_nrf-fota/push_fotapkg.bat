@@ -6,16 +6,16 @@ cd /d "%~dp0"
 rem 1) Znamy PlatformIO python (ctypes staci, tkinter netreba).
 set "PYEXE=D:\FkDev\.platformio\python3\python.exe"
 if exist "%PYEXE%" (
-    "%PYEXE%" "%~dp0push_otapkg.py"
+    "%PYEXE%" "%~dp0push_fotapkg.py"
     goto :done
 )
 
 rem 2) py launcher, 3) python z PATH.
 where py >nul 2>nul
 if %errorlevel%==0 (
-    py "%~dp0push_otapkg.py"
+    py "%~dp0push_fotapkg.py"
 ) else (
-    python "%~dp0push_otapkg.py"
+    python "%~dp0push_fotapkg.py"
 )
 
 :done

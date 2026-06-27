@@ -5,6 +5,7 @@
 #include "FotaPatcher.h"
 #include "FotaFs.h"
 #include "FotaState.h"
+#include "FotaBuffer.h"   // zdieľaný scratch (static .bss, nie stack)
 #include <Arduino.h>
 #include <SHA256.h>          // rweather/Crypto
 #include <nrf.h>             // NRF_NVMC, NVMC_CONFIG_WEN_*
@@ -179,15 +180,21 @@ static hpi_BOOL patch_mem_read(hpi_TInputStreamHandle h,
     return hpi_TRUE;
 }
 
+// Krátky strojový dôvod do 'err' (ASCII — ide aj cez LoRa CLI). err môže byť NULL.
+static void set_err(char* err, size_t n, const char* msg) {
+    if (err && n) { strncpy(err, msg, n - 1); err[n - 1] = 0; }
+}
+
 // ── TEST MÓD: SHA256-only, nič nezapisuje do flash ────────────────────
-bool fota_patch_to_file() {
+// err/err_sz (voliteľné, môže byť NULL): krátky dôvod FAIL alebo poznámka pri OK.
+bool fota_patch_to_file(char* err, size_t err_sz) {
     const FotaState* st = fota_get_state();
     Serial.println(F("[PATCH] Test: SHA256 verify (bez flash)..."));
     fota_verify_old_fw();   // len informatívne v dry-rune (neblokuje test)
 
     uint32_t patch_size = 0;
     uint8_t* patch_buf = fota_acquire_patch_ram(&patch_size);   // RAM: z recv.log | patch.bin
-    if (!patch_buf) { Serial.println(F("[PATCH] patch nedostupný")); return false; }
+    if (!patch_buf) { Serial.println(F("[PATCH] patch nedostupný")); set_err(err, err_sz, "ziadne patch data"); return false; }
 
     // Detekuj komprimovaný formát (magic 'ZLIB' v prvých 4 bajtoch)
     uint32_t magic = 0;
@@ -207,6 +214,7 @@ bool fota_patch_to_file() {
         if (!ps) {
             free(patch_buf);
             Serial.println(F("[PATCH] malloc puff_stream zlyhalo"));
+            set_err(err, err_sz, "OOM puff_stream");
             return false;
         }
         puff_stream_init(ps, patch_buf + 12, comp_sz);   // komprimované telo z RAM
@@ -220,6 +228,7 @@ bool fota_patch_to_file() {
             Serial.print(F("[PATCH] Neplatny HPatchLite header (ZLIB) ps_err="));
             Serial.println(ps->error);
             free(ps); free(patch_buf);
+            set_err(err, err_sz, "zly ZLIB/hpatch header");
             return false;
         }
         Serial.print(F("[PATCH] hpatchi: new_size=")); Serial.print((uint32_t)new_size);
@@ -232,8 +241,12 @@ bool fota_patch_to_file() {
         sl.base.read_old  = sha_read_old;
         sl.base.write_new = sha_write_new;
 
-        uint8_t cache[2048];
-        bool ok = (bool)hpatch_lite_patch(&sl.base, new_size, cache, sizeof(cache));
+        // scratch z FotaBuffer (static .bss, NIE stack — LoRa RX callstack je
+        // tesný; 2 kB na stacku tu pretekalo loop-task stack → mŕtve rádio).
+        uint8_t* cache = fota_get_buffer(FOTA_BUF_CAP);
+        if (!cache) { free(ps); free(patch_buf); Serial.println(F("[PATCH] scratch buffer nedostupný")); set_err(err, err_sz, "scratch busy"); return false; }
+        bool ok = (bool)hpatch_lite_patch(&sl.base, new_size, cache, FOTA_BUF_CAP);
+        fota_put_buffer(cache);
         int ps_err = ps->error;
         free(ps);
         free(patch_buf);
@@ -241,8 +254,11 @@ bool fota_patch_to_file() {
         if (!ok) {
             if (ps_err) {
                 Serial.print(F("[PATCH] Dekompresia zlyhal: err=")); Serial.println(ps_err);
+                char b[40]; snprintf(b, sizeof(b), "dekompresia err=%d", ps_err);
+                set_err(err, err_sz, b);
             } else {
                 Serial.println(F("[PATCH] HPatchLite ZLYHALO (ZLIB)"));
+                set_err(err, err_sz, "hpatch zlyhal (ZLIB)");
             }
             return false;
         }
@@ -255,10 +271,12 @@ bool fota_patch_to_file() {
         for (int i = 0; i < 32 && all_zero; i++) if (st->new_sha256[i]) all_zero = false;
         if (all_zero) {
             Serial.println(F("[PATCH] Ocakavany SHA256 nezname — overuj manualne"));
+            set_err(err, err_sz, "ocak. SHA neznama");
             return true;
         }
         if (memcmp(result_sha, st->new_sha256, 32) != 0) {
             Serial.print(F("[PATCH] SHA256 NESEDI  exp=")); print_sha16(st->new_sha256); Serial.println(F("..."));
+            set_err(err, err_sz, "SHA256 nesedi");
             return false;
         }
         Serial.println(F("[PATCH] ZLIB patch overeny!"));
@@ -275,11 +293,13 @@ bool fota_patch_to_file() {
                               &uncomp_size, &extra_safe)) {
         Serial.println(F("[PATCH] Neplatny format patchu (hpatchi_inplace_open)"));
         free(patch_buf);
+        set_err(err, err_sz, "zly format patchu");
         return false;
     }
     if (compress_type != hpi_compressType_no) {
         Serial.println(F("[PATCH] Komprimovany patch nie je podporovany"));
         free(patch_buf);
+        set_err(err, err_sz, "komprimovany nepodporovany");
         return false;
     }
 
@@ -294,10 +314,13 @@ bool fota_patch_to_file() {
     sl.base.read_old  = sha_read_old;
     sl.base.write_new = sha_write_new;
 
-    uint8_t cache[2048];
-    bool ok = (bool)hpatch_lite_patch(&sl.base, new_size, cache, sizeof(cache));
+    // scratch z FotaBuffer (static .bss, NIE stack — viď komentár vyššie)
+    uint8_t* cache = fota_get_buffer(FOTA_BUF_CAP);
+    if (!cache) { free(patch_buf); Serial.println(F("[PATCH] scratch buffer nedostupný")); set_err(err, err_sz, "scratch busy"); return false; }
+    bool ok = (bool)hpatch_lite_patch(&sl.base, new_size, cache, FOTA_BUF_CAP);
+    fota_put_buffer(cache);
 
-    if (!ok) { Serial.println(F("[PATCH] HPatchLite ZLYHALO")); free(patch_buf); return false; }
+    if (!ok) { Serial.println(F("[PATCH] HPatchLite ZLYHALO")); free(patch_buf); set_err(err, err_sz, "hpatch zlyhal"); return false; }
 
     uint8_t result_sha[32];
     sl.sha.finalize(result_sha, sizeof(result_sha));
@@ -310,11 +333,13 @@ bool fota_patch_to_file() {
 
     if (all_zero) {
         Serial.println(F("[PATCH] Očakávaný SHA256 neznámy — overuj manuálne"));
+        set_err(err, err_sz, "ocak. SHA neznama");
         return true;
     }
     if (memcmp(result_sha, st->new_sha256, 32) != 0) {
         Serial.print(F("[PATCH] SHA256 NESEDÍ  exp="));
         print_sha16(st->new_sha256); Serial.println(F("..."));
+        set_err(err, err_sz, "SHA256 nesedi");
         return false;
     }
     Serial.println(F("[PATCH] OK — patch overený!"));
@@ -431,8 +456,9 @@ bool fota_flash_via_flasher() {
 
 #else  // FOTA_HAS_HPATCH == 0
 
-bool fota_patch_to_file() {
+bool fota_patch_to_file(char* err, size_t err_sz) {
     Serial.println(F("[PATCH] HPatchLite nie je nainštalovaná (nrffota/hpatchlite/)."));
+    if (err && err_sz) { strncpy(err, "hpatchlite chyba", err_sz - 1); err[err_sz - 1] = 0; }
     return false;
 }
 bool fota_flash_via_flasher() {

@@ -20,6 +20,12 @@ DOČASNÉ testovacie lešenie — pre produkčný OTA build to nie je potrebné.
 import datetime
 from pathlib import Path
 
+# Cieľe z príkazového riadku (na detekciu `pio run -t nobuild`).
+try:
+    from SCons.Script import COMMAND_LINE_TARGETS   # type: ignore
+except Exception:
+    COMMAND_LINE_TARGETS = []
+
 _env = None
 try:
     Import("env")              # type: ignore  # PlatformIO SCons kontext
@@ -31,9 +37,15 @@ except Exception:
 COUNTER = PROJ / "test_nrf-fota" / "build_number.txt"
 HEADER  = PROJ / "test_nrf-fota" / "build_info.h"
 
+# NoBuild upload (`pio run -t nobuild -t upload`): NEkompiluje sa, takže build_info.h
+# sa nepoužije a na dosku ide POSLEDNÝ skutočne zbuildovaný firmware. Nebumpuj # —
+# inak by každý NoBuild upload míňal číslo bez zodpovedajúceho buildu (diery) a
+# build_info.h by nesedel s tým, čo je nahraté.
+if "nobuild" in COMMAND_LINE_TARGETS:
+    print("[build_info] nobuild -> bump # skipped (flashing last build)")
 # SCons načíta extra_scripts viackrát za build — inkrementuj LEN raz za beh,
 # inak by sa build_info menil počas kompilácie a app flash by nezodpovedal patchu.
-if _env is not None and _env.get("_BUILD_INFO_DONE"):
+elif _env is not None and _env.get("_BUILD_INFO_DONE"):
     pass
 else:
     if _env is not None:

@@ -3,7 +3,9 @@
     // for the documentation about the extensions.json format
     "recommendations": [
         "pioarduino.pioarduino-ide",
-        "platformio.platformio-ide"
+        "platformio.platformio-ide",
+        "actboy168.tasks",
+        "augustocdias.tasks-shell-input"
     ],
     "unwantedRecommendations": [
         "ms-vscode.cpptools-extension-pack"
