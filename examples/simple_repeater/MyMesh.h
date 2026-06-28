@@ -207,11 +207,13 @@ protected:
   uint8_t* _fota_cli_buf;       // požičaný FotaBuffer so snapshotom (NULL = nič)
   unsigned long _fota_apply_deadline;  // 0=neaktívne; safety net pre odložený flash
   bool deferFotaCli(const ClientInfo* client, const uint8_t* secret,
-                    const char* fargs, uint8_t path_hash_size);
+                    const char* fargs, uint8_t path_hash_size,
+                    uint32_t sender_timestamp);
   void runFotaCli(const char* fargs, char* reply);
   void sendDeferredCliReply(const uint8_t* dest_pub, const uint8_t* secret,
                             const uint8_t* out_path, uint8_t out_path_len,
-                            uint8_t path_hash_size, const char* text);
+                            uint8_t path_hash_size, const char* text,
+                            uint32_t sender_timestamp);
 #endif
 
   void sendFloodReply(mesh::Packet* packet, unsigned long delay_millis, uint8_t path_hash_size);

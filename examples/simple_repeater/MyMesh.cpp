@@ -108,14 +108,15 @@ static const char* payload_type_name(uint8_t t) {
 }
 
 // Snapshot kontextu klienta pre odloženú CLI odpoveď. Parkuje sa v zdieľanom
-// FotaBuffer (~178 B v 512 B okne), takže MyMesh nerastie o permanentný člen.
+// FotaBuffer (~182 B v 512 B okne), takže MyMesh nerastie o permanentný člen.
 struct FotaCliDefer {
-  uint8_t dest_pub[PUB_KEY_SIZE];      // 32 — komu odpovedať (Identity)
-  uint8_t secret[PUB_KEY_SIZE];        // 32 — shared secret na šifrovanie odpovede
-  uint8_t out_path[MAX_PATH_SIZE];     // 64 — známa out-path (ak je)
-  uint8_t out_path_len;                // OUT_PATH_UNKNOWN → flood reply
-  uint8_t path_hash_size;              // pre flood reply
-  char    fargs[48];                   // argumenty (" verify", " agc", …)
+  uint8_t  dest_pub[PUB_KEY_SIZE];     // 32 — komu odpovedať (Identity)
+  uint8_t  secret[PUB_KEY_SIZE];       // 32 — shared secret na šifrovanie odpovede
+  uint8_t  out_path[MAX_PATH_SIZE];    // 64 — známa out-path (ak je)
+  uint32_t sender_timestamp;           // ts prijatého príkazu — odpoveď musí mať INÝ (CLI dedup)
+  uint8_t  out_path_len;               // OUT_PATH_UNKNOWN → flood reply
+  uint8_t  path_hash_size;             // pre flood reply
+  char     fargs[48];                  // argumenty (" verify", " agc", …)
 };
 
 // ── FK_DEBUG_STACKTRACE: dočasné meranie stacku — na ZÁVER CELÉ vyhodiť ─────
@@ -864,7 +865,7 @@ void MyMesh::onPeerDataRecv(mesh::Packet *packet, uint8_t type, int sender_idx, 
         // stack). Snapshot klienta → zdieľaný FotaBuffer; výsledok pošle loop().
         if (_fota_cli_pending) {
           strcpy(reply, "FOTA: zaneprázdnené, skús neskôr");
-        } else if (deferFotaCli(client, secret, fargs, packet->getPathHashSize())) {
+        } else if (deferFotaCli(client, secret, fargs, packet->getPathHashSize(), sender_timestamp)) {
 #ifdef FOTA_INFO_MSG
           // Voliteľný medzi-paket "spracúvam". DEFAULT VYP: cez repeater idú dva
           // pakety (tento + výsledok z loop()) tesne za sebou a druhý — podstatný
@@ -1538,12 +1539,14 @@ void MyMesh::runFotaCli(const char* fargs, char* reply) {
 // false = buffer nedostupný (už požičaný). Buffer drží snapshot až kým ho loop()
 // neprečíta a neuvoľní (potom ho fota_patch_to_file môže požičať na hpatch cache).
 bool MyMesh::deferFotaCli(const ClientInfo* client, const uint8_t* secret,
-                          const char* fargs, uint8_t path_hash_size) {
+                          const char* fargs, uint8_t path_hash_size,
+                          uint32_t sender_timestamp) {
   uint8_t* buf = fota_get_buffer(sizeof(FotaCliDefer));
   if (!buf) return false;
   FotaCliDefer* s = (FotaCliDefer*)buf;
   memcpy(s->dest_pub, client->id.pub_key, PUB_KEY_SIZE);
   memcpy(s->secret, secret, PUB_KEY_SIZE);
+  s->sender_timestamp = sender_timestamp;
   s->out_path_len   = client->out_path_len;
   s->path_hash_size = path_hash_size;
   if (client->out_path_len != OUT_PATH_UNKNOWN && client->out_path_len <= MAX_PATH_SIZE) {
@@ -1560,12 +1563,22 @@ bool MyMesh::deferFotaCli(const ClientInfo* client, const uint8_t* secret,
 // odloženého príkazu). Vyfaktorované z onPeerDataRecv TXT_MSG vetvy.
 void MyMesh::sendDeferredCliReply(const uint8_t* dest_pub, const uint8_t* secret,
                                   const uint8_t* out_path, uint8_t out_path_len,
-                                  uint8_t path_hash_size, const char* text) {
+                                  uint8_t path_hash_size, const char* text,
+                                  uint32_t sender_timestamp) {
   int text_len = strlen(text);
   if (text_len <= 0) return;
   if (text_len > 160) text_len = 160;
   uint8_t temp[166];
   uint32_t timestamp = getRTCClock()->getCurrentTimeUnique();
+  if (timestamp <= sender_timestamp) {
+    // Odpoveď musí mať timestamp VYŠŠÍ než príkaz, inak ju companion (seen-table
+    // dedup podľa ts) odfiltruje ako duplikát a nezobrazí. Pokrýva DVA prípady:
+    //  1) zosynced čas + rýchla odpoveď v kľude → reply_ts == sender_ts (kolízia),
+    //  2) ZLÝ čas repeatera (po reboote 2024) → reply_ts < sender_ts → companion by
+    //     odpoveď zoradil do minulosti / odfiltroval. V oboch ho ťaháme nad sender_ts.
+    // (Inline cesta cez CommonCLI si čas synchronizuje sama; FOTA cesta nie.)
+    timestamp = sender_timestamp + 1;
+  }
   memcpy(temp, &timestamp, 4);
   temp[4] = (TXT_TYPE_CLI_DATA << 2);
   memcpy(&temp[5], text, text_len);
@@ -1649,7 +1662,8 @@ void MyMesh::loop() {
     reply[0] = 0;
     runFotaCli(snap.fargs, reply);   // ťažká práca (verify=hpatch+SHA) na plytkom stacku
     sendDeferredCliReply(snap.dest_pub, snap.secret, snap.out_path,
-                         snap.out_path_len, snap.path_hash_size, reply);
+                         snap.out_path_len, snap.path_hash_size, reply,
+                         snap.sender_timestamp);
   }
 
   // Odložený flash: 'fota flash' nastaví fota_apply_pending() a pošle ACK „accepted".
