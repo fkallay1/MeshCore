@@ -15,6 +15,13 @@
   #define FOTA_CHANNEL_NAME "#fkotanrf"
 #endif
 
+// "fota miss" strop výpisu chýbajúcich v TOKENOCH (jednotlivé číslo = 1, rozsah = 2;
+// H/S sa do tokenov nerátajú). "fota missall" ignoruje strop (limit 0). Override cez
+// build_flags:  -D FOTA_MISS_OUTTOKENS=30
+#ifndef FOTA_MISS_OUTTOKENS
+  #define FOTA_MISS_OUTTOKENS 20
+#endif
+
 // Postav OTA GroupChannel z mena (secret = SHA256(name)[0:16] doplnené nulami na
 // 32B, hash = SHA256(secret)[0]) — zhodné s companion set_channel.
 void fota_build_channel(mesh::GroupChannel& ch);

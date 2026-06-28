@@ -586,19 +586,69 @@ int fota_calc_missing(uint16_t* out, int max_out, int* out_n) {
 }
 
 // Vypíše chýbajúce CHUNKY na Serial (bez prefixu/newline; H/S a riadok rieši volajúci).
-// limit<=0 → všetky; inak prvých 'limit' (+zvyšok ako "+N"). Nič netlačí ak niet rozsahu.
+// Súvislý beh chýbajúcich sa zlúči do rozsahu "od-do" (napr. "4-11"), jednotlivý ako "5".
+// 'limit' = strop v TOKENOCH (jednotlivé číslo = 1 token, rozsah "od-do" = 2); <=0 = bez stropu.
+// Beh sa NEoreže — vypíše sa celý; po vyčerpaní tokenov sa zvyšok zhrnie do "+N" (počet
+// zvyšných chýbajúcich CHUNKOV). Nič netlačí ak niet rozsahu.
 void fota_print_missing(int limit) {
     uint16_t lo, hi;
     if (!fota_missing_range(&lo, &hi)) return;
-    int shown = 0, total = 0;
+    int total = 0, shown = 0, tokens = 0;
+    bool in_run = false; uint16_t rs = 0, re = 0;
     for (uint16_t i = lo; ; i++) {
-        if (!FOTA_BIT_GET(ota.bitmap, i)) {
+        bool missing = !FOTA_BIT_GET(ota.bitmap, i);
+        if (missing) {
             total++;
-            if (limit <= 0 || shown < limit) { Serial.print(i); Serial.print(' '); shown++; }
+            if (!in_run) { rs = re = i; in_run = true; } else re = i;
+        }
+        if (in_run && (!missing || i == hi)) {     // koniec behu: vypíš ho celý (ak je budget)
+            if (limit <= 0 || tokens < limit) {
+                Serial.print(rs);
+                if (re != rs) { Serial.print('-'); Serial.print(re); tokens += 2; }
+                else          { tokens += 1; }
+                Serial.print(' ');
+                shown += (int)(re - rs + 1);
+            }
+            in_run = false;
         }
         if (i == hi) break;
     }
     if (limit > 0 && total > shown) { Serial.print('+'); Serial.print(total - shown); }
+}
+
+// Naformátuje chýbajúce CHUNKY do 'out' ako rozsahy s vedúcou medzerou (" 5", " 4-11").
+// 'limit' = strop v TOKENOCH (číslo = 1, rozsah = 2); <=0 = bez stropu. Beh sa NEoreže.
+// Po vyčerpaní tokenov ALEBO pri zaplnení out sa zvyšok zhrnie do " +N" (počet chunkov).
+// Vracia počet znakov. Bez veľkého stack-bufferu — píše priamo do 'out' (LoRa reply ~160 B).
+int fota_format_missing(char* out, int out_sz, int limit) {
+    if (out_sz <= 0) return 0;
+    out[0] = 0;
+    uint16_t lo, hi;
+    if (!fota_missing_range(&lo, &hi)) return 0;
+    char* p = out;
+    char* cap = out + out_sz - 12;                 // rezerva na " +NNNNN"
+    int total = 0, shown = 0, tokens = 0;
+    bool full = false;                             // buffer plný (zvyšok do "+N")
+    bool in_run = false; uint16_t rs = 0, re = 0;
+    for (uint16_t i = lo; ; i++) {
+        bool missing = !FOTA_BIT_GET(ota.bitmap, i);
+        if (missing) {
+            total++;
+            if (!in_run) { rs = re = i; in_run = true; } else re = i;
+        }
+        if (in_run && (!missing || i == hi)) {
+            if (!full && (limit <= 0 || tokens < limit)) {
+                int w = (re == rs) ? snprintf(p, cap - p, " %u", (unsigned)rs)
+                                   : snprintf(p, cap - p, " %u-%u", (unsigned)rs, (unsigned)re);
+                if (w < 0 || p + w >= cap) full = true;     // nezmestí → zvyšok do "+N"
+                else { p += w; tokens += (re == rs) ? 1 : 2; shown += (int)(re - rs + 1); }
+            }
+            in_run = false;
+        }
+        if (i == hi) break;
+    }
+    if (total > shown) p += snprintf(p, out + out_sz - p, " +%d", total - shown);
+    return (int)(p - out);
 }
 
 // ---- Odložená žiadosť o flash (ACK „accepted" musí odísť PRED rebootom) ----

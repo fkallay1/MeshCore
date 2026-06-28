@@ -65,17 +65,17 @@ void fota_handle_command(const char* args, char* reply) {
     } else if (strcmp(args, "nack") == 0) {
         fota_send_nack();
         strcpy(reply, "FOTA nack -> serial");
-    } else if (strcmp(args, "miss") == 0 || strcmp(args, "miss10") == 0) {
-        // Chýbajúce: na začiatku H (META) a S (SIG) ak chýbajú, potom chunky (od 0).
-        // miss = celý zoznam (koľko sa zmestí do reply); miss10 = prvých 10 položiek.
+    } else if (strcmp(args, "miss") == 0 || strcmp(args, "missall") == 0) {
+        // Chýbajúce: na začiatku H (META) a S (SIG) ak chýbajú, potom chunky (od 0)
+        // ako rozsahy — súvislý beh "od-do" (napr. "4-11"), jednotlivý ako "5".
+        // miss = strop FOTA_MISS_OUTTOKENS tokenov (číslo = 1, rozsah = 2; H/S sa NErátajú a vypíšu sa vždy);
+        // missall = všetky (capnuté len na dĺžku LoRa paketu). Zvyšné chunky ako "+N".
         // Oba ukážu CELKOVÝ počet. "Zero info yet" len ak neprišlo vôbec nič.
-        bool only10 = (args[4] == '1');                 // "miss10" má '1' na args[4]
+        bool show_all = (args[4] == 'a');               // "missall" má 'a' na args[4]
         const FotaState* st = fota_get_state();
         bool miss_h = !st->meta_recv;
         bool miss_s = !st->sig_recv;
-        uint16_t miss[64];
-        int n = 0;
-        int chunk_missing = fota_calc_missing(miss, (int)(sizeof(miss) / sizeof(miss[0])), &n);
+        int chunk_missing = fota_calc_missing(NULL, 0, NULL);   // len celkový počet
 
         bool any_info = st->meta_recv || st->sig_recv || st->recv_count > 0 || st->total_chunks > 0;
         if (!any_info) {
@@ -85,35 +85,28 @@ void fota_handle_command(const char* args, char* reply) {
             int chunk_total = (chunk_missing < 0) ? 0 : chunk_missing;
             int hs = (miss_h ? 1 : 0) + (miss_s ? 1 : 0);
             int total = hs + chunk_total;
+            int tok_lim = show_all ? 0 : FOTA_MISS_OUTTOKENS;   // 0 = všetky; inak tokenový strop (H/S mimo)
 
-            // Serial: plný detail (H/S + všetky/prvých 10 chunkov)
+            // Serial: plný detail (H/S vždy + chunky ako rozsahy)
             Serial.print(F("[FOTA] miss ")); Serial.print(total);
             if (st->total_chunks > 0) { Serial.print('/'); Serial.print(st->total_chunks); }
             else                        Serial.print(F(" (pred HEADER)"));
             Serial.print(F(": "));
-            int hs_shown = 0;
-            if (miss_h) { Serial.print(F("H ")); hs_shown++; }
-            if (miss_s) { Serial.print(F("S ")); hs_shown++; }
-            int chunk_lim = only10 ? (10 - hs_shown) : 0;   // 0 = všetky (pre 'miss')
-            if (!(only10 && chunk_lim <= 0)) fota_print_missing(chunk_lim);
+            if (miss_h) Serial.print(F("H "));
+            if (miss_s) Serial.print(F("S "));
+            fota_print_missing(tok_lim);
             Serial.println();
 
-            // Reply (LoRa aj Serial CLI): počet + zoznam, capnutý na dĺžku paketu
+            // Reply (LoRa aj Serial CLI): počet + H/S + zoznam rozsahov, capnutý na dĺžku paketu
             char* p = reply;
             p += sprintf(p, "FOTA miss=%d", total);
             if (st->total_chunks > 0) p += sprintf(p, "/%u", (unsigned)st->total_chunks);
             else                       p += sprintf(p, "(no hdr)");
             if (total > 0) *p++ = ':';
-            int show = only10 ? 10 : (2 + n);            // max položiek (H+S+buf chunky)
-            int shown = 0;
-            if (miss_h && shown < show) { p += sprintf(p, " H"); shown++; }
-            if (miss_s && shown < show) { p += sprintf(p, " S"); shown++; }
-            for (int i = 0; i < n && shown < show; i++) {
-                if ((int)(p - reply) > 140) break;       // dĺžkový strop (LoRa ~160 B)
-                p += sprintf(p, " %u", (unsigned)miss[i]);
-                shown++;
-            }
-            if (shown < total) p += sprintf(p, " +%d", total - shown);
+            if (miss_h) p += sprintf(p, " H");
+            if (miss_s) p += sprintf(p, " S");
+            int avail = 158 - (int)(p - reply);          // strop pre LoRa (~160 B)
+            if (avail > 8) p += fota_format_missing(p, avail, tok_lim);
             *p = 0;
         }
     } else if (strcmp(args, "dbg") == 0) {
@@ -122,7 +115,7 @@ void fota_handle_command(const char* args, char* reply) {
     } else if (strcmp(args, "id") == 0 || strcmp(args, "fwid") == 0) {
         fota_print_fw_id(reply);   // build#, image_size, plný running sha256 -> serial
     } else {
-        strcpy(reply, "FOTA: status|verify|flash|clear|decompress|nack|miss|miss10|dbg|id");
+        strcpy(reply, "FOTA: status|verify|flash|clear|decompress|nack|miss|missall|dbg|id");
     }
 }
 
