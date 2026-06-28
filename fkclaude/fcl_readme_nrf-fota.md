@@ -110,10 +110,13 @@ pio run -e ProMicro_repeater_fota
 
 ## 4. Ovládanie (Serial alebo LoRa admin CLI)
 
-`ota status | verify | flash | clear | decompress | nack | dbg`
+`ota status | verify | flash | clear | decompress | nack | miss | missall | dbg | id`
+(prefix `ota` aj `fota` funguje)
 
 - `ota verify` = dry-run (aplikuje patch → SHA256, **nič nezapíše**)
 - `ota flash`  = **OSTRÝ** flash + reboot (nevráti sa pri úspechu)
+- `ota miss`   = zoznam chýbajúcich chunkov ako rozsahy „od-do" (strop 20 tokenov, H/S vždy)
+- `ota missall`= všetky chýbajúce (bez tokenového stropu, len limit LoRa paketu)
 
 Cez Serial píš priamo (`ota status`). Cez LoRa idú ako admin CLI príkazy (existujúca
 MeshCore cesta). Flasher sa púšťa **manuálne** (`ota flash`) — auto-APPLY cez LoRa je tiež

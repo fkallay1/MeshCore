@@ -79,8 +79,9 @@ broadcast kolom. Žiadne ďalšie flagy netreba.
   Reálny signál úspechu = nabehne nový build#.
 
 ## Manuálne CLI príkazy na repeateri (COM5, serial)
-`ota status | verify | flash | clear | nack | dbg | agc`
+`ota status | verify | flash | clear | nack | miss | missall | dbg | agc`
 - `ota status` — recv/total/stav (`st=0x07` = VERIFIED).
 - `ota verify` — dry-run rekonštrukcia patchu + SHA256, **bez zápisu** (bezpečné).
 - `ota flash` — **OSTRÝ** flash + reboot (gatuje na VERIFIED).
+- `ota miss` / `missall` — chýbajúce chunky ako rozsahy „od-do" (miss = strop 20 tokenov, missall = všetky).
 - `ota clear` — zmaže FOTA session (`/ota/*`).

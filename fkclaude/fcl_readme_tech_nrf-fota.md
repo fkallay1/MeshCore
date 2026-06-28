@@ -173,10 +173,14 @@ pio run -e ProMicro_repeater_fota
 
 Príkazy (serial CLI alebo LoRa admin CLI cez `handleCommand`):
 ```
-ota status | verify | flash | clear | decompress | nack | dbg | agc
+ota status | verify | flash | clear | decompress | nack | miss | missall | dbg | agc | id
 ```
+(prefix `ota` aj `fota` funguje — keep-both po OTA→FOTA rename.)
 - `ota verify` = dry-run (aplikuje patch v RAM → SHA256, **nič nezapíše**).
 - `ota flash`  = **OSTRÝ** flash + reboot (pri úspechu sa nevráti).
+- `ota miss`   = chýbajúce chunky ako rozsahy „od-do" (napr. `H S 2 4-11 28 32-34 +N`),
+  strop `FOTA_MISS_OUTTOKENS` tokenov (číslo=1, rozsah=2; H/S sa nerátajú a vypíšu sa vždy).
+- `ota missall`= ako `miss`, ale **všetky** chýbajúce (capnuté len dĺžkou LoRa paketu).
 - `ota dbg`    = flasher debug (GPREGRET2/RESETREAS + trace z 0xEC000).
 - `ota agc`    = **read-only** AGC/gain diagnostika (viď §8.3).
 - `ota clear`  = zmaže FOTA session (`/ota/*`).
