@@ -976,6 +976,7 @@ MyMesh::MyMesh(mesh::MainBoard &board, mesh::Radio &radio, mesh::MillisecondCloc
   _prefs.flood_max_unscoped = 64;
   _prefs.flood_max_advert = 8;
   _prefs.interference_threshold = 0; // disabled
+  _prefs.cad_enabled = 0;            // hardware CAD before TX (off by default; 'set cad on')
 
   // bridge defaults
   _prefs.bridge_enabled = 1;    // enabled
@@ -1163,11 +1164,9 @@ void MyMesh::setTxPower(int8_t power_dbm) {
   radio_driver.setTxPower(power_dbm);
 }
 
-#if defined(USE_SX1262) || defined(USE_SX1268)
-void MyMesh::setRxBoostedGain(bool enable) {
-  radio_driver.setRxBoostedGainMode(enable);
+bool MyMesh::setRxBoostedGain(bool enable) {
+  return radio_driver.setRxBoostedGainMode(enable);
 }
-#endif
 
 void MyMesh::formatNeighborsReply(char *reply) {
   char *dp = reply;
