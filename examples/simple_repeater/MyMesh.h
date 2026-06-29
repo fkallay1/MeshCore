@@ -154,6 +154,9 @@ protected:
   int getInterferenceThreshold() const override {
     return _prefs.interference_threshold;
   }
+  bool getCADEnabled() const override {
+    return _prefs.cad_enabled;
+  }
   int getAGCResetInterval() const override {
     return ((int)_prefs.agc_reset_interval) * 4000;   // milliseconds
   }
@@ -292,7 +295,6 @@ public:
   // To check if there is pending work
   bool hasPendingWork() const;
 
-#if defined(USE_SX1262) || defined(USE_SX1268)
-  void setRxBoostedGain(bool enable) override;
-#endif
+  bool setRxBoostedGain(bool enable) override;
+
 };
