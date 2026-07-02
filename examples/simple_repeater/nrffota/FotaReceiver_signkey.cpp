@@ -1,5 +1,5 @@
 // =====================================================================
-// FotaReceiver_signkey.cpp — Autorizačné kľúče pre Ed25519 overenie OTA HEADER
+// FotaReceiver_signkey.cpp — Autorizačné kľúče pre Ed25519 overenie FOTA HEADER
 //
 #ifdef WITH_LORA_FOTA
 #include "FotaState.h"

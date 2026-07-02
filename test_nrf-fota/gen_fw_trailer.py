@@ -14,7 +14,7 @@ Vďaka tomu .hex / .zip / .uf2 nesú správne vyplnený trailer a navzájom sedi
 Layout FwIdTrailer (packed, viď nrffota/FwId.h):
   char magic[8]; uint32_t image_size; uint32_t build_number; uint8_t sha256[32];  // 48 B
 
-Zapojené v OTA env (variants/promicro/platformio.ini):
+Zapojené vo FOTA env (variants/promicro/platformio.ini):
     extra_scripts =
       pre:test_nrf-fota/gen_build_info.py
       post:test_nrf-fota/gen_fw_trailer.py

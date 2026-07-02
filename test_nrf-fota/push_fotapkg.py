@@ -77,7 +77,7 @@ def pick_files(initial_dir: str) -> list[str]:
     """Natívny multi-select dialóg → zoznam absolútnych ciest (prázdny = zrušené)."""
     buf_len = 1 << 16  # 64K znakov: pohodlne pre desiatky súborov
     buf = ctypes.create_unicode_buffer(buf_len)
-    flt = "OTA balíky\0*.fotapkg.json\0JSON\0*.json\0Všetko\0*.*\0\0"
+    flt = "FOTA balíky\0*.fotapkg.json\0JSON\0*.json\0Všetko\0*.*\0\0"
 
     ofn = OPENFILENAMEW()
     ofn.lStructSize = ctypes.sizeof(OPENFILENAMEW)

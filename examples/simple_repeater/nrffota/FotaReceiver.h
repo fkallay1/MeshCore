@@ -1,8 +1,8 @@
 #pragma once
 // =====================================================================
-// FotaReceiver.h — OTA prijímač: spracovanie paketov, CustomLFS, reboot-resilient
+// FotaReceiver.h — FOTA prijímač: spracovanie paketov, CustomLFS, reboot-resilient
 //
-// Port z FK_lora-sniffer/src/fota_receiver.h. Spracováva už DEŠIFROVANÝ OTA
+// Port z FK_lora-sniffer/src/fota_receiver.h. Spracováva už DEŠIFROVANÝ FOTA
 // payload (MeshCore GRP_DATA → mesh::Utils::MACThenDecrypt → onGroupDataRecv).
 // Žiadna dynamická pamäť (statický stav + statické buffre).
 // =====================================================================
@@ -18,8 +18,8 @@
 // Inicializácia — mount CustomLFS @ 0xD4000, pokus o resume po reboote.
 void fota_init();
 
-// Spracuj jeden OTA paket (plaintext, začína typovým bajtom FOTA_PKT_*).
-// Vracia true ak bol paket rozpoznaný ako OTA.
+// Spracuj jeden FOTA paket (plaintext, začína typovým bajtom FOTA_PKT_*).
+// Vracia true ak bol paket rozpoznaný ako FOTA.
 bool fota_process(const uint8_t* plain, int plen);
 
 // Manuálne spustenie aplikácie patchu (ak je FOTA_ST_VERIFIED).
@@ -44,8 +44,8 @@ void fota_request_apply();
 bool fota_apply_pending();
 void fota_clear_apply_pending();
 
-// Výpis dekódovaného OTA paketu (diagnostika pred spracovaním).
-// plain = pointer na OTA paket (začína typovým bajtom FOTA_PKT_*).
+// Výpis dekódovaného FOTA paketu (diagnostika pred spracovaním).
+// plain = pointer na FOTA paket (začína typovým bajtom FOTA_PKT_*).
 void fota_print_pkt(const uint8_t* plain, int plen, float rssi, float snr);
 
 // Stav session (len na čítanie).
@@ -57,11 +57,11 @@ uint32_t fota_running_fw_base(void);
 uint32_t fota_running_fw_size(void);
 
 // Výpis FW identity (build#, image_size, trailer sha256) + dopočítaný plný
-// SHA256 bežiaceho FW — na porovnanie s old_sha256 v .otapkg.json. reply =
+// SHA256 bežiaceho FW — na porovnanie s old_sha256 v .fotapkg.json. reply =
 // krátka odpoveď pre LoRa; detaily idú na Serial.
 void fota_print_fw_id(char* reply);
 
-// Vymaže všetky OTA súbory z CustomLFS + resetuje RAM stav.
+// Vymaže všetky FOTA súbory z CustomLFS + resetuje RAM stav.
 void fota_clear_session();
 
 // Načíta patch do čerstvo malloc-nutého RAM buffra (caller uvoľní free()).
@@ -70,7 +70,7 @@ void fota_clear_session();
 // *out_size = veľkosť patchu. Vracia NULL pri chybe (vrátane malloc zlyhania).
 uint8_t* fota_acquire_patch_ram(uint32_t* out_size);
 
-// Postav STATUS/NACK paket do out[] (pre odoslanie späť cez LoRa OTA kanál).
+// Postav STATUS/NACK paket do out[] (pre odoslanie späť cez LoRa FOTA kanál).
 // Vracia dĺžku payloadu, alebo 0 ak nie je čo poslať.
 int fota_build_status(uint8_t* out);
 int fota_build_nack(uint8_t* out);

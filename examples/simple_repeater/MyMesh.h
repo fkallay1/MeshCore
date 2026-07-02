@@ -181,21 +181,21 @@ protected:
   void onControlDataRecv(mesh::Packet* packet) override;
 
 #ifdef WITH_LORA_FOTA
-  mesh::GroupChannel _ota_channel;
-  bool _ota_ready;
-  // Deferred OTA spracovanie: onGroupDataRecv (volané z recv cesty) len ODLOŽÍ
+  mesh::GroupChannel _fota_channel;
+  bool _fota_ready;
+  // Deferred FOTA spracovanie: onGroupDataRecv (volané z recv cesty) len ODLOŽÍ
   // payload sem; pomalé FS I/O (CustomLFS) sa spraví až v loop() PO tom, čo
   // dispatcher re-armne rádio do RX — inak by FS zápis v recv callbacku oneskoril
   // re-arm a rádio by po prvom pakete prestalo prijímať.
-  uint8_t _ota_pending[MAX_PACKET_PAYLOAD];
-  int     _ota_pending_len;   // 0 = nič nečaká
-  float   _ota_pending_rssi, _ota_pending_snr;
+  uint8_t _fota_pending[MAX_PACKET_PAYLOAD];
+  int     _fota_pending_len;   // 0 = nič nečaká
+  float   _fota_pending_rssi, _fota_pending_snr;
   // RAW príjem (PRED dekódovaním/dešifrovaním) — koľko surových rámcov rádio
   // vôbec prijalo (CRC-OK). Ak rastie ale GRP_DATA neprichádza → problém je
   // v dekódovaní/zhode kanála, nie v RF spoji.
-  volatile uint32_t _ota_raw_rx;
-  uint32_t          _ota_raw_last_len;
-  float             _ota_raw_last_rssi, _ota_raw_last_snr;
+  volatile uint32_t _fota_raw_rx;
+  uint32_t          _fota_raw_last_len;
+  float             _fota_raw_last_rssi, _fota_raw_last_snr;
   int searchChannelsByHash(const uint8_t* hash, mesh::GroupChannel channels[], int max_matches) override;
   void onGroupDataRecv(mesh::Packet* packet, uint8_t type, const mesh::GroupChannel& channel, uint8_t* data, size_t len) override;
 

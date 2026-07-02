@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 gen_fotapkg.py — vygeneruje fw.fotapkg.json (upgrade) a fw_reverse.fotapkg.json
-(rollback) pre Flutter OTA appku (mc-fotanrf-fotapkg/1).
+(rollback) pre Flutter FOTA appku (mc-fotanrf-fotapkg/1).
 
 Tri režimy:
   1) --from-hex <firmware.hex>   extrahuje app image z HEX, archivuje ho ako
@@ -79,7 +79,7 @@ def read_ihex(path: Path) -> bytearray:
 def build_number(flat: bytes) -> int:
     idx = flat.find(MAGIC)
     if idx < 0:
-        raise SystemExit("[fotapkg] magic FKFWID01 nenájdený v image — nie OTA build?")
+        raise SystemExit("[fotapkg] magic FKFWID01 nenájdený v image — nie FOTA build?")
     return struct.unpack_from("<I", flat, idx + OFF_BUILD)[0]
 
 

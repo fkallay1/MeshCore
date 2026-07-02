@@ -8,7 +8,7 @@
 #if defined(FK_DEBUG_STACKTRACE) && defined(INCLUDE_pxTaskGetStackStart) && INCLUDE_pxTaskGetStackStart == 1
 #include <task.h>                 // pxTaskGetStackStart — AKTUÁLNE použitie loop-stacku (FK_DEBUG_STACKTRACE)
 #endif
-extern RADIO_CLASS radio;   // surový RadioLib SX1262 (z target.cpp) — pre AGC register read ('ota agc')
+extern RADIO_CLASS radio;   // surový RadioLib SX1262 (z target.cpp) — pre AGC register read ('fota agc')
 #if __has_include("build_info.h")
   #include "build_info.h"   // DOČASNÉ: test_nrf-fota/gen_build_info.py (pre-script)
 #endif
@@ -545,11 +545,11 @@ void MyMesh::logRxRaw(float snr, float rssi, const uint8_t raw[], int len) {
   // dekódovaním typu/route a dešifrovaním. Toto je odpoveď na otázku "prichádzajú
   // na repeater hocijaké pakety?" — ak toto rastie ale GRP_DATA/onGroupDataRecv
   // nie, chyba je v dekódovaní (typ/hash/krypto), nie v RF.
-  _ota_raw_rx++;
-  _ota_raw_last_len  = (uint32_t)len;
-  _ota_raw_last_rssi = rssi;
-  _ota_raw_last_snr  = snr;
-  Serial.print(F("[FOTA] RAW #")); Serial.print(_ota_raw_rx);
+  _fota_raw_rx++;
+  _fota_raw_last_len  = (uint32_t)len;
+  _fota_raw_last_rssi = rssi;
+  _fota_raw_last_snr  = snr;
+  Serial.print(F("[FOTA] RAW #")); Serial.print(_fota_raw_rx);
   Serial.print(F(" len="));  Serial.print(len);
   Serial.print(F(" rssi=")); Serial.print((int)rssi);
   Serial.print(F(" snr="));  Serial.print(snr, 1);
@@ -570,11 +570,11 @@ void MyMesh::logRxRaw(float snr, float rssi, const uint8_t raw[], int len) {
       path_byte_len = path_count * hsize;
       payload_off   = path_off + path_byte_len;
     }
-    // Naša FOTA? GRP_DATA na našom OTA kanáli — channel_hash je 1. bajt payloadu
+    // Naša FOTA? GRP_DATA na našom FOTA kanáli — channel_hash je 1. bajt payloadu
     // (Mesh.cpp: channel_hash = payload[0]); čitateľné už tu, pred dešifrovaním.
-    bool is_fota = (pt == PAYLOAD_TYPE_GRP_DATA && _ota_ready
+    bool is_fota = (pt == PAYLOAD_TYPE_GRP_DATA && _fota_ready
                     && payload_off >= 0 && payload_off < len
-                    && raw[payload_off] == _ota_channel.hash[0]);
+                    && raw[payload_off] == _fota_channel.hash[0]);
     Serial.print(F(" type=")); Serial.print(pt);
     Serial.print('('); Serial.print(payload_type_name(pt));
     if (is_fota) Serial.print(F("/FOTA"));
@@ -987,49 +987,49 @@ void MyMesh::onControlDataRecv(mesh::Packet* packet) {
 }
 
 #ifdef WITH_LORA_FOTA
-// Repeater "subscribne" jediný OTA kanál — keď sa channel_hash zhoduje,
+// Repeater "subscribne" jediný FOTA kanál — keď sa channel_hash zhoduje,
 // MeshCore dešifruje GRP_DATA cez fota_channel.secret a zavolá onGroupDataRecv().
 int MyMesh::searchChannelsByHash(const uint8_t* hash, mesh::GroupChannel channels[], int max_matches) {
-  if (_ota_ready && max_matches > 0 && hash[0] == _ota_channel.hash[0]) {
-    channels[0] = _ota_channel;
+  if (_fota_ready && max_matches > 0 && hash[0] == _fota_channel.hash[0]) {
+    channels[0] = _fota_channel;
     return 1;
   }
   return 0;
 }
 
-// Dešifrovaný GRP_DATA payload: [ts 4B LE][fota_type 1B][...]. OTA payload
+// Dešifrovaný GRP_DATA payload: [ts 4B LE][fota_type 1B][...]. FOTA payload
 // začína za 4B timestampom (zhodné s fota_sender.py meshcore_grp_data_packet).
 void MyMesh::onGroupDataRecv(mesh::Packet* packet, uint8_t type, const mesh::GroupChannel& channel,
                              uint8_t* data, size_t len) {
   if (type != PAYLOAD_TYPE_GRP_DATA) return;
-  if (channel.hash[0] != _ota_channel.hash[0]) return;   // nie náš OTA kanál
-  // Zjednotený OTA formát: štandardný GRP_DATA plaintext = [data_type 2B][len 1B][ts 4B][fota_payload].
-  // Odlúpni [data_type][len]; ak data_type != FOTA_MAGIC, nie je to OTA. Po odlúpnutí má
+  if (channel.hash[0] != _fota_channel.hash[0]) return;   // nie náš FOTA kanál
+  // Zjednotený FOTA formát: štandardný GRP_DATA plaintext = [data_type 2B][len 1B][ts 4B][fota_payload].
+  // Odlúpni [data_type][len]; ak data_type != FOTA_MAGIC, nie je to FOTA. Po odlúpnutí má
   // buffer tvar [ts 4B][fota_payload] — zvyšok pipeline (loop +4) ostáva nezmenený.
   if (len < 3 + 5) return;                               // [dt2][len1] + [ts4][type1]
   uint16_t dtype = (uint16_t)data[0] | ((uint16_t)data[1] << 8);
-  if (dtype != FOTA_MAGIC) return;                        // nie náš OTA data_type
+  if (dtype != FOTA_MAGIC) return;                        // nie náš FOTA data_type
   // data[2] = pravá dĺžka [ts4][fota_payload]. MACThenDecrypt vracia AES-padovanú
   // (16B) dĺžku, preto NEporovnávaj s len; použi data[2] na strhnutie paddingu.
   uint8_t inner = data[2];
   if (inner < 5 || (size_t)(3 + inner) > len) return;    // sanity vs padded buffer
   data += 3; len = inner;                                // → presné [ts4][fota_payload]
 #ifdef FOTA_GDR_DIAG
-  Serial.print(F("[DIAG] GDR otatype=0x")); Serial.print(data[4], HEX);
+  Serial.print(F("[DIAG] GDR fota_type=0x")); Serial.print(data[4], HEX);
   Serial.print(F(" len=")); Serial.print((int)len);
-  Serial.print(F(" pending=")); Serial.println(_ota_pending_len);
+  Serial.print(F(" pending=")); Serial.println(_fota_pending_len);
 #endif
   // Odlož payload — pomalé CustomLFS I/O sa spraví v loop() PO tom, čo dispatcher
   // re-armne rádio do RX. FS zápis priamo tu oneskoroval re-arm a rádio po prvom
   // pakete prestávalo prijímať. Ak ešte čaká predošlý, tento zahodíme (loop ho
   // stihne spracovať skôr ako príde ďalší LoRa paket pri SF7).
-  if (_ota_pending_len == 0) {
+  if (_fota_pending_len == 0) {
     int n = (int)len;
-    if (n > (int)sizeof(_ota_pending)) n = (int)sizeof(_ota_pending);
-    memcpy(_ota_pending, data, n);
-    _ota_pending_len  = n;
-    _ota_pending_rssi = (float)radio_driver.getLastRSSI();
-    _ota_pending_snr  = packet->getSNR();
+    if (n > (int)sizeof(_fota_pending)) n = (int)sizeof(_fota_pending);
+    memcpy(_fota_pending, data, n);
+    _fota_pending_len  = n;
+    _fota_pending_rssi = (float)radio_driver.getLastRSSI();
+    _fota_pending_snr  = packet->getSNR();
   } else {
     Serial.println(F("[FOTA] WARN pending busy, paket zahodený"));
   }
@@ -1136,14 +1136,14 @@ MyMesh::MyMesh(mesh::MainBoard &board, mesh::Radio &radio, mesh::MillisecondCloc
 void MyMesh::begin(FILESYSTEM *fs) {
 #ifdef WITH_LORA_FOTA
   fota_check_flasher_debug();   // prečítaj GPREGRET2/RESETREAS čo najskôr po boote
-  _ota_ready = false;
-  _ota_pending_len = 0;
+  _fota_ready = false;
+  _fota_pending_len = 0;
   _fota_cli_pending = false;
   _fota_cli_buf = nullptr;
   _fota_apply_deadline = 0;
-  _ota_raw_rx = 0;
-  _ota_raw_last_len = 0;
-  _ota_raw_last_rssi = _ota_raw_last_snr = 0;
+  _fota_raw_rx = 0;
+  _fota_raw_last_len = 0;
+  _fota_raw_last_rssi = _fota_raw_last_snr = 0;
 #endif
   mesh::Mesh::begin();
   _fs = fs;
@@ -1198,8 +1198,8 @@ void MyMesh::begin(FILESYSTEM *fs) {
 
 #ifdef WITH_LORA_FOTA
   fota_init();                      // mount CustomLFS @ 0xD4000 + resume
-  fota_build_channel(_ota_channel); // OTA GRP_DATA kanál z PSK
-  _ota_ready = true;
+  fota_build_channel(_fota_channel); // FOTA GRP_DATA kanál (#-konvencia z FOTA_CHANNEL_NAME)
+  _fota_ready = true;
   fota_print_flasher_debug();       // ak sa práve vrátil z flashera
   Serial.print(F("[FOTA] build #")); Serial.print(FW_BUILD_NUMBER);
   Serial.print(F("  freq=")); Serial.print(_prefs.freq, 3);
@@ -1525,9 +1525,9 @@ void MyMesh::runFotaCli(const char* fargs, char* reply) {
             (int)inst_rssi, (int)_radio->getNoiseFloor(),
             (unsigned long)(((uint32_t)_prefs.agc_reset_interval) * 4));
   } else {
-    // POZOR: AGC auto-reset (set agc.reset.interval > 0) NEKOMBINOVAŤ s OTA flashom!
-    // Ak agc resety (radio.sleep+calibrate) bežia počas OTA session, nasledujúci
-    // 'ota flash' zlyhá (flasher sa zastaví po "Komprimovany format", repeater
+    // POZOR: AGC auto-reset (set agc.reset.interval > 0) NEKOMBINOVAŤ s FOTA flashom!
+    // Ak agc resety (radio.sleep+calibrate) bežia počas FOTA session, nasledujúci
+    // 'fota flash' zlyhá (flasher sa zastaví po "Komprimovany format", repeater
     // nabehne na OLD). Pri agc_reset=0 funguje príjem aj flash spoľahlivo.
     // (Overené 2026-06-15: agc=0 #28→#29 PASS; agc=8 #28→#29 aj #30→#31 FAIL.)
     fota_handle_command(fargs, reply);   // LoRa-FOTA: status|verify|flash|clear|id|...
@@ -1637,13 +1637,13 @@ void MyMesh::loop() {
   last_millis = now;
 
 #ifdef WITH_LORA_FOTA
-  // Odložené OTA spracovanie — mesh::Mesh::loop() vyššie už re-armol rádio do RX,
+  // Odložené FOTA spracovanie — mesh::Mesh::loop() vyššie už re-armol rádio do RX,
   // takže pomalé CustomLFS I/O tu už nezablokuje príjem ďalšieho paketu.
-  if (_ota_pending_len > 0) {
-    int n = _ota_pending_len;
-    fota_print_pkt(_ota_pending + 4, n - 4, _ota_pending_rssi, _ota_pending_snr);
-    fota_process(_ota_pending + 4, n - 4);
-    _ota_pending_len = 0;   // uvoľni buffer až po spracovaní
+  if (_fota_pending_len > 0) {
+    int n = _fota_pending_len;
+    fota_print_pkt(_fota_pending + 4, n - 4, _fota_pending_rssi, _fota_pending_snr);
+    fota_process(_fota_pending + 4, n - 4);
+    _fota_pending_len = 0;   // uvoľni buffer až po spracovaní
   }
 
   // Odložené FOTA CLI (z LoRa) — tu beží na PLYTKOM stacku ako Serial cesta.
@@ -1682,14 +1682,14 @@ void MyMesh::loop() {
   }
 
 #ifdef FK_DEBUG
-  // DOČASNÉ: heartbeat s build# (na detekciu verzie pri OTA teste cez Serial)
+  // DOČASNÉ: heartbeat s build# (na detekciu verzie pri FOTA teste cez Serial)
   static unsigned long s_next_build_print = 0;
   if (s_next_build_print == 0 || millisHasNowPassed(s_next_build_print)) {
     s_next_build_print = futureMillis(5000);
     Serial.print(F("[FOTA] AALIVE build #")); Serial.print(FW_BUILD_NUMBER);
     Serial.print(F("  freq=")); Serial.print(_prefs.freq, 3);
     Serial.print(F(" sf="));    Serial.print(_prefs.sf);
-    Serial.print(F(" rawrx=")); Serial.print(_ota_raw_rx);       // surové rámce (pred dekódom)
+    Serial.print(F(" rawrx=")); Serial.print(_fota_raw_rx);       // surové rámce (pred dekódom)
     Serial.print(F(" rxpkts=")); Serial.print(radio_driver.getPacketsRecv());
     Serial.print(F(" rxerr=")); Serial.print(radio_driver.getPacketsRecvErrors());
 #ifdef FK_DEBUG_STACKTRACE

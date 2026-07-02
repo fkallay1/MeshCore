@@ -1,5 +1,5 @@
 @echo off
-rem Spusti push_otapkg.py (vyber .otapkg.json -> adb push do telefonu).
+rem Spusti push_fotapkg.py (vyber .fotapkg.json -> adb push do telefonu).
 rem Double-click; netreba zadavat cesty.
 cd /d "%~dp0"
 

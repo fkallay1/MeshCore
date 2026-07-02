@@ -10,13 +10,13 @@ Po tom, čo gen_fw_trailer.py vyplní FwIdTrailer vo firmware.hex, tento hook:
 NEFATÁLNE: akékoľvek zlyhanie (chýbajúci predošlý build, hdiffi, privkey…) len
 vypíše varovanie a NIKDY nezhodí build.
 
-Zapojené v OTA env PO gen_fw_trailer (poradie v extra_scripts určuje poradie
+Zapojené vo FOTA env PO gen_fw_trailer (poradie v extra_scripts určuje poradie
 post-akcií na firmware.hex):
     post:test_nrf-fota/gen_fw_trailer.py
     post:test_nrf-fota/gen_fotapkg_hook.py
 
 Vypnutie: zakomentuj riadok v variants/promicro/platformio.ini, alebo nastav
-env premennú OTAPKG_SKIP=1.
+env premennú FOTAPKG_SKIP=1 (legacy OTAPKG_SKIP=1 tiež funguje).
 """
 import locale
 import os
@@ -39,8 +39,8 @@ def _safe_print(s):  # noqa: ANN001
 
 
 def _post(source, target, env):  # noqa: ANN001
-    if os.environ.get("OTAPKG_SKIP"):
-        print("[fotapkg] hook: OTAPKG_SKIP nastavené — preskakujem")
+    if os.environ.get("FOTAPKG_SKIP") or os.environ.get("OTAPKG_SKIP"):
+        print("[fotapkg] hook: FOTAPKG_SKIP nastavené — preskakujem")
         return
     hexf = env.subst("$BUILD_DIR/${PROGNAME}.hex")
     script = Path(env.subst("$PROJECT_DIR")) / "test_nrf-fota" / "gen_fotapkg.py"

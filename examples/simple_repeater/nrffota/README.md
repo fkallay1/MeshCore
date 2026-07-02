@@ -1,6 +1,6 @@
-# nrffota — LoRa-OTA (delta-patch) pre MeshCore repeater (nRF52840)
+# nrffota — LoRa-FOTA (delta-patch) pre MeshCore repeater (nRF52840)
 
-Port funkčného OTA systému z projektu **FK_lora-sniffer** do MeshCore repeatera.
+Port funkčného FOTA systému z projektu **FK_lora-sniffer** do MeshCore repeatera.
 Umožňuje aktualizovať firmvér repeatera **cez LoRa** prenosom malého delta-patchu
 (rozdiel medzi starým a novým FW), nie celého firmvéru.
 
@@ -15,14 +15,14 @@ PC (fota_sender.py)                     Repeater (nRF52840)
   zlib(-9, wbits=-9) → staged            fota_process()
   GRP_DATA (AES-128-ECB + HMAC) ──LoRa──▶ chunky → CustomLFS append-log
   HEADER / CHUNK / APPLY                   COMPLETE → assemble patch.bin + SHA256
-                                          'ota flash' → flasher@0xEB000:
+                                          'fota flash' → flasher@0xEB000:
                                             HPatchLite inplaceB (old=XIP, new=app flash)
                                             streaming DEFLATE (puff_stream)
                                             NVMC zápis + verify → reset
 ```
 
-- **Transport:** OTA pakety idú ako MeshCore `PAYLOAD_TYPE_GRP_DATA` na dedikovanom
-  kanáli (PSK). MeshCore ich dešifruje (`Utils::MACThenDecrypt`, AES-128-ECB +
+- **Transport:** FOTA pakety idú ako MeshCore `PAYLOAD_TYPE_GRP_DATA` na dedikovanom
+  kanáli (`#fkotanrf`, #-konvencia). MeshCore ich dešifruje (`Utils::MACThenDecrypt`, AES-128-ECB +
   HMAC-SHA256) a `MyMesh::onGroupDataRecv()` ich odovzdá do `fota_process()`.
   Žiadna zmena jadra MeshCore — len override `searchChannelsByHash()` +
   `onGroupDataRecv()`.
@@ -34,7 +34,7 @@ PC (fota_sender.py)                     Repeater (nRF52840)
 
 ```
 0x26000 - 0xD4000 : aplikačný kód repeatera (712 kB)
-0xD4000 - 0xEB000 : OTA FS (CustomLFS, 92 kB — recv.log/patch.bin/meta/bitmap)
+0xD4000 - 0xEB000 : FOTA FS (CustomLFS, 92 kB — recv.log/patch.bin/meta/bitmap)
 0xEB000 - 0xEC000 : flasher kód (4 kB, beží mimo app flash)
 0xEC000 - 0xED000 : flasher trace/meta (4 kB)
 0xED000 - 0xF4000 : MeshCore InternalFS (28 kB — identity/prefs/ACL, NEDOTKNUTÝ)
@@ -50,37 +50,44 @@ app base `0x27000` — nič netreba nastavovať: FW ho zistí z linker symbolu
 # 1) vygeneruj flasher blob (raz, resp. po zmene flasher/flasher.c)
 python examples/simple_repeater/nrffota/tools/build_flasher.py
 
-# 2) build OTA repeatera
+# 2) build FOTA repeatera
 pio run -e ProMicro_repeater_fota
 ```
 
-OTA je zapnuté build-flagom `-D WITH_LORA_FOTA=1` (viď `variants/promicro/platformio.ini`).
-Bez tohto flagu sú všetky `nrffota/` súbory inertné → stock repeater builды sú
-nedotknuté. PSK kanála: `-D FOTA_CHANNEL_PSK='"..."'` (musí sa zhodovať so senderom).
+FOTA je zapnuté build-flagom `-D WITH_LORA_FOTA=1` (viď `variants/promicro/platformio.ini`).
+Bez tohto flagu sú všetky `nrffota/` súbory inertné → stock repeater buildy sú
+nedotknuté. Kanál: `-D FOTA_CHANNEL_NAME='"#fkotanrf"'` — MeshCore #-konvencia
+(secret = SHA256(meno)[0:16]), musí sa zhodovať so senderom.
 
 ## Ovládanie (Serial alebo LoRa admin CLI)
 
-| Príkaz           | Akcia                                                      |
-|------------------|------------------------------------------------------------|
-| `ota status`     | stav session (recv/total, flags, veľkosť)                  |
-| `ota verify`     | dry-run: aplikuj patch → SHA256, **nič nezapisuje**        |
-| `ota flash`      | **OSTRÝ** flash + reboot (nevráti sa pri úspechu)          |
-| `ota clear`      | vymaž OTA session z FS                                     |
-| `ota decompress` | debug: dekomprimuj patch.bin cez puff_stream, vypíš FNV    |
-| `ota nack`       | vypíš chýbajúce chunky                                     |
-| `ota dbg`        | vypíš flasher debug marker (GPREGRET2/RESETREAS + trace)   |
+| Príkaz            | Akcia                                                      |
+|-------------------|------------------------------------------------------------|
+| `fota status`     | stav session (recv/total, flags, veľkosť)                  |
+| `fota verify`     | dry-run: aplikuj patch → SHA256, **nič nezapisuje**        |
+| `fota flash`      | **OSTRÝ** flash + reboot (nevráti sa pri úspechu)          |
+| `fota clear`      | vymaž FOTA session z FS                                    |
+| `fota miss`       | chýbajúce chunky ako rozsahy „od-do" (strop 20 tokenov)    |
+| `fota missall`    | všetky chýbajúce (bez tokenového stropu)                   |
+| `fota nack`       | vypíš chýbajúce chunky (NACK formát)                       |
+| `fota decompress` | debug: dekomprimuj patch.bin cez puff_stream, vypíš FNV    |
+| `fota dbg`        | vypíš flasher debug marker (GPREGRET2/RESETREAS + trace)   |
+| `fota id`         | FW identita (build#, veľkosť, running SHA256)              |
+| `fota agc`        | read-only diagnostika rádia (RxGain, RSSI, noise floor)    |
 
-Na Serial sa píšu priamo (`ota status`). Cez LoRa idú ako admin CLI príkazy
+Legacy prefix `ota …` stále funguje (alias, viď `FOTA-CLI-ALIAS` v MyMesh.cpp).
+Na Serial sa píšu priamo (`fota status`). Cez LoRa idú ako admin CLI príkazy
 (rovnaká cesta ako ostatné MeshCore CLI cez `onPeerDataRecv` TXT).
 
 ## Posielanie patchu z PC
 
-Pozri `FK_lora-sniffer/tools/fota_sender.py --mode meshcore --psk meshcore-ota`.
-Generuje patch (`hdiffi -inplaceB` + zlib) a vysiela HEADER/CHUNK/APPLY ako GRP_DATA.
+Pozri `test_nrf-fota/fota_sender.py --mode meshcore` (bridge) alebo
+`test_nrf-fota/fota_sender_mcpy.py` (cez companion). Generuje patch
+(`hdiffi -inplaceB` + zlib) a vysiela HEADER/CHUNK/APPLY ako GRP_DATA.
 
 ## Bezpečnosť flashera
 
 - Pred prepisom overí, že bežiaci FW == `old` z patchu (SHA256). Ak nesedí → nepíše.
 - Po zápise prečíta flash späť (FNV-1a) a pri nezhode skočí do DFU bootloadera
   namiesto bootu pokazeného FW (zariadenie sa dá obnoviť cez USB).
-- `ota verify` (dry-run) prejde celý patch bez zápisu — testuj ho pred `ota flash`.
+- `fota verify` (dry-run) prejde celý patch bez zápisu — testuj ho pred `fota flash`.

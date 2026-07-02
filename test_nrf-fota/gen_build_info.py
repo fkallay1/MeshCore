@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
 """
-gen_build_info.py — PlatformIO PRE-build skript pre OTA test repeatera.
+gen_build_info.py — PlatformIO PRE-build skript pre FOTA test repeatera.
 
 Pri každom builde:
   - inkrementuje build counter v test_nrf-fota/build_number.txt
   - vygeneruje test_nrf-fota/build_info.h s FW_BUILD_NUMBER + FW_BUILD_TIME
 
-MyMesh (pod -DWITH_LORA_OTA) vypíše "build #N" v heartbeate → po OTA flash z
+MyMesh (pod -DWITH_LORA_FOTA) vypíše "build #N" v heartbeate → po FOTA flash z
 neho priamo vidíš, ktorý build beží (NEW musí mať vyššie číslo ako OLD). Toto je
 zároveň mechanizmus ktorý zaručí OLD != NEW (build# je súčasť kódu → každý build
 je iný → patch nie je prázdny).
 
-Zapojené v OTA env (variants/promicro/platformio.ini):
+Zapojené vo FOTA env (variants/promicro/platformio.ini):
     extra_scripts = pre:test_nrf-fota/gen_build_info.py
     build_flags  += -I test_nrf-fota
 
-DOČASNÉ testovacie lešenie — pre produkčný OTA build to nie je potrebné.
+DOČASNÉ testovacie lešenie — pre produkčný FOTA build to nie je potrebné.
 """
 import datetime
 from pathlib import Path

@@ -1,19 +1,19 @@
 #pragma once
 // =====================================================================
-// FotaProtocol.h — on-air protokol OTA-over-LoRa (MeshCore port)
+// FotaProtocol.h — on-air protokol FOTA-over-LoRa (MeshCore port)
 //
 // Port z FK_lora-sniffer/src/fota_proto.h. Portable: žiadne Arduino
 // závislosti, použiteľné aj na PC strane (fota_sender.py / ctypes).
 //
-// V MeshCore prichádzajú OTA pakety zabalené v GRP_DATA (AES-128-ECB +
+// V MeshCore prichádzajú FOTA pakety zabalené v GRP_DATA (AES-128-ECB +
 // HMAC-SHA256), repeater ich dešifruje cez mesh::Utils::MACThenDecrypt
 // a v onGroupDataRecv() odovzdá do FotaReceiver. Plaintext má tvar:
-//   [ts 4B LE][fota_type 1B][...]   — OTA payload začína na fota_type.
+//   [ts 4B LE][fota_type 1B][...]   — FOTA payload začína na fota_type.
 // =====================================================================
 #include <stdint.h>
 
 // =====================================================================
-// Typy OTA paketov (prvý bajt OTA payloadu — za 4B timestampom GRP_DATA)
+// Typy FOTA paketov (prvý bajt FOTA payloadu — za 4B timestampom GRP_DATA)
 // =====================================================================
 #define FOTA_PKT_HEADER    0x10   // PC → zariadenie: META (metadáta patchu, podpisované)
 #define FOTA_PKT_CHUNK    0x11   // PC → zariadenie: jeden chunk patch dát
@@ -22,10 +22,10 @@
 #define FOTA_PKT_STATUS   0x20   // zariadenie → PC: stav prijímania
 #define FOTA_PKT_NACK     0x21   // zariadenie → PC: chýbajúce chunky
 
-// Zjednotený OTA formát v0 (bridge aj companion) — viď
-// docs/superpowers/specs/2026-06-23-fota-companion-mcpy-design.md
-#define FOTA_MAGIC         0x07A0 // GRP_DATA data_type pre OTA (gating diskriminátor)
-#define FOTA_PROT_INF_V0   0x00   // verzia OTA protokolu/štruktúr
+// Zjednotený FOTA formát v0 (bridge aj companion) — viď
+// fkclaude/docs/superpowers/specs/2026-06-23-fota-companion-mcpy-design.md
+#define FOTA_MAGIC         0x07A0 // GRP_DATA data_type pre FOTA (gating diskriminátor)
+#define FOTA_PROT_INF_V0   0x00   // verzia FOTA protokolu/štruktúr
 
 // Max dát v jednom FOTA_CHUNK. Cez štandardný GRP_DATA (sendGroupData) je
 // data_len ≤ MAX_GROUP_DATA_LENGTH(165); data = [ts 4B] + chunk(13 + DATA),

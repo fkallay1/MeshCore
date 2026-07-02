@@ -99,8 +99,8 @@ Build/flash (z `FK_lora-sniffer`): `pio run -e Xiao_bridge -t upload --upload-po
   **Nie je to RF korupcia ani reálny drop** — RF chybu by zachytil LoRa PHY CRC / MAC pred dešifrovaním.
 - **Header NIE je väčší než plný chunk** — oba 181 B na drôte (count-0); header bol problém len
   ako single-point-of-failure (1×/kolo) na zahltenom relay spoji.
-- Voliteľná diagnostika príjmu: build s `-DOTA_GDR_DIAG` → `MyMesh::onGroupDataRecv` vypíše
-  `otatype/route/hops` (0x10=HEADER, 0x11=CHUNK) každého dešifrovaného GRP_DATA.
+- Voliteľná diagnostika príjmu: build s `-DFOTA_GDR_DIAG` → `MyMesh::onGroupDataRecv` vypíše
+  `fota_type/route/hops` (0x10=HEADER, 0x11=CHUNK) každého dešifrovaného GRP_DATA.
 
 ---
 
@@ -108,7 +108,8 @@ Build/flash (z `FK_lora-sniffer`): `pio run -e Xiao_bridge -t upload --upload-po
 
 ```bash
 PENV="D:/FkDev/.platformio/penv/Scripts/python.exe"
-PSK=$(python -c "print(b'meshcore-ota-key'.hex())")
+# kanál #fkotanrf, #-konvencia: psk = SHA256(mena)[0:16]
+PSK=$(cd test_nrf-fota && "$PENV" -c "from fota_sender import fota_channel_secret; print(fota_channel_secret().hex())")
 
 # zero-hop (default) — priami susedia, nikto nerepeatuje
 "$PENV" test_nrf-fota/fota_sender.py --old old.bin --new new.bin --port COM3 --mode meshcore --psk $PSK --privkey test_nrf-fota/test_key.der

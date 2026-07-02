@@ -1,6 +1,6 @@
 #pragma once
 // =====================================================================
-// flash_layout.h — OTA flash mapa pre MeshCore nRF52840 repeater.
+// flash_layout.h — FOTA flash mapa pre MeshCore nRF52840 repeater.
 //
 // Iba NUMERICKÉ makrá → freestanding-safe (kompiluje sa aj do standalone
 // flashera v tools/build_flasher.py, ktorý beží bez Arduino/newlib).
@@ -11,7 +11,7 @@
 //
 // Layout (zhodný princíp s FK_lora-sniffer, prispôsobený MeshCore):
 //   APP_FLASH_START - 0xD4000 : aplikačný kód (repeater FW)
-//   0xD4000 - 0xEB000         : OTA FS (CustomLFS, 92kB — recv.log/patch.bin/meta/bitmap)
+//   0xD4000 - 0xEB000         : FOTA FS (CustomLFS, 92kB — recv.log/patch.bin/meta/bitmap)
 //   0xEB000 - 0xEC000         : flasher kód (4kB ARM Thumb2)
 //   0xEC000 - 0xED000         : flasher metadata + trace log (4kB)
 //   0xED000 - 0xF4000         : MeshCore InternalFS (28kB, NEDOTKNUTÝ — identity/prefs/ACL)

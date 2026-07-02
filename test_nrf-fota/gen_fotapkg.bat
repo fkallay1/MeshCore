@@ -16,7 +16,7 @@ set "PYTHONUTF8=1"
 set "PYTHONIOENCODING=utf-8"
 
 if not exist "builds" (
-    echo CHYBA: adresar builds\ neexistuje - najprv buildni OTA env.
+    echo CHYBA: adresar builds\ neexistuje - najprv buildni FOTA env.
     pause & exit /b 1
 )
 

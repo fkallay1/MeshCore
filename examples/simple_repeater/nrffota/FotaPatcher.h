@@ -1,6 +1,6 @@
 #pragma once
 // =====================================================================
-// FotaPatcher.h — Aplikácia OTA patchu (MeshCore port z FK_lora-sniffer)
+// FotaPatcher.h — Aplikácia FOTA patchu (MeshCore port z FK_lora-sniffer)
 //
 // ┌─────────────────────────────────────────────────────────────────┐
 // │ TEST (overenie príjmu):  fota_patch_to_file()                    │

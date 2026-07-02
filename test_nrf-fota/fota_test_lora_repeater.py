@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-fota_test_lora_repeater.py — end-to-end OTA test MeshCore repeatera cez LoRa.
+fota_test_lora_repeater.py — end-to-end FOTA test MeshCore repeatera cez LoRa.
 
 Topológia (rovnaká ako FK_lora fota_test_lora.py):
     PC ──USB── BRIDGE (XIAO, FK_lora gateway_fw) ──LoRa── REPEATER (ProMicro, MeshCore) ──USB── PC
               (--bridge-port COM3)                        (--target-port COM5, monitoring + CLI)
 
-OTA ide cez MeshCore GRP_DATA (šifrované, PSK). Sender = test_nrf-fota/fota_sender.py
+FOTA ide cez MeshCore GRP_DATA (šifrované, kanál #fkotanrf). Sender = test_nrf-fota/fota_sender.py
 v móde 'meshcore'. CZ preset (869.525/SF7) — mimo SK siete; bridge aj repeater
 sa buildujú na CZ, aby sa počuli a nerušili produkčnú SK sieť.
 
@@ -60,13 +60,14 @@ FOTA_MCPY_SENDER     = SCRIPT_DIR / "fota_sender_mcpy.py"
 # tohto skriptu (MESHCORE_DIR.parent) — funguje bez ohľadu na to, kam je projekt presunutý.
 DEFAULT_FK_LORA     = Path(os.environ.get("PLATFORMIO_SETTING_PROJECTS_DIR")
                            or str(MESHCORE_DIR.parent)) / "FK_lora-sniffer"
-FOTA_PSK_STR         = "meshcore-ota-key"   # MUSÍ == FOTA_CHANNEL_PSK v OTA env
-# OTA env (ProMicro_repeater_fota) NEMÁ -D FOTA_ALLOW_UNSIGNED → HEADER MUSÍ byť
+# Kanál: #fkotanrf (#-konvencia, secret = SHA256(mena)[0:16]) — psk_hex sa berie
+# runtime z fota_sender.fota_channel_secret(), žiadna lokálna konštanta netreba.
+# FOTA env (ProMicro_repeater_fota) NEMÁ -D FOTA_ALLOW_UNSIGNED → HEADER MUSÍ byť
 # podpísaný Ed25519, inak repeater odmietne session (FOTA_ERR_SIGNATURE 0x06).
 # Default = test keypair (pubkey == s_authors[key_id=1] v FotaReceiver_signkey.cpp).
 DEFAULT_PRIVKEY     = SCRIPT_DIR / "test_key.der"
 
-# OTA status flags (z FotaState.h)
+# FOTA status flags (z FotaState.h)
 FOTA_ST_VERIFIED = 0x04
 FOTA_ST_ERROR    = 0x80
 

@@ -18,24 +18,24 @@ compile_commands.json
 venv/
 platformio.local.ini
 
-# OTA test scaffolding (auto-generated)
+# FOTA test scaffolding (auto-generated)
 test_nrf-fota/build_info.h
 test_nrf-fota/lora_old.bin
 test_nrf-fota/lora_new.bin
-test_nrf-fota/ota_patch.bin
-/ota_patch.bin
-# OTA pkg generátor: archív buildov + smerové patch tempy + generované balíky (artefakty)
+test_nrf-fota/fota_patch.bin
+/fota_patch.bin
+# FOTA pkg generátor: archív buildov + smerové patch tempy + generované balíky (artefakty)
 test_nrf-fota/builds/
-test_nrf-fota/ota_patch_fwd.bin
-test_nrf-fota/ota_patch_rev.bin
-test_nrf-fota/*.otapkg.json
+test_nrf-fota/fota_patch_fwd.bin
+test_nrf-fota/fota_patch_rev.bin
+test_nrf-fota/*.fotapkg.json
 test_nrf-fota/fotapkg_json/
-/ota_patch_rev.bin
+/fota_patch_rev.bin
 __pycache__/
 
 # Claude Code agent/memory dir
 .claude/
 
-# OTA test private key + pycache (never commit)
+# FOTA test private key + pycache (never commit)
 test_nrf-fota/test_key.der
 test_nrf-fota/__pycache__/

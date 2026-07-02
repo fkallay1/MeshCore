@@ -1,6 +1,6 @@
 /* flasher.ld — linker script pre standalone flasher binary (MeshCore)
  *
- * Cieľová adresa: 0xEB000 (mimo OTA FS, app flash aj InternalFS)
+ * Cieľová adresa: 0xEB000 (mimo FOTA FS, app flash aj InternalFS)
  * Kód a rodata: FLASH 4kB
  * BSS (NOLOAD):  RAM  — iba pre linker, nepotrebuje inicializáciu,
  *                       objcopy vytiahne len .text (flasher_code.h)

@@ -1,5 +1,5 @@
 // =====================================================================
-// FotaMesh.cpp — glue medzi MeshCore a OTA modulom.
+// FotaMesh.cpp — glue medzi MeshCore a FOTA modulom.
 // =====================================================================
 #ifdef WITH_LORA_FOTA
 #include "FotaMesh.h"

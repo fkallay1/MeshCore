@@ -62,8 +62,11 @@ FOTA pakety idú ako MeshCore `PAYLOAD_TYPE_GRP_DATA` na dedikovanom kanáli (PS
 > dedup je korektný; ak by raz bolo treba znášať identické re-sendy, je možný „bezstavový FOTA routing"
 > (doručiť aj pri `hasSeen`, retransmit ponechať pod dedupom) — neimplementované, netreba.
 
-Kanál: `hash = sha256(psk)[0]`, `secret = psk doplnené nulami na 32B`. PSK je 16/32-bajtový
-(default `"meshcore-ota-key"`). Zhodné s `fota_sender.py --mode meshcore --psk <hex>`.
+Kanál (od 2026-06-23, #-konvencia): meno `FOTA_CHANNEL_NAME "#fkotanrf"`,
+`psk = SHA256(mena)[0:16]` (vrátane `#`), `secret = psk doplnené nulami na 32B`,
+`hash = sha256(psk)[0]` (= `0xA4`). Zhodné s `meshcore_py set_channel` aj
+`fota_sender.fota_channel_secret()`; sender: `--mode meshcore --psk <hex secretu>`.
+(Pôvodný textový PSK `"meshcore-ota-key"` je zrušený.)
 
 ### Krypto / FS — znovupoužité z MeshCore
 - **SHA256**: `mesh::Utils::sha256` + `rweather/Crypto` (existujúca dep, žiadna nová).

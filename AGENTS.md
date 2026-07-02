@@ -50,13 +50,13 @@ Disabled by default (`-w -DNDEBUG`). Uncomment `; -D MESH_DEBUG=1` or `; -D MESH
 - ESP32: SPIFFS at `/identity`
 - nRF52/STM32: `InternalFS`
 - RP2040: `LittleFS`
-- nRF52 OTA: `CustomLFS` at 0xD4000 (separate from internal FS)
+- nRF52 FOTA: `CustomLFS` at 0xD4000 (separate from internal FS)
 
 ### NRF52 platform specifics
 - Custom Adafruit nRF52 Arduino fork used (see `platformio.ini` nrf52_base for URL).
 - Softdevice: s140 v6 (default) or v7 (XIAO/SenseCap boards). FOTA reads the app base from the linker symbol at runtime, so no board flag is needed.
 - Linker scripts in `boards/`: `nrf52840_s140_v6.ld`, `nrf52840_s140_v6_extrafs.ld` (extra FS, app ends at 0xD4000).
-- OTA repeater variants use `_extrafs.ld` + `board_upload.maximum_size = 712704`.
+- FOTA repeater variants use `_extrafs.ld` + `board_upload.maximum_size = 712704`.
 
 ### LoRa radio config
 - Uses RadioLib wrapper (`src/helpers/radiolib/`).

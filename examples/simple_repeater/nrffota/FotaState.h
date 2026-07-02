@@ -1,6 +1,6 @@
 #pragma once
 // =====================================================================
-// FotaState.h — RAM stav OTA session + perzistentná hlavička (MeshCore port)
+// FotaState.h — RAM stav FOTA session + perzistentná hlavička (MeshCore port)
 //
 // Port z FK_lora-sniffer/src/ota.h.
 // =====================================================================

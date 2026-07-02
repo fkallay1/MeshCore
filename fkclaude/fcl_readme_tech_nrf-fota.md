@@ -90,20 +90,23 @@ FOTA pakety idú ako MeshCore `PAYLOAD_TYPE_GRP_DATA` (0x06) na **dedikovanom ka
 
 | | zariadenie (`FotaMesh.cpp`) | `fota_sender.py` |
 |---|---|---|
-| psk bajty | `FOTA_CHANNEL_PSK` (napr. `"meshcore-ota-key"` = 16 ASCII) | `bytes.fromhex(--psk)` |
+| psk (16 B) | `SHA256(FOTA_CHANNEL_NAME)[0:16]` — meno vrátane `#` (`"#fkotanrf"`) | `fota_channel_secret(name)` |
 | `secret` (32 B) | psk doplnené `0x00` na `PUB_KEY_SIZE` | `psk.ljust(32, b'\0')` |
 | AES kľúč | `secret[:16]` | `psk32[:16]` |
 | HMAC kľúč | `secret[:32]` | `psk32` (32 B) |
-| `hash` (`PATH_HASH_SIZE`=1) | `sha256(psk)[0]` | `hashlib.sha256(psk).digest()[0]` |
+| `hash` (`PATH_HASH_SIZE`=1) | `sha256(psk)[0]` (= `0xA4` pre `#fkotanrf`) | `hashlib.sha256(psk).digest()[0]` |
 
-> **PSK pozn.:** ľubovoľných 16 alebo 32 bajtov je platný kľúč. Textový PSK (`"meshcore-ota-key"`)
-> je len 16 ASCII bajtov — na sender sa odovzdáva ako hex (`6d657368...6b6579`), čo sú tie isté
-> bajty. Krypto sa rieši **až po prijatí** surového rámca, takže PSK nikdy nebol príčinou
-> problémov s príjmom.
+> **Kanál pozn. (od 2026-06-23, zjednotený formát v0):** kanál sa odvodzuje MeshCore
+> **#-konvenciou z mena** (`FOTA_CHANNEL_NAME "#fkotanrf"`), zhodne s `meshcore_py
+> set_channel` — pôvodný textový `FOTA_CHANNEL_PSK "meshcore-ota-key"` je ZRUŠENÝ.
+> `fota_sender.py --psk <hex>` stále berie surové psk bajty; správnu hodnotu vráti
+> `fota_channel_secret()`. Krypto sa rieši **až po prijatí** surového rámca, takže PSK
+> nikdy nebol príčinou problémov s príjmom.
 
 ### Wire formát plaintextu
 `[ts 4B LE][fota_type 1B][payload...]` — FOTA payload začína za 4 B timestampom
-(`onGroupDataRecv` preskočí `data+4`). Typy: BEGIN, CHUNK, APPLY, (STATUS/NACK = spätný kanál).
+(`onGroupDataRecv` preskočí `data+4`). Typy: HEADER=META (0x10), SIG (0x13), CHUNK (0x11),
+APPLY (0x12), (STATUS/NACK 0x20/0x21 = spätný kanál).
 
 ### Deferred spracovanie (dôležité pre RX)
 `onGroupDataRecv()` (volané z recv cesty dispatchera) **len skopíruje payload** do

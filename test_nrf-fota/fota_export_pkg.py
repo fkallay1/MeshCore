@@ -38,7 +38,7 @@ def build_pkg(old, new, patch_path, *, channel_name=FOTA_CHANNEL_NAME, channel_i
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Export .fotapkg.json for the Flutter OTA app")
+    ap = argparse.ArgumentParser(description="Export .fotapkg.json for the Flutter FOTA app")
     ap.add_argument('--old', required=True); ap.add_argument('--new', required=True)
     ap.add_argument('--patch', default='fota_patch.bin')
     ap.add_argument('--out', required=True)

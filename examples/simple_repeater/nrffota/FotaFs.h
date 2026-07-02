@@ -1,6 +1,6 @@
 #pragma once
 // =====================================================================
-// FotaFs.h — OTA filesystem glue (MeshCore port)
+// FotaFs.h — FOTA filesystem glue (MeshCore port)
 //
 // Dedikovaný CustomLFS na 0xD4000 (92kB) — oddelený od MeshCore InternalFS
 // (ten ostáva na Adafruit defaulte 0xED000-0xF4000 pre identity/prefs/ACL).

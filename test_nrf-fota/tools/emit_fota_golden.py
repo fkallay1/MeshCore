@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Emit byte-exact OTA golden vectors for the Flutter Dart tests.
+"""Emit byte-exact FOTA golden vectors for the Flutter Dart tests.
 Uses FIXED synthetic inputs (no hdiffi needed). Run from MeshCore repo root:
-    <penv>/python.exe test_nrf-fota/tools/emit_ota_golden.py <out_json>
+    <penv>/python.exe test_nrf-fota/tools/emit_fota_golden.py <out_json>
 """
 import json, struct, sys, hashlib
 from pathlib import Path
@@ -26,8 +26,8 @@ channel_idx = 1
 
 meta = S.build_meta_payload(0, patch_size, patch_sha256, new_sha256, old_sha256)
 sig = S.build_sig_payload(meta, key, key_id)
-chunk = S.build_ota_chunk(chunk_idx, chunk_data, old_fw_size, old_sha256[:4])
-apply = S.build_ota_apply(patch_sha256)
+chunk = S.build_fota_chunk(chunk_idx, chunk_data, old_fw_size, old_sha256[:4])
+apply = S.build_fota_apply(patch_sha256)
 
 # full CMD_SEND_CHANNEL_DATA frame for META, zerohop, idx=1 (mirror fota_sender_mcpy)
 data = struct.pack('<I', ts) + meta

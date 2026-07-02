@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-fota_sender.py  — MeshCore OTA over LoRa / Serial sender
+fota_sender.py  — MeshCore FOTA over LoRa / Serial sender
 
 Závislosti:
     pip install pyserial pycryptodome
@@ -46,7 +46,7 @@ for _s in (sys.stdout, sys.stderr):
         pass
 
 # ─────────────────────────────────────────────────────────────────────
-# Protokol — synchronizované s fota_proto.h
+# Protokol — synchronizované s nrffota/FotaProtocol.h
 # ─────────────────────────────────────────────────────────────────────
 FOTA_PKT_HEADER   = 0x10
 FOTA_PKT_CHUNK   = 0x11
@@ -55,9 +55,9 @@ FOTA_PKT_HDR_SIG  = 0x13   # 2. časť HEADER — Ed25519 podpis (zjednotený fo
 FOTA_PKT_STATUS  = 0x20
 FOTA_PKT_NACK    = 0x21
 
-# Zjednotený OTA formát v0 — viď docs/superpowers/specs/2026-06-23-fota-companion-mcpy-design.md
-FOTA_MAGIC        = 0x07A0      # GRP_DATA data_type pre OTA (gating diskriminátor)
-FOTA_PROT_INF_V0  = 0x00       # verzia OTA protokolu/štruktúr
+# Zjednotený FOTA formát v0 — viď fkclaude/docs/superpowers/specs/2026-06-23-fota-companion-mcpy-design.md
+FOTA_MAGIC        = 0x07A0      # GRP_DATA data_type pre FOTA (gating diskriminátor)
+FOTA_PROT_INF_V0  = 0x00       # verzia FOTA protokolu/štruktúr
 FOTA_CHUNK_DATA   = 144        # bolo 150 — GRP_DATA limit data_len ≤165 (4B ts + 13B hdr + 144 = 161)
 FOTA_CHANNEL_NAME = "#fkotanrf"
 DIRECT_MAGIC    = b'\x4F\x54'   # 'OT'
@@ -91,7 +91,7 @@ def crc16(data: bytes) -> int:
     return crc
 
 # ─────────────────────────────────────────────────────────────────────
-# Ed25519 podpisanie OTA HEADER
+# Ed25519 podpisanie FOTA HEADER
 # ─────────────────────────────────────────────────────────────────────
 def load_ed25519_privkey(key_path: Path):
     """Načíta Ed25519 private key z DER/PEM súboru, vráti ECC key objekt."""
@@ -103,7 +103,7 @@ def load_ed25519_privkey(key_path: Path):
     raw = key_path.read_bytes()
     return ECC.import_key(raw)
 
-def sign_ota_header(otbmsg: bytes, privkey) -> bytes:
+def sign_fota_header(otbmsg: bytes, privkey) -> bytes:
     """Podpise message (107B: type→old_sha256) a vráti 64B signature."""
     from Crypto.Signature import eddsa
     sig_obj = eddsa.new(privkey, 'rfc8032')
@@ -158,7 +158,7 @@ def wrap_meshcore_packet(payload_type: int, payload: bytes, scope: Scope) -> byt
     return bytes([header]) + codes + bytes([path_len]) + path + payload
 
 def fota_channel_secret(name: str = FOTA_CHANNEL_NAME) -> bytes:
-    """OTA kanál secret (16B PSK) = SHA256(name)[0:16] — MeshCore #-konvencia,
+    """FOTA kanál secret (16B PSK) = SHA256(name)[0:16] — MeshCore #-konvencia,
     zhodné s meshcore_py set_channel (device.py:216, hashuje meno vrátane '#')."""
     return hashlib.sha256(name.encode("utf-8")).digest()[:16]
 
@@ -175,7 +175,7 @@ def build_meta_payload(total_chunks: int, patch_size: int,
 
 def build_sig_payload(meta: bytes, privkey, key_id: int) -> bytes:
     """SIG (99B) = type+fota_prot_inf+old_sha256+key_id+signature. Podpis nad 102B META."""
-    sig = sign_ota_header(meta, privkey) if privkey else bytes(64)
+    sig = sign_fota_header(meta, privkey) if privkey else bytes(64)
     old_sha256 = meta[70:102]
     out = bytes([FOTA_PKT_HDR_SIG, FOTA_PROT_INF_V0]) + old_sha256 + bytes([key_id]) + sig
     assert len(out) == 99, f"SIG musi byt 99B, je {len(out)}"
@@ -203,7 +203,7 @@ def build_grpdata_payload(psk: bytes, fota_payload: bytes, ts: int | None = None
 def meshcore_grp_data_packet(psk: bytes, fota_payload: bytes, scope: Scope) -> bytes:
     return wrap_meshcore_packet(6, build_grpdata_payload(psk, fota_payload), scope)
 
-def direct_ota_packet(fota_payload: bytes) -> bytes:
+def direct_fota_packet(fota_payload: bytes) -> bytes:
     return DIRECT_MAGIC + fota_payload
 
 # ─────────────────────────────────────────────────────────────────────
@@ -343,9 +343,9 @@ class SerialReader(threading.Thread):
                 break
 
 # ─────────────────────────────────────────────────────────────────────
-# OTA paket buiders  (HEADER = META+SIG, viď build_meta_payload/build_sig_payload)
+# FOTA paket builders  (HEADER = META+SIG, viď build_meta_payload/build_sig_payload)
 # ─────────────────────────────────────────────────────────────────────
-def build_ota_chunk(idx: int, data: bytes, old_fw_size: int, old_sha256_prefix: bytes) -> bytes:
+def build_fota_chunk(idx: int, data: bytes, old_fw_size: int, old_sha256_prefix: bytes) -> bytes:
     """Vyrovi FOTA_CHUNK s base FW validáciou (+8B oproti pôvodnému)."""
     return (bytes([FOTA_PKT_CHUNK])
             + struct.pack('<HH', idx, crc16(data))
@@ -353,13 +353,13 @@ def build_ota_chunk(idx: int, data: bytes, old_fw_size: int, old_sha256_prefix: 
             + old_sha256_prefix  # 4B
             + data)
 
-def build_ota_apply(patch_sha256: bytes) -> bytes:
+def build_fota_apply(patch_sha256: bytes) -> bytes:
     return bytes([FOTA_PKT_APPLY]) + patch_sha256
 
 # ─────────────────────────────────────────────────────────────────────
-# Hlavná OTA session
+# Hlavná FOTA session
 # ─────────────────────────────────────────────────────────────────────
-def send_ota(ser: serial.Serial,
+def send_fota(ser: serial.Serial,
              patch: bytes, patch_sha256: bytes, new_sha256: bytes,
              old_sha256: bytes, old_fw_size: int,
              psk: bytes | None, mode: str,
@@ -370,12 +370,12 @@ def send_ota(ser: serial.Serial,
     chunks = [patch[i:i+FOTA_CHUNK_DATA] for i in range(0, len(patch), FOTA_CHUNK_DATA)]
     total  = len(chunks)
     old_sha256_prefix = old_sha256[:4]  # 4B pre session izoláciu
-    print(f"[OTA] {len(patch)}B → {total} chunkov")
-    print(f"[OTA]   PATCH sha256 = {patch_sha256.hex()}")
-    print(f"[OTA]   OLD   sha256 = {old_sha256.hex()}  ({old_fw_size}B)")
-    print(f"[OTA]   NEW   sha256 = {new_sha256.hex()}")
+    print(f"[FOTA] {len(patch)}B → {total} chunkov")
+    print(f"[FOTA]   PATCH sha256 = {patch_sha256.hex()}")
+    print(f"[FOTA]   OLD   sha256 = {old_sha256.hex()}  ({old_fw_size}B)")
+    print(f"[FOTA]   NEW   sha256 = {new_sha256.hex()}")
     air_min = total * 1.2 / 60
-    print(f"[OTA] ~{air_min:.1f} min @ SF8/BW62.5  chunk_delay={chunk_delay}s")
+    print(f"[FOTA] ~{air_min:.1f} min @ SF8/BW62.5  chunk_delay={chunk_delay}s")
 
     import queue
     resp_queue: queue.Queue = queue.Queue()
@@ -386,24 +386,24 @@ def send_ota(ser: serial.Serial,
         if mode == 'meshcore':
             lora_pkt = meshcore_grp_data_packet(psk, payload, scope)
         elif mode == 'direct':
-            lora_pkt = direct_ota_packet(payload)
-        else:  # serial-direct: inject priamo ako direct OTA cez serial rámec
-            lora_pkt = direct_ota_packet(payload)
+            lora_pkt = direct_fota_packet(payload)
+        else:  # serial-direct: inject priamo ako direct FOTA cez serial rámec
+            lora_pkt = direct_fota_packet(payload)
         send_frame(ser, lora_pkt)
 
     # --- HEADER = META (102B, podpisované) + SIG (99B) — zjednotený formát v0 ---
     meta_payload = build_meta_payload(total, len(patch), patch_sha256, new_sha256, old_sha256)
     if privkey:
-        print(f"[OTA] Signujem META (key_id=0x{key_id:02X})...")
+        print(f"[FOTA] Signujem META (key_id=0x{key_id:02X})...")
     else:
-        print("[OTA] WARNING: --privkey nie je zadany, podpis bude nulový!")
+        print("[FOTA] WARNING: --privkey nie je zadany, podpis bude nulový!")
     sig_payload = build_sig_payload(meta_payload, privkey, key_id)
 
     _hdr_sent = [False]
     def send_header():
         if _hdr_sent[0]:
             return
-        print(f"[OTA] Posielam HEADER META+SIG (size={len(patch)}B, chunks={total}, order={packetorder})...")
+        print(f"[FOTA] Posielam HEADER META+SIG (size={len(patch)}B, chunks={total}, order={packetorder})...")
         send_pkt(meta_payload)
         time.sleep(chunk_delay)
         send_pkt(sig_payload)
@@ -428,7 +428,7 @@ def send_ota(ser: serial.Serial,
     for attempt in range(nack_retries + 1):
         if not to_send:
             break
-        print(f"[OTA] Posielam {len(to_send)} chunkov (pokus {attempt+1}/{nack_retries+1})...")
+        print(f"[FOTA] Posielam {len(to_send)} chunkov (pokus {attempt+1}/{nack_retries+1})...")
         serial_lost = False
         dropped = 0
         for pos, idx in enumerate(to_send):
@@ -441,7 +441,7 @@ def send_ota(ser: serial.Serial,
                 dropped += 1
                 continue
             try:
-                send_pkt(build_ota_chunk(idx, chunks[idx], old_fw_size, old_sha256_prefix))
+                send_pkt(build_fota_chunk(idx, chunks[idx], old_fw_size, old_sha256_prefix))
             except serial.SerialException as e:
                 print(f"\n{e}")
                 serial_lost = True
@@ -455,7 +455,7 @@ def send_ota(ser: serial.Serial,
             # (najmä cez slabý/zarušený relay hop).
             if header_every > 0 and (pos + 1) % header_every == 0:
                 try:
-                    print(f"\n[OTA] HEADER META+SIG (redundancia, po {pos+1} chunkoch)")
+                    print(f"\n[FOTA] HEADER META+SIG (redundancia, po {pos+1} chunkoch)")
                     send_pkt(meta_payload)
                     time.sleep(chunk_delay)
                     send_pkt(sig_payload)
@@ -469,13 +469,13 @@ def send_ota(ser: serial.Serial,
             try: send_header()
             except serial.SerialException: pass
         if dropped:
-            print(f"[OTA] (simulácia straty: vynechaných {dropped} chunkov)")
+            print(f"[FOTA] (simulácia straty: vynechaných {dropped} chunkov)")
         if serial_lost:
             reader.stop()
             return False
 
         # Čakaj na odpoveď od zariadenia
-        print("[OTA] Čakám na STATUS/NACK (5s)...")
+        print("[FOTA] Čakám na STATUS/NACK (5s)...")
         try:
             resp = resp_queue.get(timeout=5.0)
         except Exception:
@@ -486,28 +486,28 @@ def send_ota(ser: serial.Serial,
         if resp[0] == FOTA_PKT_NACK and len(resp) >= 2:
             count = resp[1]
             missing = list(struct.unpack_from(f'<{count}H', resp, 2))
-            print(f"[OTA] NACK: {count} chýba: {missing[:10]}...")
+            print(f"[FOTA] NACK: {count} chýba: {missing[:10]}...")
             to_send = missing
         elif resp[0] == FOTA_PKT_STATUS and len(resp) >= 6:
             recv_c, tot_c, status = struct.unpack_from('<HHB', resp, 1)
-            print(f"[OTA] STATUS: {recv_c}/{tot_c}  st=0x{status:02X}")
+            print(f"[FOTA] STATUS: {recv_c}/{tot_c}  st=0x{status:02X}")
             if status & FOTA_ST_VERIFIED:
                 to_send = []
                 break
             elif status & FOTA_ST_ERROR:
-                print("[OTA] CHYBA na zariadení!")
+                print("[FOTA] CHYBA na zariadení!")
                 reader.stop()
                 return False
         else:
             to_send = []
 
     if to_send:
-        print(f"[OTA] Stále chýba {len(to_send)} chunkov!")
+        print(f"[FOTA] Stále chýba {len(to_send)} chunkov!")
         reader.stop()
         return False
 
     if not do_reboot:
-        print("[OTA] Vsetky chunky odoslane. Ovladaj manualme cez konzolu:")
+        print("[FOTA] Vsetky chunky odoslane. Ovladaj manualme cez konzolu:")
         print("  f  = LittleFS zoznam suborov")
         print("  o  = OTA stav session")
         print("  Q  = test patch (dry-run SHA256, bez zapisu)")
@@ -516,15 +516,15 @@ def send_ota(ser: serial.Serial,
         return True
 
     # --- APPLY (iba ak --reboot) ---
-    print("[OTA] Posielam APPLY (flash + reboot)...")
+    print("[FOTA] Posielam APPLY (flash + reboot)...")
     try:
-        send_pkt(build_ota_apply(patch_sha256))
+        send_pkt(build_fota_apply(patch_sha256))
     except serial.SerialException as e:
         print(e)
         reader.stop()
         return False
     time.sleep(2.0)
-    print("[OTA] Hotovo — zariadenie sa rebootu je.")
+    print("[FOTA] Hotovo — zariadenie sa rebootu je.")
     reader.stop()
     return True
 
@@ -532,7 +532,7 @@ def send_ota(ser: serial.Serial,
 # CLI
 # ─────────────────────────────────────────────────────────────────────
 def main():
-    ap = argparse.ArgumentParser(description='MeshCore OTA sender')
+    ap = argparse.ArgumentParser(description='MeshCore FOTA sender')
     ap.add_argument('--old',    required=True, help='Starý firmware .bin')
     ap.add_argument('--new',    required=True, help='Nový firmware .bin')
     ap.add_argument('--port',   required=True, help='Serial port (COM5 / /dev/ttyUSB0)')
@@ -663,13 +663,13 @@ def main():
         for cyc in range(args.cycles):
             if args.cycles > 1:
                 print(f'\n========== CYKLUS {cyc+1}/{args.cycles} ==========')
-            ok = send_ota(ser, patch, patch_sha256, new_sha256, old_sha256, old_fw_size,
+            ok = send_fota(ser, patch, patch_sha256, new_sha256, old_sha256, old_fw_size,
                           psk, args.mode, args.delay, args.nack_retries, args.reboot,
                           drop_prob=args.drop,
                           privkey=privkey, key_id=args.keyid, packetorder=args.packetorder,
                           scope=scope, header_every=args.header_every)
             if not ok:
-                print('[OTA] cyklus zlyhal (serial?) — končím')
+                print('[FOTA] cyklus zlyhal (serial?) — končím')
                 break
             if cyc < args.cycles - 1:
                 time.sleep(args.cycle_delay)

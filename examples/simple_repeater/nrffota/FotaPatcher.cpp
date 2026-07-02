@@ -1,5 +1,5 @@
 // =====================================================================
-// FotaPatcher.cpp — aplikácia OTA patchu (MeshCore port z FK_lora-sniffer)
+// FotaPatcher.cpp — aplikácia FOTA patchu (MeshCore port z FK_lora-sniffer)
 // =====================================================================
 #ifdef WITH_LORA_FOTA
 #include "FotaPatcher.h"

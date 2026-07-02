@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""fota_sender_mcpy.py — OTA sender cez MeshCore companion (meshcore_py, serial).
+"""fota_sender_mcpy.py — FOTA sender cez MeshCore companion (meshcore_py, serial).
 
 Companion (Xiao_nrf52_companion_radio_usb na COM3) šifruje a smeruje sám cez
-CMD_SEND_CHANNEL_DATA. Tento sender NEROBÍ AES/HMAC — len zostaví OTA payload
+CMD_SEND_CHANNEL_DATA. Tento sender NEROBÍ AES/HMAC — len zostaví FOTA payload
 (META/SIG/chunk) a pošle ho ako GRP_DATA `data = [ts4][fota_payload]`.
 
 Závislosti:
@@ -19,7 +19,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import fota_sender as S
 from fota_sender import (make_patch, build_meta_payload, build_sig_payload,
-                        build_ota_chunk, build_ota_apply, load_ed25519_privkey,
+                        build_fota_chunk, build_fota_apply, load_ed25519_privkey,
                         FOTA_MAGIC, FOTA_CHUNK_DATA, FOTA_CHANNEL_NAME)
 
 for _s in (sys.stdout, sys.stderr):
@@ -103,20 +103,20 @@ async def run_mcpy(args):
     if args.packetorder in ("normal", "hbegin"):
         await send_hdr()
     for idx in range(total):
-        await snd(build_ota_chunk(idx, chunks[idx], old_fw_size, old_prefix))
+        await snd(build_fota_chunk(idx, chunks[idx], old_fw_size, old_prefix))
         if (idx + 1) % 10 == 0 or idx == total - 1:
             print(f"[mcpy]   chunk {idx+1}/{total}")
     if args.packetorder == "hend":
         await send_hdr()
     if args.reboot:
-        await snd(build_ota_apply(patch_sha256), "APPLY")
+        await snd(build_fota_apply(patch_sha256), "APPLY")
 
     await mc.disconnect()
     print("[mcpy] hotovo")
 
 
 def main():
-    ap = argparse.ArgumentParser(description="OTA sender cez MeshCore companion (meshcore_py)")
+    ap = argparse.ArgumentParser(description="FOTA sender cez MeshCore companion (meshcore_py)")
     ap.add_argument('--old', required=True)
     ap.add_argument('--new', required=True)
     ap.add_argument('--port', default="COM3")
