@@ -24,22 +24,19 @@ PC (fota_sender.py)                     Repeater (nRF52840)
 - **Transport:** FOTA pakety idú ako MeshCore `PAYLOAD_TYPE_GRP_DATA` na dedikovanom
   kanáli (`#fkotanrf`, #-konvencia). MeshCore ich dešifruje (`Utils::MACThenDecrypt`, AES-128-ECB +
   HMAC-SHA256) a `MyMesh::onGroupDataRecv()` ich odovzdá do `fota_process()`.
-  Žiadna zmena jadra MeshCore — len override `searchChannelsByHash()` +
-  `onGroupDataRecv()`.
+  Žiadna zmena jadra MeshCore. Celá integrácia do repeatera žije v
+  `FotaMyMesh.cpp` (telá FOTA metód MyMesh vrátane overridov
+  `searchChannelsByHash()`/`onGroupDataRecv()`); v samotnom `MyMesh.cpp`
+  je len 6 tenkých `#ifdef WITH_LORA_FOTA` hookov (~30 riadkov diff vs upstream).
 - **Krypto:** `mesh::Utils::sha256` + `rweather/Crypto` (rovnaká dep ako MeshCore).
 - **FS:** dedikovaný `CustomLFS` na 0xD4000 (oddelený od MeshCore `InternalFS`).
 - **Patch formát:** HPatchLite `inplaceB` zabalený v `[ZLIB][uncomp][new_fw][deflate]`.
 
-## Flash mapa (nRF52840, extrafs.ld, s140 v6)
+## Flash mapa
 
-```
-0x26000 - 0xD4000 : aplikačný kód repeatera (712 kB)
-0xD4000 - 0xEB000 : FOTA FS (CustomLFS, 92 kB — recv.log/patch.bin/meta/bitmap)
-0xEB000 - 0xEC000 : flasher kód (4 kB, beží mimo app flash)
-0xEC000 - 0xED000 : flasher trace/meta (4 kB)
-0xED000 - 0xF4000 : MeshCore InternalFS (28 kB — identity/prefs/ACL, NEDOTKNUTÝ)
-0xF4000+          : bootloader
-```
+**Kanonický zdroj: [`flash_layout.h`](flash_layout.h)** (jediné miesto s adresami;
+stručne aj v AGENTS.md). V skratke: app končí na 0xD4000, FOTA FS 92 kB @ 0xD4000,
+flasher @ 0xEB000, MeshCore InternalFS @ 0xED000 NEDOTKNUTÝ.
 Strop patchu ~40 kB (recv.log + patch.bin súčasne). Pre s140 v7 (XIAO/SenseCap) je
 app base `0x27000` — nič netreba nastavovať: FW ho zistí z linker symbolu
 (`fota_running_fw_base()`) a odovzdá flasheru runtime (jeden board-agnostický blob).
@@ -59,6 +56,11 @@ Bez tohto flagu sú všetky `nrffota/` súbory inertné → stock repeater build
 nedotknuté. Kanál: `-D FOTA_CHANNEL_NAME='"#fkotanrf"'` — MeshCore #-konvencia
 (secret = SHA256(meno)[0:16]), musí sa zhodovať so senderom.
 
+Diagnostické výpisy na Serial (`[FOTA] …`, `[FLASHER-DBG] …`) sú za flagom
+`-D FOTA_DEBUG=1` (makrá `FOTA_DEBUG_PRINT/PRINTLN` vo [`FotaDebug.h`](FotaDebug.h),
+vzor MESH_DEBUG). FOTA envy ho majú default zapnutý; bez neho sa výpisy vôbec
+nekompilujú — CLI odpovede (`reply`) fungujú vždy.
+
 ## Ovládanie (Serial alebo LoRa admin CLI)
 
 | Príkaz            | Akcia                                                      |
@@ -75,7 +77,7 @@ nedotknuté. Kanál: `-D FOTA_CHANNEL_NAME='"#fkotanrf"'` — MeshCore #-konvenc
 | `fota id`         | FW identita (build#, veľkosť, running SHA256)              |
 | `fota agc`        | read-only diagnostika rádia (RxGain, RSSI, noise floor)    |
 
-Legacy prefix `ota …` stále funguje (alias, viď `FOTA-CLI-ALIAS` v MyMesh.cpp).
+Legacy prefix `ota …` stále funguje (alias, viď `FOTA-CLI-ALIAS` vo FotaMyMesh.cpp).
 Na Serial sa píšu priamo (`fota status`). Cez LoRa idú ako admin CLI príkazy
 (rovnaká cesta ako ostatné MeshCore CLI cez `onPeerDataRecv` TXT).
 

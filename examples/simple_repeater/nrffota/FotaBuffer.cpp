@@ -4,7 +4,8 @@
 // =====================================================================
 #ifdef WITH_LORA_FOTA
 #include "FotaBuffer.h"
-#include <Arduino.h>   // Serial — diagnostika nesprávneho použitia
+#include "FotaDebug.h"
+#include <Arduino.h>
 
 // Jediné miesto, ktoré drží "odkiaľ" je pamäť. Aligned(4) pre prípadné
 // budúce word-orientované použitie.
@@ -13,12 +14,11 @@ static bool    s_fota_buf_in_use = false;
 
 uint8_t* fota_get_buffer(uint32_t need) {
     if (need > FOTA_BUF_CAP) {
-        Serial.print(F("[FOTA] buffer: need ")); Serial.print(need);
-        Serial.print(F("B > cap ")); Serial.print(FOTA_BUF_CAP); Serial.println('B');
+        FOTA_DEBUG_PRINTLN("[FOTA] buffer: need %lu B > cap %u B", (unsigned long)need, (unsigned)FOTA_BUF_CAP);
         return nullptr;
     }
     if (s_fota_buf_in_use) {
-        Serial.println(F("[FOTA] buffer: už požičaný (reentrancia?)"));
+        FOTA_DEBUG_PRINTLN("[FOTA] buffer: už požičaný (reentrancia?)");
         return nullptr;
     }
     s_fota_buf_in_use = true;
@@ -28,7 +28,7 @@ uint8_t* fota_get_buffer(uint32_t need) {
 
 void fota_put_buffer(uint8_t* p) {
     if (p != s_fota_buf) {
-        Serial.println(F("[FOTA] buffer: put cudzí smerník — ignorujem"));
+        FOTA_DEBUG_PRINTLN("[FOTA] buffer: put cudzí smerník — ignorujem");
         return;
     }
     s_fota_buf_in_use = false;

@@ -5,6 +5,7 @@
 #include "FotaMesh.h"
 #include "FotaReceiver.h"
 #include "FotaPatcher.h"
+#include "FotaDebug.h"
 #include <Utils.h>
 #include <Arduino.h>
 #include <string.h>
@@ -24,10 +25,7 @@ void fota_build_channel(mesh::GroupChannel& ch) {
     mesh::Utils::sha256(h, sizeof(h), ch.secret, 16);
     memcpy(ch.hash, h, PATH_HASH_SIZE);
 
-    Serial.print(F("[FOTA] kanál ")); Serial.print(name);
-    Serial.print(F(" hash=0x"));
-    if (ch.hash[0] < 0x10) Serial.print('0');
-    Serial.println(ch.hash[0], HEX);   // očakávané 0xA4 pre #fkotanrf
+    FOTA_DEBUG_PRINTLN("[FOTA] kanál %s hash=0x%02X", name, (unsigned)ch.hash[0]);   // očakávané 0xA4 pre #fkotanrf
 }
 
 void fota_handle_command(const char* args, char* reply) {
@@ -79,7 +77,7 @@ void fota_handle_command(const char* args, char* reply) {
 
         bool any_info = st->meta_recv || st->sig_recv || st->recv_count > 0 || st->total_chunks > 0;
         if (!any_info) {
-            Serial.println(F("[FOTA] miss Zero info yet"));
+            FOTA_DEBUG_PRINTLN("[FOTA] miss Zero info yet");
             strcpy(reply, "FOTA miss: Zero info yet");
         } else {
             int chunk_total = (chunk_missing < 0) ? 0 : chunk_missing;
@@ -88,14 +86,14 @@ void fota_handle_command(const char* args, char* reply) {
             int tok_lim = show_all ? 0 : FOTA_MISS_OUTTOKENS;   // 0 = všetky; inak tokenový strop (H/S mimo)
 
             // Serial: plný detail (H/S vždy + chunky ako rozsahy)
-            Serial.print(F("[FOTA] miss ")); Serial.print(total);
-            if (st->total_chunks > 0) { Serial.print('/'); Serial.print(st->total_chunks); }
-            else                        Serial.print(F(" (pred HEADER)"));
-            Serial.print(F(": "));
-            if (miss_h) Serial.print(F("H "));
-            if (miss_s) Serial.print(F("S "));
+            FOTA_DEBUG_PRINT("[FOTA] miss %d", total);
+            if (st->total_chunks > 0) { FOTA_DEBUG_PRINT("/%u", (unsigned)st->total_chunks); }
+            else                        FOTA_DEBUG_PRINT(" (pred HEADER)");
+            FOTA_DEBUG_PRINT(": ");
+            if (miss_h) FOTA_DEBUG_PRINT("H ");
+            if (miss_s) FOTA_DEBUG_PRINT("S ");
             fota_print_missing(tok_lim);
-            Serial.println();
+            FOTA_DEBUG_PRINTLN("");
 
             // Reply (LoRa aj Serial CLI): počet + H/S + zoznam rozsahov, capnutý na dĺžku paketu
             char* p = reply;

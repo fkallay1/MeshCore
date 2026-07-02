@@ -8,6 +8,7 @@
 #include "FotaReceiver.h"
 #include "FotaFs.h"
 #include "FwId.h"             // fw_id_trailer (build#, image_size, sha256)
+#include "FotaDebug.h"
 #include <Arduino.h>
 #include <SHA256.h>          // rweather/Crypto — rovnaká dep ako mesh::Utils
 #include <Ed25519.h>         // rweather/Crypto —Ed25519::verify()
@@ -23,8 +24,7 @@ static bool verify_header_signature(const uint8_t* sig,
             return Ed25519::verify(sig, s_authors[i].pub_key, msg, msg_len);
         }
     }
-    Serial.print(F("[FOTA] UNKNOWN key_id=0x"));
-    Serial.println(key_id, HEX);
+    FOTA_DEBUG_PRINTLN("[FOTA] UNKNOWN key_id=0x%X", (unsigned)key_id);
     return false;
 }
 
@@ -83,9 +83,10 @@ static inline uint32_t fw_flash_base(void) {
 uint32_t fota_running_fw_base(void) { return fw_flash_base(); }
 uint32_t fota_running_fw_size(void) { return fw_image_size(); }
 
+__attribute__((unused))
 static void print_sha_full(const uint8_t* h) {
-    for (int i = 0; i < 32; i++) { if (h[i] < 0x10) Serial.print('0'); Serial.print(h[i], HEX); }
-    Serial.println();
+    for (int i = 0; i < 32; i++) { FOTA_DEBUG_PRINT("%02X", (unsigned)h[i]); }
+    FOTA_DEBUG_PRINTLN("");
 }
 
 // "fota id" — vypíš FW identitu a dopočítaj plný SHA256 bežiaceho FW.
@@ -98,24 +99,24 @@ void fota_print_fw_id(char* reply) {
     uint32_t timg      = fw_id_trailer.image_size;
     uint32_t build     = fw_id_trailer.build_number;
 
-    Serial.println(F("[FOTA] === FW identity ==="));
-    Serial.print(F("[FOTA] build #            = ")); Serial.println((unsigned long)build);
-    Serial.print(F("[FOTA] app base           = 0x")); Serial.println(base, HEX);
-    Serial.print(F("[FOTA] image_size trailer = ")); Serial.println((unsigned long)timg);
-    Serial.print(F("[FOTA] image_size linker  = ")); Serial.println((unsigned long)link_size);
+    FOTA_DEBUG_PRINTLN("[FOTA] === FW identity ===");
+    FOTA_DEBUG_PRINTLN("[FOTA] build #            = %lu", (unsigned long)build);
+    FOTA_DEBUG_PRINTLN("[FOTA] app base           = 0x%lX", (unsigned long)base);
+    FOTA_DEBUG_PRINTLN("[FOTA] image_size trailer = %lu", (unsigned long)timg);
+    FOTA_DEBUG_PRINTLN("[FOTA] image_size linker  = %lu", (unsigned long)link_size);
     if (timg != link_size)
-        Serial.println(F("[FOTA] !! POZOR: trailer != linker veľkosť — zlá board konfig?"));
-    Serial.print(F("[FOTA] trailer sha256     = ")); print_sha_full(fw_id_trailer.sha256);
+        FOTA_DEBUG_PRINTLN("[FOTA] !! POZOR: trailer != linker veľkosť — zlá board konfig?");
+    FOTA_DEBUG_PRINT("[FOTA] trailer sha256     = "); print_sha_full(fw_id_trailer.sha256);
 
     uint8_t h[32]; memset(h, 0, sizeof(h));
     if (timg && timg <= (APP_FLASH_END - base)) {
         SHA256 sha;
         sha.update((const void*)base, timg);
         sha.finalize(h, sizeof(h));
-        Serial.print(F("[FOTA] running sha256     = ")); print_sha_full(h);
-        Serial.println(F("[FOTA] ^ porovnaj s old_sha256 v .fotapkg.json"));
+        FOTA_DEBUG_PRINT("[FOTA] running sha256     = "); print_sha_full(h);
+        FOTA_DEBUG_PRINTLN("[FOTA] ^ porovnaj s old_sha256 v .fotapkg.json");
     } else {
-        Serial.println(F("[FOTA] running sha256: image_size neplatná"));
+        FOTA_DEBUG_PRINTLN("[FOTA] running sha256: image_size neplatná");
     }
     if (reply) {
         sprintf(reply, "id b#%lu sz=%lu sha=%02X%02X%02X%02X",
@@ -128,8 +129,8 @@ void fota_print_fw_id(char* reply) {
 static bool fota_fw_size_matches(uint32_t fw_size) {
     uint32_t self = fw_image_size();
     if (fw_size == self) return true;
-    Serial.print(F("[FOTA] base FW: old_fw_size ")); Serial.print(fw_size);
-    Serial.print(F(" != bežiace ")); Serial.println(self);
+    FOTA_DEBUG_PRINTLN("[FOTA] base FW: old_fw_size %lu != bežiace %lu",
+                       (unsigned long)fw_size, (unsigned long)self);
     return false;
 }
 
@@ -146,8 +147,7 @@ static bool fota_base_fw_validated(uint32_t fw_size, const uint8_t* prefix) {
     }
     // Veľkosť sa zmenila alebo cache prázdna → re-počítaj
     if (fw_size > (APP_FLASH_END - fw_flash_base())) {
-        Serial.print(F("[FOTA] base FW: fw_size ")); Serial.print(fw_size);
-        Serial.println(F(" > app okno"));
+        FOTA_DEBUG_PRINTLN("[FOTA] base FW: fw_size %lu > app okno", (unsigned long)fw_size);
         return false;
     }
     SHA256 sha;
@@ -156,10 +156,9 @@ static bool fota_base_fw_validated(uint32_t fw_size, const uint8_t* prefix) {
     sha.finalize(h, sizeof(h));
     fota.base_fw_size = fw_size;
     memcpy(fota.base_fw_sha256, h, 32);
-    Serial.print(F("[FOTA] base FW cached: size=")); Serial.print(fw_size);
-    Serial.print(F("B sha256="));
-    for (int i = 0; i < 4; i++) { if (h[i] < 0x10) Serial.print('0'); Serial.print(h[i], HEX); }
-    Serial.println(F("..."));
+    FOTA_DEBUG_PRINT("[FOTA] base FW cached: size=%luB sha256=", (unsigned long)fw_size);
+    for (int i = 0; i < 4; i++) { FOTA_DEBUG_PRINT("%02X", (unsigned)h[i]); }
+    FOTA_DEBUG_PRINTLN("...");
     return memcmp(fota.base_fw_sha256, prefix, 4) == 0;
 }
 
@@ -203,7 +202,7 @@ static void fota_clear() {
 static void fota_set_error(uint8_t code) {
     fota.status   = FOTA_ST_ERROR;
     fota.err_code = code;
-    Serial.print(F("[FOTA] CHYBA=0x")); Serial.println(code, HEX);
+    FOTA_DEBUG_PRINTLN("[FOTA] CHYBA=0x%X", (unsigned)code);
 }
 
 // Kernighan bit count
@@ -240,7 +239,7 @@ static bool save_meta() {
     FotaFS.remove(FOTA_FS_META);
     File f(FotaFS);
     if (!f.open(FOTA_FS_META, FILE_O_WRITE)) {
-        Serial.println(F("[FOTA] meta: zápis zlyhal")); return false;
+        FOTA_DEBUG_PRINTLN("[FOTA] meta: zápis zlyhal"); return false;
     }
     bool ok = (f.write((const uint8_t*)&mp, sizeof(mp)) == (int)sizeof(mp));
     f.close();
@@ -289,7 +288,7 @@ static bool load_bitmap() {
 static bool log_append(uint16_t idx, const uint8_t* data, uint16_t data_len) {
     File f(FotaFS);
     if (!f.open(FOTA_FS_LOG, FILE_O_WRITE)) {
-        Serial.println(F("[FOTA] log: zápis zlyhal")); return false;
+        FOTA_DEBUG_PRINTLN("[FOTA] log: zápis zlyhal"); return false;
     }
     uint8_t hdr[4];
     hdr[0] = (uint8_t)(idx);       hdr[1] = (uint8_t)(idx >> 8);
@@ -351,14 +350,14 @@ static uint32_t assemble_log_to_buf(uint8_t* buf, uint32_t cap) {
 static bool verify_log_sha() {
     File log_r(FotaFS);
     if (!log_r.open(FOTA_FS_LOG, FILE_O_READ)) {
-        Serial.println(F("[FOTA] log: čítanie zlyhal")); return false;
+        FOTA_DEBUG_PRINTLN("[FOTA] log: čítanie zlyhal"); return false;
     }
     build_log_offsets(log_r);
     SHA256 sha;
     uint8_t buf[FOTA_CHUNK_DATA_MAX];
     for (uint16_t i = 0; i < fota.total_chunks; i++) {
         if (s_log_data_offset[i] == 0xFFFFFFFFu) {
-            Serial.print(F("[FOTA] chýba chunk ")); Serial.println(i);
+            FOTA_DEBUG_PRINTLN("[FOTA] chýba chunk %u", (unsigned)i);
             log_r.close(); return false;
         }
         uint16_t exp_len = chunk_exp_len(i);
@@ -370,9 +369,9 @@ static bool verify_log_sha() {
     uint8_t hash[32];
     sha.finalize(hash, sizeof(hash));
     if (memcmp(hash, fota.patch_sha256, 32) != 0) {
-        Serial.print(F("[FOTA] SHA256 NESÚHLASÍ  got="));
-        for (int i = 0; i < 8; i++) { if (hash[i] < 0x10) Serial.print('0'); Serial.print(hash[i], HEX); }
-        Serial.println(F("..."));
+        FOTA_DEBUG_PRINT("[FOTA] SHA256 NESÚHLASÍ  got=");
+        for (int i = 0; i < 8; i++) { FOTA_DEBUG_PRINT("%02X", (unsigned)hash[i]); }
+        FOTA_DEBUG_PRINTLN("...");
         return false;
     }
     return true;
@@ -386,15 +385,15 @@ static bool verify_log_sha() {
 // =====================================================================
 static bool assemble_and_verify() {
 #ifndef USE_PATCHBIN_FILE
-    Serial.println(F("[FOTA] Overujem patch SHA256 (RAM, bez patch.bin)..."));
+    FOTA_DEBUG_PRINTLN("[FOTA] Overujem patch SHA256 (RAM, bez patch.bin)...");
     if (!verify_log_sha()) return false;
-    Serial.println(F("[FOTA] patch SHA256 OK (recv.log ostáva ako zdroj)"));
+    FOTA_DEBUG_PRINTLN("[FOTA] patch SHA256 OK (recv.log ostáva ako zdroj)");
     return true;
 #else
-    Serial.println(F("[FOTA] Zostavujem patch.bin..."));
+    FOTA_DEBUG_PRINTLN("[FOTA] Zostavujem patch.bin...");
     File log_r(FotaFS);
     if (!log_r.open(FOTA_FS_LOG, FILE_O_READ)) {
-        Serial.println(F("[FOTA] log: čítanie zlyhal")); return false;
+        FOTA_DEBUG_PRINTLN("[FOTA] log: čítanie zlyhal"); return false;
     }
     build_log_offsets(log_r);
 
@@ -407,7 +406,7 @@ static bool assemble_and_verify() {
     uint8_t buf[FOTA_CHUNK_DATA_MAX];
     for (uint16_t i = 0; i < fota.total_chunks && ok; i++) {
         if (s_log_data_offset[i] == 0xFFFFFFFFu) {
-            Serial.print(F("[FOTA] chýba chunk ")); Serial.println(i); ok = false; break;
+            FOTA_DEBUG_PRINTLN("[FOTA] chýba chunk %u", (unsigned)i); ok = false; break;
         }
         uint16_t exp_len = chunk_exp_len(i);
         log_r.seek(s_log_data_offset[i]);
@@ -418,19 +417,19 @@ static bool assemble_and_verify() {
     }
     log_r.close();
     out_f.close();
-    if (!ok) { Serial.println(F("[FOTA] zostava zlyhala")); return false; }
+    if (!ok) { FOTA_DEBUG_PRINTLN("[FOTA] zostava zlyhala"); return false; }
 
     uint8_t hash[32];
     sha.finalize(hash, sizeof(hash));
     if (memcmp(hash, fota.patch_sha256, 32) != 0) {
-        Serial.print(F("[FOTA] SHA256 NESÚHLASÍ  got="));
-        for (int i = 0; i < 8; i++) { if (hash[i] < 0x10) Serial.print('0'); Serial.print(hash[i], HEX); }
-        Serial.println(F("..."));
+        FOTA_DEBUG_PRINT("[FOTA] SHA256 NESÚHLASÍ  got=");
+        for (int i = 0; i < 8; i++) { FOTA_DEBUG_PRINT("%02X", (unsigned)hash[i]); }
+        FOTA_DEBUG_PRINTLN("...");
         return false;
     }
-    Serial.println(F("[FOTA] patch.bin SHA256 OK"));
+    FOTA_DEBUG_PRINTLN("[FOTA] patch.bin SHA256 OK");
     FotaFS.remove(FOTA_FS_LOG);   // recv.log cleanup — patch.bin je odteraz zdroj
-    Serial.println(F("[FOTA] recv.log zmazaný (patch.bin je zdroj)"));
+    FOTA_DEBUG_PRINTLN("[FOTA] recv.log zmazaný (patch.bin je zdroj)");
     return true;
 #endif
 }
@@ -444,27 +443,26 @@ static bool assemble_and_verify() {
 uint8_t* fota_acquire_patch_ram(uint32_t* out_size) {
 #ifdef USE_PATCHBIN_FILE
     File f(FotaFS);
-    if (!f.open(FOTA_FS_PATCH, FILE_O_READ)) { Serial.println(F("[FOTA] patch.bin chýba")); return nullptr; }
+    if (!f.open(FOTA_FS_PATCH, FILE_O_READ)) { FOTA_DEBUG_PRINTLN("[FOTA] patch.bin chýba"); return nullptr; }
     uint32_t sz = (uint32_t)f.size();
     if (sz == 0 || sz > FOTA_FS_FLASH_SIZE) { f.close(); return nullptr; }
     uint8_t* buf = (uint8_t*)malloc(sz);
-    if (!buf) { f.close(); Serial.print(F("[FOTA] malloc ")); Serial.print(sz); Serial.println(F("B zlyhal")); return nullptr; }
+    if (!buf) { f.close(); FOTA_DEBUG_PRINTLN("[FOTA] malloc %lu B zlyhal", (unsigned long)sz); return nullptr; }
     bool ok = ((uint32_t)f.read(buf, sz) == sz);
     f.close();
-    if (!ok) { free(buf); Serial.println(F("[FOTA] čítanie patch.bin zlyhalo")); return nullptr; }
+    if (!ok) { free(buf); FOTA_DEBUG_PRINTLN("[FOTA] čítanie patch.bin zlyhalo"); return nullptr; }
     *out_size = sz;
     return buf;
 #else
     uint32_t sz = fota.patch_size;
-    if (sz == 0 || sz > FOTA_FS_FLASH_SIZE) { Serial.println(F("[FOTA] neplatná patch_size")); return nullptr; }
+    if (sz == 0 || sz > FOTA_FS_FLASH_SIZE) { FOTA_DEBUG_PRINTLN("[FOTA] neplatná patch_size"); return nullptr; }
     uint8_t* buf = (uint8_t*)malloc(sz);
     if (!buf) {
-        Serial.print(F("[FOTA] malloc ")); Serial.print(sz);
-        Serial.println(F("B zlyhal (RAM assembly) — pre veľké patche skús -D USE_PATCHBIN_FILE"));
+        FOTA_DEBUG_PRINTLN("[FOTA] malloc %lu B zlyhal (RAM assembly) — pre veľké patche skús -D USE_PATCHBIN_FILE", (unsigned long)sz);
         return nullptr;
     }
     if (assemble_log_to_buf(buf, sz) != sz) {
-        free(buf); Serial.println(F("[FOTA] RAM assembly z recv.log zlyhala")); return nullptr;
+        free(buf); FOTA_DEBUG_PRINTLN("[FOTA] RAM assembly z recv.log zlyhala"); return nullptr;
     }
     *out_size = sz;
     return buf;
@@ -498,10 +496,7 @@ static void try_resume() {
     load_bitmap();
     fota.recv_count = bitmap_popcount();
 
-    Serial.print(F("[FOTA] RESUME "));
-    Serial.print(fota.recv_count); Serial.print('/');
-    Serial.print(fota.total_chunks); Serial.print(F(" chunks  st=0x"));
-    Serial.println(fota.status, HEX);
+    FOTA_DEBUG_PRINTLN("[FOTA] RESUME %u/%u chunks  st=0x%02X", (unsigned)fota.recv_count, (unsigned)fota.total_chunks, (unsigned)fota.status);
 }
 
 // =====================================================================
@@ -511,26 +506,28 @@ void fota_init() {
     fota_clear();
     if (!FotaFS.begin()) {
         // Po flasheri je 0xD4000 prepísaný raw patch dátami — reformátuj
-        Serial.println(F("[FOTA] FS poškodený (post-flash?), reformátujem..."));
+        FOTA_DEBUG_PRINTLN("[FOTA] FS poškodený (post-flash?), reformátujem...");
         FotaFS.format();
         if (!FotaFS.begin()) {
-            Serial.println(F("[FOTA] FS: format+begin zlyhalo — FS nedostupný"));
+            FOTA_DEBUG_PRINTLN("[FOTA] FS: format+begin zlyhalo — FS nedostupný");
         }
     }
     FotaFS.mkdir(FOTA_FS_DIR);
     try_resume();
-    Serial.println(F("[FOTA] init  (CustomLFS 92kB @ 0xD4000)"));
+    FOTA_DEBUG_PRINTLN("[FOTA] init  (CustomLFS 92kB @ 0xD4000)");
 }
 
 const FotaState* fota_get_state() { return &fota; }
 
 void fota_print_status() {
-    Serial.print(F("[FOTA] "));
-    Serial.print(fota.recv_count); Serial.print('/'); Serial.print(fota.total_chunks);
-    Serial.print(F("  st=0x")); Serial.print(fota.status, HEX);
-    Serial.print(F("  size=")); Serial.print(fota.patch_size);
-    if (fota.err_code) { Serial.print(F("  err=0x")); Serial.print(fota.err_code, HEX); }
-    Serial.println();
+    char buf[128];
+    int n = snprintf(buf, sizeof(buf), "[FOTA] %u/%u  st=0x%02X  size=%lu",
+                     (unsigned)fota.recv_count, (unsigned)fota.total_chunks,
+                     (unsigned)fota.status, (unsigned long)fota.patch_size);
+    if (fota.err_code && n > 0 && n < (int)sizeof(buf) - 16) {
+        snprintf(buf + n, sizeof(buf) - n, "  err=0x%02X", (unsigned)fota.err_code);
+    }
+    FOTA_DEBUG_PRINTLN("%s", buf);
 }
 
 void fota_send_nack() {
@@ -541,13 +538,13 @@ void fota_send_nack() {
         if (!FOTA_BIT_GET(fota.bitmap, i))
             missing[cnt++] = i;
 
-    Serial.print(F("[FOTA] NACK missing=")); Serial.print(cnt);
+    FOTA_DEBUG_PRINT("[FOTA] NACK missing=%u", (unsigned)cnt);
     if (cnt) {
-        Serial.print(F("  [")); Serial.print(missing[0]);
-        if (cnt > 1) { Serial.print(F("..")); Serial.print(missing[cnt-1]); }
-        Serial.print(']');
+        FOTA_DEBUG_PRINT("  [%u", (unsigned)missing[0]);
+        if (cnt > 1) { FOTA_DEBUG_PRINT("..%u", (unsigned)missing[cnt-1]); }
+        FOTA_DEBUG_PRINT("]");
     }
-    Serial.println();
+    FOTA_DEBUG_PRINTLN("");
 }
 
 // Rozsah na počítanie chýbajúcich chunkov [*lo .. *hi].
@@ -603,17 +600,15 @@ void fota_print_missing(int limit) {
         }
         if (in_run && (!missing || i == hi)) {     // koniec behu: vypíš ho celý (ak je budget)
             if (limit <= 0 || tokens < limit) {
-                Serial.print(rs);
-                if (re != rs) { Serial.print('-'); Serial.print(re); tokens += 2; }
-                else          { tokens += 1; }
-                Serial.print(' ');
+                if (re != rs) { FOTA_DEBUG_PRINT("%u-%u ", (unsigned)rs, (unsigned)re); tokens += 2; }
+                else          { FOTA_DEBUG_PRINT("%u ", (unsigned)rs); tokens += 1; }
                 shown += (int)(re - rs + 1);
             }
             in_run = false;
         }
         if (i == hi) break;
     }
-    if (limit > 0 && total > shown) { Serial.print('+'); Serial.print(total - shown); }
+    if (limit > 0 && total > shown) { FOTA_DEBUG_PRINT("+%d", total - shown); }
 }
 
 // Naformátuje chýbajúce CHUNKY do 'out' ako rozsahy s vedúcou medzerou (" 5", " 4-11").
@@ -708,37 +703,36 @@ static void try_verify_header() {
 #ifdef FOTA_ALLOW_UNSIGNED
     bool is_unsigned = (fota.hdr_sig[0] == 0 && fota.hdr_sig[1] == 0 &&
                         fota.hdr_sig[2] == 0 && fota.hdr_sig[3] == 0);
-    if (is_unsigned) { Serial.println(F("[FOTA] HEADER: UNSIGNED (FOTA_ALLOW_UNSIGNED)")); ok = true; }
+    if (is_unsigned) { FOTA_DEBUG_PRINTLN("[FOTA] HEADER: UNSIGNED (FOTA_ALLOW_UNSIGNED)"); ok = true; }
     else
 #endif
     ok = verify_header_signature(fota.hdr_sig, meta, 102u, fota.hdr_key_id);
 
     if (!ok) {
-        Serial.println(F("[FOTA] HEADER: INVALID signature — rejecting"));
+        FOTA_DEBUG_PRINTLN("[FOTA] HEADER: INVALID signature — rejecting");
         fota_set_error(FOTA_ERR_SIGNATURE);
         return;
     }
 
     uint32_t tc = (fota.patch_size + FOTA_CHUNK_DATA_MAX - 1u) / FOTA_CHUNK_DATA_MAX;
     if (tc == 0 || tc > FOTA_MAX_CHUNKS) {
-        Serial.print(F("[FOTA] HEADER: zlé total_chunks=")); Serial.println(tc); return;
+        FOTA_DEBUG_PRINTLN("[FOTA] HEADER: zlé total_chunks=%lu", (unsigned long)tc); return;
     }
     fota.total_chunks = (uint16_t)tc;
     fota.recv_count   = bitmap_popcount();
     fota.status       = FOTA_ST_RECEIVING;
     save_bitmap();
     save_meta();
-    Serial.print(F("[FOTA] HEADER OK (META+SIG overené) chunks=")); Serial.print(tc);
-    Serial.print(F("  mám ")); Serial.print(fota.recv_count); Serial.println(F(" chunkov"));
+    FOTA_DEBUG_PRINTLN("[FOTA] HEADER OK (META+SIG overené) chunks=%lu  mám %u chunkov", (unsigned long)tc, (unsigned)fota.recv_count);
 
     // Chunky mohli doraziť pred hlavičkou → over COMPLETE hneď
     if (fota.recv_count >= fota.total_chunks) {
         fota.status |= FOTA_ST_COMPLETE;
         save_meta();
-        Serial.println(F("[FOTA] COMPLETE — assembly + SHA256..."));
+        FOTA_DEBUG_PRINTLN("[FOTA] COMPLETE — assembly + SHA256...");
         if (assemble_and_verify()) {
             fota.status |= FOTA_ST_VERIFIED; save_meta();
-            Serial.println(F("[FOTA] VERIFIED — 'fota verify'=dry-run | 'fota flash'=flash+reboot"));
+            FOTA_DEBUG_PRINTLN("[FOTA] VERIFIED — 'fota verify'=dry-run | 'fota flash'=flash+reboot");
         } else {
             fota_set_error(FOTA_ERR_SHA256); save_meta();
         }
@@ -748,7 +742,7 @@ static void try_verify_header() {
 // FOTA_PKT_HEADER = META (metadáta patchu, podpisované). Idempotentné (opätovné
 // prijatie len prepíše rovnaké polia). Verify+promócia spraví try_verify_header.
 static void handle_meta(const uint8_t* plain, int plen) {
-    if (plen < (int)sizeof(FotaHeaderPkt)) { Serial.println(F("[FOTA] META: krátky")); return; }
+    if (plen < (int)sizeof(FotaHeaderPkt)) { FOTA_DEBUG_PRINTLN("[FOTA] META: krátky"); return; }
     const FotaHeaderPkt* pkt = (const FotaHeaderPkt*)plain;
 
     // Base FW gating — META.old_sha256 MUSÍ sedieť s bežiacim FW, inak patch nepatrí
@@ -756,7 +750,7 @@ static void handle_meta(const uint8_t* plain, int plen) {
     // base_fw_size==0 a SHA sa doráta nad fw_image_size). Drop (nie ERROR) — cudzí
     // paket nesmie zhodiť ani založiť NAŠU session. Vypíš (ako pri chunku).
     if (!fota_meta_base_ok(pkt->old_sha256)) {
-        Serial.println(F("[FOTA] META: base FW nezhoda — patch nie je pre toto zariadenie, drop"));
+        FOTA_DEBUG_PRINTLN("[FOTA] META: base FW nezhoda — patch nie je pre toto zariadenie, drop");
         return;
     }
 
@@ -788,28 +782,25 @@ static void handle_meta(const uint8_t* plain, int plen) {
     memcpy(fota.old_sha256,   pkt->old_sha256,   32);
     fota.meta_recv = 1;
     if (!dup_meta) save_meta();   // DUP re-send → žiadny flash zápis (nestalluj RX)
-    Serial.print(F("[FOTA] META prijaté patch_size=")); Serial.print(pkt->patch_size);
-    Serial.print(F("B  patch_sha256="));
-    for (int i = 0; i < 6; i++) { if (pkt->patch_sha256[i] < 0x10) Serial.print('0'); Serial.print(pkt->patch_sha256[i], HEX); }
-    Serial.print(F("..."));
-    Serial.println(dup_meta ? F("  meta_recv=1 DUP → skip save")
-                            : F("  NEW/CHANGED → save"));
+    FOTA_DEBUG_PRINT("[FOTA] META prijaté patch_size=%lu B  patch_sha256=", (unsigned long)pkt->patch_size);
+    for (int i = 0; i < 6; i++) { FOTA_DEBUG_PRINT("%02X", (unsigned)pkt->patch_sha256[i]); }
+    FOTA_DEBUG_PRINTLN("...  %s", dup_meta ? "meta_recv=1 DUP → skip save" : "NEW/CHANGED → save");
     try_verify_header();
 }
 
 // FOTA_PKT_HDR_SIG = SIG (Ed25519 podpis META). Gating cez old_sha256.
 static void handle_sig(const uint8_t* plain, int plen) {
-    if (plen < (int)sizeof(FotaHdrSigPkt)) { Serial.println(F("[FOTA] SIG: krátky")); return; }
+    if (plen < (int)sizeof(FotaHdrSigPkt)) { FOTA_DEBUG_PRINTLN("[FOTA] SIG: krátky"); return; }
     const FotaHdrSigPkt* pkt = (const FotaHdrSigPkt*)plain;
 
     if (fota.meta_recv) {
         if (memcmp(fota.old_sha256, pkt->old_sha256, 32) != 0) {
-            Serial.println(F("[FOTA] SIG: old_sha256 nezhoda s META — drop")); return;
+            FOTA_DEBUG_PRINTLN("[FOTA] SIG: old_sha256 nezhoda s META — drop"); return;
         }
     } else if (!fota_meta_base_ok(pkt->old_sha256)) {
         // SIG prišiel pred META — over base FW VŽDY (aj pri base_fw_size==0), inak by
         // SIG-first založil session pre cudzí patch. (SIG.old_sha256 = "gating patrí mne".)
-        Serial.println(F("[FOTA] SIG: base FW nezhoda — patch nie je pre toto zariadenie, drop")); return;
+        FOTA_DEBUG_PRINTLN("[FOTA] SIG: base FW nezhoda — patch nie je pre toto zariadenie, drop"); return;
     }
     if (!(fota.status & FOTA_ST_RECEIVING)) { fota.status = FOTA_ST_RECEIVING; fota.total_chunks = 0; }
 
@@ -820,9 +811,8 @@ static void handle_sig(const uint8_t* plain, int plen) {
     memcpy(fota.hdr_sig, pkt->signature, 64);
     fota.sig_recv = 1;
     if (!dup_sig) save_meta();   // DUP re-send → žiadny flash zápis (nestalluj RX)
-    Serial.print(F("[FOTA] SIG prijaté key_id=0x")); Serial.print(pkt->key_id, HEX);
-    Serial.println(dup_sig ? F("  sig_recv=1 DUP → skip save")
-                           : F("  NEW/CHANGED → save"));
+    FOTA_DEBUG_PRINTLN("[FOTA] SIG prijaté key_id=0x%X  %s", (unsigned)pkt->key_id,
+        dup_sig ? "sig_recv=1 DUP → skip save" : "NEW/CHANGED → save");
     try_verify_header();
 }
 
@@ -840,7 +830,7 @@ static void handle_chunk(const uint8_t* plain, int plen) {
 
     // Base FW validácia — over, že chunk je pre aktuálny FW na zariadení
     if (!fota_base_fw_validated(pkt->old_fw_size, pkt->old_sha256_prefix)) {
-        Serial.println(F("[FOTA] CHUNK: base FW nezhoda — drop"));
+        FOTA_DEBUG_PRINTLN("[FOTA] CHUNK: base FW nezhoda — drop");
         return;
     }
 
@@ -858,7 +848,7 @@ static void handle_chunk(const uint8_t* plain, int plen) {
         fota.status = FOTA_ST_RECEIVING;
         fota.total_chunks = 0;  // čaká HEADER (alebo promóciu)
         save_meta();
-        Serial.println(F("[FOTA] CHUNK: partial session z chunku (čaká HEADER)"));
+        FOTA_DEBUG_PRINTLN("[FOTA] CHUNK: partial session z chunku (čaká HEADER)");
     } else if (memcmp(fota.old_sha256, pkt->old_sha256_prefix, 4) != 0) {
         return;  // chunk patrí inému base FW než bežiaca session
     }
@@ -886,9 +876,7 @@ static void handle_chunk(const uint8_t* plain, int plen) {
 
     uint16_t calc_crc = fota_crc16(data, data_len);
     if (calc_crc != rx_crc) {
-        Serial.print(F("[FOTA] CRC ERR idx=")); Serial.print(idx);
-        Serial.print(F("  exp=0x")); Serial.print(rx_crc, HEX);
-        Serial.print(F("  got=0x")); Serial.println(calc_crc, HEX);
+        FOTA_DEBUG_PRINTLN("[FOTA] CRC ERR idx=%u  exp=0x%04X  got=0x%04X", (unsigned)idx, (unsigned)rx_crc, (unsigned)calc_crc);
         return;
     }
 
@@ -907,19 +895,18 @@ static void handle_chunk(const uint8_t* plain, int plen) {
         save_bitmap();
 
     if (fota.recv_count % 20 == 0 || complete) {
-        Serial.print(F("[FOTA] ")); Serial.print(fota.recv_count);
-        Serial.print('/'); Serial.println(fota.total_chunks);
+        FOTA_DEBUG_PRINTLN("[FOTA] %u/%u", (unsigned)fota.recv_count, (unsigned)fota.total_chunks);
     }
 
     if (complete) {
         fota.status |= FOTA_ST_COMPLETE;
         save_meta();
-        Serial.println(F("[FOTA] COMPLETE — assembly + SHA256..."));
+        FOTA_DEBUG_PRINTLN("[FOTA] COMPLETE — assembly + SHA256...");
 
         if (assemble_and_verify()) {
             fota.status |= FOTA_ST_VERIFIED;
             save_meta();
-            Serial.println(F("[FOTA] VERIFIED — 'fota verify'=dry-run | 'fota flash'=flash+reboot"));
+            FOTA_DEBUG_PRINTLN("[FOTA] VERIFIED — 'fota verify'=dry-run | 'fota flash'=flash+reboot");
         } else {
             fota_set_error(FOTA_ERR_SHA256);
             save_meta();
@@ -934,7 +921,7 @@ static void handle_apply(const uint8_t* plain, int plen) {
     if (plen < (int)sizeof(FotaApplyPkt)) return;
     const FotaApplyPkt* pkt = (const FotaApplyPkt*)plain;
     if (memcmp(pkt->sha256, fota.patch_sha256, 32) != 0) {
-        Serial.println(F("[FOTA] APPLY: SHA256 nesúhlasí")); return;
+        FOTA_DEBUG_PRINTLN("[FOTA] APPLY: SHA256 nesúhlasí"); return;
     }
     fota_apply();
 }
@@ -946,71 +933,58 @@ void fota_print_pkt(const uint8_t* plain, int plen, float rssi, float snr) {
     if (plen < 1) return;
     uint8_t type = plain[0];
 
-    Serial.print(F("[FOTA] "));
-
     switch (type) {
         case FOTA_PKT_HEADER: {   // META
-            if (plen < (int)sizeof(FotaHeaderPkt)) { Serial.println(F("META (krátky)")); return; }
+            if (plen < (int)sizeof(FotaHeaderPkt)) { FOTA_DEBUG_PRINTLN("[FOTA] META (krátky)"); return; }
             const FotaHeaderPkt* p = (const FotaHeaderPkt*)plain;
             uint32_t ps; memcpy(&ps, &p->patch_size, 4);
             uint32_t tc = (ps + FOTA_CHUNK_DATA_MAX - 1u) / FOTA_CHUNK_DATA_MAX;
-            Serial.print(F("META  v")); Serial.print(p->fota_prot_inf);
-            Serial.print(F("  size="));   Serial.print(ps); Serial.print('B');
-            Serial.print(F("  chunks~")); Serial.print(tc);
-            Serial.print(F("  patch="));
-            for (int i = 0; i < 4; i++) { if (p->patch_sha256[i] < 0x10) Serial.print('0'); Serial.print(p->patch_sha256[i], HEX); }
-            Serial.print(F("...  new="));
-            for (int i = 0; i < 4; i++) { if (p->new_sha256[i] < 0x10) Serial.print('0'); Serial.print(p->new_sha256[i], HEX); }
-            Serial.print(F("..."));
-            break;
+            FOTA_DEBUG_PRINT("[FOTA] META  v%u  size=%lu B  chunks~%lu  patch=", (unsigned)p->fota_prot_inf, (unsigned long)ps, (unsigned long)tc);
+            for (int i = 0; i < 4; i++) { FOTA_DEBUG_PRINT("%02X", (unsigned)p->patch_sha256[i]); }
+            FOTA_DEBUG_PRINT("...  new=");
+            for (int i = 0; i < 4; i++) { FOTA_DEBUG_PRINT("%02X", (unsigned)p->new_sha256[i]); }
+            FOTA_DEBUG_PRINTLN("...");
+            return;
         }
         case FOTA_PKT_HDR_SIG: {  // SIG
-            if (plen < (int)sizeof(FotaHdrSigPkt)) { Serial.println(F("SIG (krátky)")); return; }
+            if (plen < (int)sizeof(FotaHdrSigPkt)) { FOTA_DEBUG_PRINTLN("[FOTA] SIG (krátky)"); return; }
             const FotaHdrSigPkt* p = (const FotaHdrSigPkt*)plain;
-            Serial.print(F("SIG  v")); Serial.print(p->fota_prot_inf);
-            Serial.print(F("  key_id=0x")); Serial.print(p->key_id, HEX);
-            Serial.print(F("  sig="));
-            for (int i = 0; i < 4; i++) { if (p->signature[i] < 0x10) Serial.print('0'); Serial.print(p->signature[i], HEX); }
-            Serial.print(F("...  old="));
-            for (int i = 0; i < 4; i++) { if (p->old_sha256[i] < 0x10) Serial.print('0'); Serial.print(p->old_sha256[i], HEX); }
-            Serial.print(F("..."));
-            break;
+            FOTA_DEBUG_PRINT("[FOTA] SIG  v%u  key_id=0x%X  sig=", (unsigned)p->fota_prot_inf, (unsigned)p->key_id);
+            for (int i = 0; i < 4; i++) { FOTA_DEBUG_PRINT("%02X", (unsigned)p->signature[i]); }
+            FOTA_DEBUG_PRINT("...  old=");
+            for (int i = 0; i < 4; i++) { FOTA_DEBUG_PRINT("%02X", (unsigned)p->old_sha256[i]); }
+            FOTA_DEBUG_PRINTLN("...");
+            return;
         }
         case FOTA_PKT_CHUNK: {
-            if (plen < (int)(sizeof(FotaChunkPkt) - FOTA_CHUNK_DATA_MAX)) { Serial.println(F("CHUNK (krátky)")); return; }
+            if (plen < (int)(sizeof(FotaChunkPkt) - FOTA_CHUNK_DATA_MAX)) { FOTA_DEBUG_PRINTLN("[FOTA] CHUNK (krátky)"); return; }
             const FotaChunkPkt* p = (const FotaChunkPkt*)plain;
             uint16_t dlen = (uint16_t)(plen - (int)(sizeof(FotaChunkPkt) - FOTA_CHUNK_DATA_MAX));
             uint16_t calc  = fota_crc16(p->data, dlen);
             bool crc_ok    = (calc == p->crc16);
 
-            Serial.print(F("CHUNK  idx="));  Serial.print(p->chunk_idx);
-            if (fota.total_chunks > 0) { Serial.print('/'); Serial.print(fota.total_chunks); }
-            Serial.print(F("  len="));       Serial.print(dlen); Serial.print('B');
-            Serial.print(F("  crc=0x"));     Serial.print(p->crc16, HEX);
-            Serial.print(crc_ok ? F("  OK") : F("  BAD"));
-            if (p->chunk_idx < FOTA_MAX_CHUNKS && FOTA_BIT_GET(fota.bitmap, p->chunk_idx)) Serial.print(F(" DUP"));
-            Serial.print(F("  base="));
-            for (int i = 0; i < 4; i++) { if (p->old_sha256_prefix[i] < 0x10) Serial.print('0'); Serial.print(p->old_sha256_prefix[i], HEX); }
-            break;
+            FOTA_DEBUG_PRINT("[FOTA] CHUNK  idx=%u", (unsigned)p->chunk_idx);
+            if (fota.total_chunks > 0) { FOTA_DEBUG_PRINT("/%u", (unsigned)fota.total_chunks); }
+            FOTA_DEBUG_PRINT("  len=%u B  crc=0x%04X %s", (unsigned)dlen, (unsigned)p->crc16, crc_ok ? "OK" : "BAD");
+            if (p->chunk_idx < FOTA_MAX_CHUNKS && FOTA_BIT_GET(fota.bitmap, p->chunk_idx)) FOTA_DEBUG_PRINT(" DUP");
+            FOTA_DEBUG_PRINT("  base=");
+            for (int i = 0; i < 4; i++) { FOTA_DEBUG_PRINT("%02X", (unsigned)p->old_sha256_prefix[i]); }
+            FOTA_DEBUG_PRINTLN("");
+            return;
         }
         case FOTA_PKT_APPLY: {
-            if (plen < (int)sizeof(FotaApplyPkt)) { Serial.println(F("APPLY (krátky)")); return; }
+            if (plen < (int)sizeof(FotaApplyPkt)) { FOTA_DEBUG_PRINTLN("[FOTA] APPLY (krátky)"); return; }
             const FotaApplyPkt* p = (const FotaApplyPkt*)plain;
             bool sha_ok = (memcmp(p->sha256, fota.patch_sha256, 32) == 0);
-            Serial.print(F("APPLY  sha256="));
-            for (int i = 0; i < 8; i++) { if (p->sha256[i] < 0x10) Serial.print('0'); Serial.print(p->sha256[i], HEX); }
-            Serial.print(sha_ok ? F("...  OK") : F("...  NESEDÍ"));
-            break;
+            FOTA_DEBUG_PRINT("[FOTA] APPLY  sha256=");
+            for (int i = 0; i < 8; i++) { FOTA_DEBUG_PRINT("%02X", (unsigned)p->sha256[i]); }
+            FOTA_DEBUG_PRINTLN("%s", sha_ok ? "...  OK" : "...  NESEDÍ");
+            return;
         }
         default:
-            Serial.print(F("? type=0x")); Serial.print(type, HEX);
+            FOTA_DEBUG_PRINTLN("[FOTA] ? type=0x%X", (unsigned)type);
+            return;
     }
-
-    if (rssi != 0.0f) {
-        Serial.print(F("  RSSI=")); Serial.print(rssi, 1);
-        Serial.print(F(" SNR="));  Serial.print(snr, 1);
-    }
-    Serial.println();
 }
 
 // =====================================================================
@@ -1032,7 +1006,7 @@ bool fota_process(const uint8_t* plain, int plen) {
 // =====================================================================
 bool fota_apply() {
     if (!(fota.status & FOTA_ST_VERIFIED)) {
-        Serial.println(F("[FOTA] APPLY: nie je verifikované — spusti príjem chunkov")); return false;
+        FOTA_DEBUG_PRINTLN("[FOTA] APPLY: nie je verifikované — spusti príjem chunkov"); return false;
     }
     uint8_t prev_status = fota.status;   // pre obnovu ak flash zlyhá (base-check a pod.)
     fota.status = FOTA_ST_APPLYING;
@@ -1051,19 +1025,17 @@ bool fota_apply() {
 // fota_clear_session — vymaže FOTA súbory z FS, resetuje RAM stav
 // =====================================================================
 void fota_clear_session() {
-    Serial.println(F("[FOTA] Mazem FOTA session..."));
+    FOTA_DEBUG_PRINTLN("[FOTA] Mazem FOTA session...");
     int removed = 0;
     const char* files[] = { FOTA_FS_META, FOTA_FS_BITMAP, FOTA_FS_LOG, FOTA_FS_PATCH };
     for (int i = 0; i < 4; i++) {
         if (FotaFS.remove(files[i])) {
-            Serial.print(F("[FOTA] rm "));
-            Serial.println(files[i]);
+            FOTA_DEBUG_PRINTLN("[FOTA] rm %s", files[i]);
             removed++;
         }
     }
     fota_clear();
-    Serial.print(F("[FOTA] Hotovo — vymazaných ")); Serial.print(removed);
-    Serial.println(F(" súborov"));
+    FOTA_DEBUG_PRINTLN("[FOTA] Hotovo — vymazaných %d súborov", removed);
 }
 
 #endif  // WITH_LORA_FOTA

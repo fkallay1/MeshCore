@@ -6,6 +6,7 @@
 #include "FotaFs.h"
 #include "FotaState.h"
 #include "FotaBuffer.h"   // zdieľaný scratch (static .bss, nie stack)
+#include "FotaDebug.h"
 #include <Arduino.h>
 #include <SHA256.h>          // rweather/Crypto
 #include <nrf.h>             // NRF_NVMC, NVMC_CONFIG_WEN_*
@@ -37,8 +38,9 @@ extern uint8_t* fota_acquire_patch_ram(uint32_t* out_size);
 // App base z linker symbolu (v6=0x26000, v7=0x27000) — viac robustné než makro.
 extern uint32_t fota_running_fw_base(void);
 
+__attribute__((unused))
 static void print_sha16(const uint8_t* h) {
-    for (int i = 0; i < 16; i++) { if (h[i] < 0x10) Serial.print('0'); Serial.print(h[i], HEX); }
+    for (int i = 0; i < 16; i++) { FOTA_DEBUG_PRINT("%02X", (unsigned)h[i]); }
 }
 
 // Overí, že aktuálne bežiaci FW (app flash @ APP_FLASH_START) zodpovedá 'old'
@@ -48,24 +50,24 @@ static bool fota_verify_old_fw() {
     bool all_zero = true;
     for (int i = 0; i < 32 && all_zero; i++) if (st->old_sha256[i]) all_zero = false;
     if (all_zero || st->old_fw_size == 0) {
-        Serial.println(F("[OLD] old_sha256 neznámy — kontrola base preskočená"));
+        FOTA_DEBUG_PRINTLN("[OLD] old_sha256 neznámy — kontrola base preskočená");
         return true;
     }
     if (st->old_fw_size > (APP_FLASH_END - fota_running_fw_base())) {
-        Serial.print(F("[OLD] CHYBA: old_fw_size ")); Serial.print(st->old_fw_size);
-        Serial.println(F(" > app okno")); return false;
+        FOTA_DEBUG_PRINTLN("[OLD] CHYBA: old_fw_size %lu > app okno", (unsigned long)st->old_fw_size);
+        return false;
     }
     SHA256 sha; sha.reset();
     sha.update((const void*)fota_running_fw_base(), st->old_fw_size);
     uint8_t h[32]; sha.finalize(h, sizeof(h));
-    Serial.print(F("[OLD] base app flash SHA256=")); print_sha16(h); Serial.println(F("..."));
-    Serial.print(F("[OLD] očakávaný old_sha256 =")); print_sha16(st->old_sha256); Serial.println(F("..."));
+    FOTA_DEBUG_PRINT("[OLD] base app flash SHA256="); print_sha16(h); FOTA_DEBUG_PRINTLN("...");
+    FOTA_DEBUG_PRINT("[OLD] očakávaný old_sha256 ="); print_sha16(st->old_sha256); FOTA_DEBUG_PRINTLN("...");
     if (memcmp(h, st->old_sha256, 32) != 0) {
-        Serial.println(F("[OLD] BASE NESEDÍ — bežiaci FW != old z patchu! NEPREPISUJEM."));
-        Serial.println(F("[OLD]   Vygeneruj patch voči aktuálnemu firmvéru."));
+        FOTA_DEBUG_PRINTLN("[OLD] BASE NESEDÍ — bežiaci FW != old z patchu! NEPREPISUJEM.");
+        FOTA_DEBUG_PRINTLN("[OLD]   Vygeneruj patch voči aktuálnemu firmvéru.");
         return false;
     }
-    Serial.println(F("[OLD] base FW sedí s patchom"));
+    FOTA_DEBUG_PRINTLN("[OLD] base FW sedí s patchom");
     return true;
 }
 
@@ -95,17 +97,17 @@ static void nvmc_write_words(uint32_t dst_addr, const uint32_t* src, uint32_t wo
 
 static bool ensure_flasher_written() {
     if (memcmp((const void*)FLASHER_CODE_ADDR, flasher_code, FLASHER_CODE_SIZE) == 0) {
-        Serial.println(F("[FLASH] Flasher je aktuálny"));
+        FOTA_DEBUG_PRINTLN("[FLASH] Flasher je aktuálny");
         return true;
     }
-    Serial.println(F("[FLASH] Zapisujem flasher do 0xEB000..."));
+    FOTA_DEBUG_PRINTLN("[FLASH] Zapisujem flasher do 0xEB000...");
     nvmc_erase_page(FLASHER_CODE_ADDR);
     nvmc_write_words(FLASHER_CODE_ADDR, (const uint32_t*)flasher_code, (FLASHER_CODE_SIZE + 3) / 4);
     if (memcmp((const void*)FLASHER_CODE_ADDR, flasher_code, FLASHER_CODE_SIZE) != 0) {
-        Serial.println(F("[FLASH] CHYBA: overenie flasher zlyhalo!"));
+        FOTA_DEBUG_PRINTLN("[FLASH] CHYBA: overenie flasher zlyhalo!");
         return false;
     }
-    Serial.println(F("[FLASH] Flasher zapísaný OK"));
+    FOTA_DEBUG_PRINTLN("[FLASH] Flasher zapísaný OK");
     return true;
 }
 #endif
@@ -189,12 +191,12 @@ static void set_err(char* err, size_t n, const char* msg) {
 // err/err_sz (voliteľné, môže byť NULL): krátky dôvod FAIL alebo poznámka pri OK.
 bool fota_patch_to_file(char* err, size_t err_sz) {
     const FotaState* st = fota_get_state();
-    Serial.println(F("[PATCH] Test: SHA256 verify (bez flash)..."));
+    FOTA_DEBUG_PRINTLN("[PATCH] Test: SHA256 verify (bez flash)...");
     fota_verify_old_fw();   // len informatívne v dry-rune (neblokuje test)
 
     uint32_t patch_size = 0;
     uint8_t* patch_buf = fota_acquire_patch_ram(&patch_size);   // RAM: z recv.log | patch.bin
-    if (!patch_buf) { Serial.println(F("[PATCH] patch nedostupný")); set_err(err, err_sz, "ziadne patch data"); return false; }
+    if (!patch_buf) { FOTA_DEBUG_PRINTLN("[PATCH] patch nedostupný"); set_err(err, err_sz, "ziadne patch data"); return false; }
 
     // Detekuj komprimovaný formát (magic 'ZLIB' v prvých 4 bajtoch)
     uint32_t magic = 0;
@@ -206,14 +208,12 @@ bool fota_patch_to_file(char* err, size_t err_sz) {
         memcpy(&new_fw_sz, patch_buf + 8, 4);
         uint32_t comp_sz = patch_size - 12;
 
-        Serial.print(F("[PATCH] ZLIB: compressed=")); Serial.print(comp_sz);
-        Serial.print(F("B  raw=")); Serial.print(uncomp_sz);
-        Serial.print(F("B  new_fw=")); Serial.print(new_fw_sz); Serial.println('B');
+        FOTA_DEBUG_PRINTLN("[PATCH] ZLIB: compressed=%lu B  raw=%lu B  new_fw=%lu B", (unsigned long)comp_sz, (unsigned long)uncomp_sz, (unsigned long)new_fw_sz);
 
         puff_stream_t* ps = (puff_stream_t*)malloc(sizeof(puff_stream_t));
         if (!ps) {
             free(patch_buf);
-            Serial.println(F("[PATCH] malloc puff_stream zlyhalo"));
+            FOTA_DEBUG_PRINTLN("[PATCH] malloc puff_stream zlyhalo");
             set_err(err, err_sz, "OOM puff_stream");
             return false;
         }
@@ -225,14 +225,12 @@ bool fota_patch_to_file(char* err, size_t err_sz) {
         if (!hpatchi_inplace_open(ps, patch_zlib_read,
                                   &compress_type, &new_size,
                                   &uncomp_size_hpi, &extra_safe)) {
-            Serial.print(F("[PATCH] Neplatny HPatchLite header (ZLIB) ps_err="));
-            Serial.println(ps->error);
+            FOTA_DEBUG_PRINTLN("[PATCH] Neplatny HPatchLite header (ZLIB) ps_err=%d", ps->error);
             free(ps); free(patch_buf);
             set_err(err, err_sz, "zly ZLIB/hpatch header");
             return false;
         }
-        Serial.print(F("[PATCH] hpatchi: new_size=")); Serial.print((uint32_t)new_size);
-        Serial.print(F("B  extra_safe=")); Serial.print((uint32_t)extra_safe); Serial.println('B');
+        FOTA_DEBUG_PRINTLN("[PATCH] hpatchi: new_size=%lu B  extra_safe=%lu B", (unsigned long)new_size, (unsigned long)extra_safe);
 
         ShaListener sl;
         sl.written = 0;
@@ -244,7 +242,7 @@ bool fota_patch_to_file(char* err, size_t err_sz) {
         // scratch z FotaBuffer (static .bss, NIE stack — LoRa RX callstack je
         // tesný; 2 kB na stacku tu pretekalo loop-task stack → mŕtve rádio).
         uint8_t* cache = fota_get_buffer(FOTA_BUF_CAP);
-        if (!cache) { free(ps); free(patch_buf); Serial.println(F("[PATCH] scratch buffer nedostupný")); set_err(err, err_sz, "scratch busy"); return false; }
+        if (!cache) { free(ps); free(patch_buf); FOTA_DEBUG_PRINTLN("[PATCH] scratch buffer nedostupný"); set_err(err, err_sz, "scratch busy"); return false; }
         bool ok = (bool)hpatch_lite_patch(&sl.base, new_size, cache, FOTA_BUF_CAP);
         fota_put_buffer(cache);
         int ps_err = ps->error;
@@ -253,11 +251,11 @@ bool fota_patch_to_file(char* err, size_t err_sz) {
 
         if (!ok) {
             if (ps_err) {
-                Serial.print(F("[PATCH] Dekompresia zlyhal: err=")); Serial.println(ps_err);
+                FOTA_DEBUG_PRINTLN("[PATCH] Dekompresia zlyhal: err=%d", ps_err);
                 char b[40]; snprintf(b, sizeof(b), "dekompresia err=%d", ps_err);
                 set_err(err, err_sz, b);
             } else {
-                Serial.println(F("[PATCH] HPatchLite ZLYHALO (ZLIB)"));
+                FOTA_DEBUG_PRINTLN("[PATCH] HPatchLite ZLYHALO (ZLIB)");
                 set_err(err, err_sz, "hpatch zlyhal (ZLIB)");
             }
             return false;
@@ -265,21 +263,21 @@ bool fota_patch_to_file(char* err, size_t err_sz) {
 
         uint8_t result_sha[32];
         sl.sha.finalize(result_sha, sizeof(result_sha));
-        Serial.print(F("[PATCH] SHA256=")); print_sha16(result_sha); Serial.println(F("..."));
+        FOTA_DEBUG_PRINT("[PATCH] SHA256="); print_sha16(result_sha); FOTA_DEBUG_PRINTLN("...");
 
         bool all_zero = true;
         for (int i = 0; i < 32 && all_zero; i++) if (st->new_sha256[i]) all_zero = false;
         if (all_zero) {
-            Serial.println(F("[PATCH] Ocakavany SHA256 nezname — overuj manualne"));
+            FOTA_DEBUG_PRINTLN("[PATCH] Ocakavany SHA256 nezname — overuj manualne");
             set_err(err, err_sz, "ocak. SHA neznama");
             return true;
         }
         if (memcmp(result_sha, st->new_sha256, 32) != 0) {
-            Serial.print(F("[PATCH] SHA256 NESEDI  exp=")); print_sha16(st->new_sha256); Serial.println(F("..."));
+            FOTA_DEBUG_PRINT("[PATCH] SHA256 NESEDI  exp="); print_sha16(st->new_sha256); FOTA_DEBUG_PRINTLN("...");
             set_err(err, err_sz, "SHA256 nesedi");
             return false;
         }
-        Serial.println(F("[PATCH] ZLIB patch overeny!"));
+        FOTA_DEBUG_PRINTLN("[PATCH] ZLIB patch overeny!");
         return true;
     }
 
@@ -291,21 +289,19 @@ bool fota_patch_to_file(char* err, size_t err_sz) {
     if (!hpatchi_inplace_open(&ms, patch_mem_read,
                               &compress_type, &new_size,
                               &uncomp_size, &extra_safe)) {
-        Serial.println(F("[PATCH] Neplatny format patchu (hpatchi_inplace_open)"));
+        FOTA_DEBUG_PRINTLN("[PATCH] Neplatny format patchu (hpatchi_inplace_open)");
         free(patch_buf);
         set_err(err, err_sz, "zly format patchu");
         return false;
     }
     if (compress_type != hpi_compressType_no) {
-        Serial.println(F("[PATCH] Komprimovany patch nie je podporovany"));
+        FOTA_DEBUG_PRINTLN("[PATCH] Komprimovany patch nie je podporovany");
         free(patch_buf);
         set_err(err, err_sz, "komprimovany nepodporovany");
         return false;
     }
 
-    Serial.print(F("[PATCH] new=")); Serial.print((uint32_t)new_size);
-    Serial.print(F("B  patch=")); Serial.print(patch_size);
-    Serial.print(F("B  extraSafe=")); Serial.print((uint32_t)extra_safe); Serial.println('B');
+    FOTA_DEBUG_PRINTLN("[PATCH] new=%lu B  patch=%lu B  extraSafe=%lu B", (unsigned long)new_size, (unsigned long)patch_size, (unsigned long)extra_safe);
 
     ShaListener sl;
     sl.written = 0;
@@ -316,15 +312,15 @@ bool fota_patch_to_file(char* err, size_t err_sz) {
 
     // scratch z FotaBuffer (static .bss, NIE stack — viď komentár vyššie)
     uint8_t* cache = fota_get_buffer(FOTA_BUF_CAP);
-    if (!cache) { free(patch_buf); Serial.println(F("[PATCH] scratch buffer nedostupný")); set_err(err, err_sz, "scratch busy"); return false; }
+    if (!cache) { free(patch_buf); FOTA_DEBUG_PRINTLN("[PATCH] scratch buffer nedostupný"); set_err(err, err_sz, "scratch busy"); return false; }
     bool ok = (bool)hpatch_lite_patch(&sl.base, new_size, cache, FOTA_BUF_CAP);
     fota_put_buffer(cache);
 
-    if (!ok) { Serial.println(F("[PATCH] HPatchLite ZLYHALO")); free(patch_buf); set_err(err, err_sz, "hpatch zlyhal"); return false; }
+    if (!ok) { FOTA_DEBUG_PRINTLN("[PATCH] HPatchLite ZLYHALO"); free(patch_buf); set_err(err, err_sz, "hpatch zlyhal"); return false; }
 
     uint8_t result_sha[32];
     sl.sha.finalize(result_sha, sizeof(result_sha));
-    Serial.print(F("[PATCH] SHA256=")); print_sha16(result_sha); Serial.println(F("..."));
+    FOTA_DEBUG_PRINT("[PATCH] SHA256="); print_sha16(result_sha); FOTA_DEBUG_PRINTLN("...");
     free(patch_buf);
 
     bool all_zero = true;
@@ -332,30 +328,30 @@ bool fota_patch_to_file(char* err, size_t err_sz) {
         if (st->new_sha256[i]) all_zero = false;
 
     if (all_zero) {
-        Serial.println(F("[PATCH] Očakávaný SHA256 neznámy — overuj manuálne"));
+        FOTA_DEBUG_PRINTLN("[PATCH] Očakávaný SHA256 neznámy — overuj manuálne");
         set_err(err, err_sz, "ocak. SHA neznama");
         return true;
     }
     if (memcmp(result_sha, st->new_sha256, 32) != 0) {
-        Serial.print(F("[PATCH] SHA256 NESEDÍ  exp="));
-        print_sha16(st->new_sha256); Serial.println(F("..."));
+        FOTA_DEBUG_PRINT("[PATCH] SHA256 NESEDÍ  exp=");
+        print_sha16(st->new_sha256); FOTA_DEBUG_PRINTLN("...");
         set_err(err, err_sz, "SHA256 nesedi");
         return false;
     }
-    Serial.println(F("[PATCH] OK — patch overený!"));
+    FOTA_DEBUG_PRINTLN("[PATCH] OK — patch overený!");
     return true;
 }
 
 // ── PRODUKČNÝ MÓD: patch→RAM → jump flasher@0xEB000 ──────────────────
 bool fota_flash_via_flasher() {
 #if !FOTA_HAS_FLASHER
-    Serial.println(F("[FLASHER] flasher_code.h chýba."));
-    Serial.println(F("[FLASHER] Spusti: python nrffota/tools/build_flasher.py"));
+    FOTA_DEBUG_PRINTLN("[FLASHER] flasher_code.h chýba.");
+    FOTA_DEBUG_PRINTLN("[FLASHER] Spusti: python nrffota/tools/build_flasher.py");
     return false;
 #else
     // ── 0: overenie base FW ──
     if (!fota_verify_old_fw()) {
-        Serial.println(F("[FLASHER] PRERUŠENÉ — base FW nesedí, neriskujem prepis."));
+        FOTA_DEBUG_PRINTLN("[FLASHER] PRERUŠENÉ — base FW nesedí, neriskujem prepis.");
         return false;
     }
 
@@ -365,11 +361,11 @@ bool fota_flash_via_flasher() {
     uint32_t patch_size = 0;
     uint8_t* patch_buf = fota_acquire_patch_ram(&patch_size);
     if (!patch_buf) {
-        Serial.println(F("[FLASHER] patch nedostupný (RAM/súbor)"));
+        FOTA_DEBUG_PRINTLN("[FLASHER] patch nedostupný (RAM/súbor)");
         return false;
     }
     if (patch_size == 0 || patch_size > FOTA_FS_FLASH_SIZE) {
-        Serial.print(F("[FLASHER] Neplatná veľkosť patchu: ")); Serial.println(patch_size);
+        FOTA_DEBUG_PRINTLN("[FLASHER] Neplatná veľkosť patchu: %lu", (unsigned long)patch_size);
         free(patch_buf);
         return false;
     }
@@ -382,9 +378,7 @@ bool fota_flash_via_flasher() {
             uint32_t uncomp_sz = 0;
             memcpy(&uncomp_sz, patch_buf + 4, 4);
             memcpy(&new_fw_size, patch_buf + 8, 4);
-            Serial.print(F("[FLASHER] Komprimovany format: staged=")); Serial.print(patch_size);
-            Serial.print(F("B  raw=")); Serial.print(uncomp_sz);
-            Serial.print(F("B  new_fw=")); Serial.print(new_fw_size); Serial.println('B');
+            FOTA_DEBUG_PRINTLN("[FLASHER] Komprimovany format: staged=%lu B  raw=%lu B  new_fw=%lu B", (unsigned long)patch_size, (unsigned long)uncomp_sz, (unsigned long)new_fw_size);
         } else {
             MemStream ms = { patch_buf, patch_size, 0 };
             hpi_compressType compress_type = hpi_compressType_no;
@@ -394,25 +388,24 @@ bool fota_flash_via_flasher() {
                                       &compress_type, &new_fw_size64,
                                       &uncomp_size, &extra_safe)) {
                 free(patch_buf);
-                Serial.println(F("[FLASHER] Neplatny format patchu"));
+                FOTA_DEBUG_PRINTLN("[FLASHER] Neplatny format patchu");
                 return false;
             }
             if (compress_type != hpi_compressType_no) {
                 free(patch_buf);
-                Serial.println(F("[FLASHER] Komprimovany HPatchLite nie je podporovany"));
+                FOTA_DEBUG_PRINTLN("[FLASHER] Komprimovany HPatchLite nie je podporovany");
                 return false;
             }
             new_fw_size = (uint32_t)new_fw_size64;
-            Serial.print(F("[FLASHER] Nekomprimovany format: new_fw=")); Serial.print(new_fw_size);
-            Serial.print(F("B  patch=")); Serial.print(patch_size); Serial.println('B');
+            FOTA_DEBUG_PRINTLN("[FLASHER] Nekomprimovany format: new_fw=%lu B  patch=%lu B", (unsigned long)new_fw_size, (unsigned long)patch_size);
         }
     }
-    Serial.print(F("[FLASHER] Patch v RAM (")); Serial.print(patch_size); Serial.println(F("B)"));
+    FOTA_DEBUG_PRINTLN("[FLASHER] Patch v RAM (%lu B)", (unsigned long)patch_size);
 
     const uint32_t PATCH_RAM_ADDR = 0x20000000u;   // zhodné s flasher.c
     if (patch_size > 0x20000u) {   // 128kB — limit RAM oblasti pre patch (flasher.ld)
         free(patch_buf);
-        Serial.println(F("[FLASHER] Patch > 128kB — nezmestí sa do RAM oblasti"));
+        FOTA_DEBUG_PRINTLN("[FLASHER] Patch > 128kB — nezmestí sa do RAM oblasti");
         return false;
     }
 
@@ -424,8 +417,7 @@ bool fota_flash_via_flasher() {
     // 4. arg, takže je JEDEN board-agnostický blob (nie compile-time per-board).
     uint32_t app_base = fota_running_fw_base();
     typedef void(*flasher_fn_t)(uint32_t, uint32_t, uint32_t, uint32_t);
-    Serial.print(F("[FLASHER] → 0x")); Serial.print(FLASHER_CODE_ADDR, HEX);
-    Serial.println(F(" [BYE] (streaming)"));
+    FOTA_DEBUG_PRINTLN("[FLASHER] → 0x%X [BYE] (streaming)", (unsigned)FLASHER_CODE_ADDR);
     Serial.flush();
 
     extern uint32_t sd_softdevice_disable(void);
@@ -457,12 +449,12 @@ bool fota_flash_via_flasher() {
 #else  // FOTA_HAS_HPATCH == 0
 
 bool fota_patch_to_file(char* err, size_t err_sz) {
-    Serial.println(F("[PATCH] HPatchLite nie je nainštalovaná (nrffota/hpatchlite/)."));
+    FOTA_DEBUG_PRINTLN("[PATCH] HPatchLite nie je nainštalovaná (nrffota/hpatchlite/).");
     if (err && err_sz) { strncpy(err, "hpatchlite chyba", err_sz - 1); err[err_sz - 1] = 0; }
     return false;
 }
 bool fota_flash_via_flasher() {
-    Serial.println(F("[FLASHER] HPatchLite nie je nainštalovaná."));
+    FOTA_DEBUG_PRINTLN("[FLASHER] HPatchLite nie je nainštalovaná.");
     return false;
 }
 
@@ -485,34 +477,31 @@ void fota_check_flasher_debug() {
     NRF_POWER_RESETREAS = s_resetreas_raw; // write-1-to-clear
 }
 
+__attribute__((unused))
 static void print_step(uint8_t step) {
-    Serial.print(F("[FLASHER-DBG] Step=0x"));
-    if (step < 0x10u) Serial.print('0');
-    Serial.print(step, HEX);
-    Serial.print(F("  "));
+    FOTA_DEBUG_PRINT("[FLASHER-DBG] Step=0x%02X  ", (unsigned)step);
     switch (step) {
-        case 0xFF: Serial.println(F("STARTED — crashed before ZLIB check")); break;
-        case 0x01: Serial.println(F("ZLIB detected OK")); break;
-        case 0x02: Serial.println(F("puff() OK")); break;
-        case 0x03: Serial.println(F("hpatchi_inplace_open OK")); break;
-        case 0x04: Serial.println(F("hpatchi_inplaceB OK")); break;
-        case 0x05: Serial.println(F("flush last page OK")); break;
-        case 0x06: Serial.println(F("RESET issued — patch complete!")); break;
-        case 0xE0: Serial.println(F("ERR: uncomp_size 0 or > max")); break;
-        case 0xE1: Serial.println(F("ERR: puff() failed")); break;
-        case 0xE2: Serial.println(F("ERR: puff destlen mismatch")); break;
-        case 0xE3: Serial.println(F("ERR: hpatchi_inplace_open failed")); break;
-        case 0xE4: Serial.println(F("ERR: compress_type != no")); break;
-        case 0xE5: Serial.println(F("ERR: extra_safe > MAX")); break;
-        case 0xE6: Serial.println(F("ERR: hpatchi_inplaceB failed")); break;
-        case 0xFE: Serial.println(F("FAIL — flasher zlyhal a resetoval sa")); break;
+        case 0xFF: FOTA_DEBUG_PRINTLN("STARTED — crashed before ZLIB check"); break;
+        case 0x01: FOTA_DEBUG_PRINTLN("ZLIB detected OK"); break;
+        case 0x02: FOTA_DEBUG_PRINTLN("puff() OK"); break;
+        case 0x03: FOTA_DEBUG_PRINTLN("hpatchi_inplace_open OK"); break;
+        case 0x04: FOTA_DEBUG_PRINTLN("hpatchi_inplaceB OK"); break;
+        case 0x05: FOTA_DEBUG_PRINTLN("flush last page OK"); break;
+        case 0x06: FOTA_DEBUG_PRINTLN("RESET issued — patch complete!"); break;
+        case 0xE0: FOTA_DEBUG_PRINTLN("ERR: uncomp_size 0 or > max"); break;
+        case 0xE1: FOTA_DEBUG_PRINTLN("ERR: puff() failed"); break;
+        case 0xE2: FOTA_DEBUG_PRINTLN("ERR: puff destlen mismatch"); break;
+        case 0xE3: FOTA_DEBUG_PRINTLN("ERR: hpatchi_inplace_open failed"); break;
+        case 0xE4: FOTA_DEBUG_PRINTLN("ERR: compress_type != no"); break;
+        case 0xE5: FOTA_DEBUG_PRINTLN("ERR: extra_safe > MAX"); break;
+        case 0xE6: FOTA_DEBUG_PRINTLN("ERR: hpatchi_inplaceB failed"); break;
+        case 0xFE: FOTA_DEBUG_PRINTLN("FAIL — flasher zlyhal a resetoval sa"); break;
         default:
             if (step >= 0x20u && step <= 0x3Fu) {
                 uint32_t kb = (uint32_t)(step - 0x20u) * 16u;
-                Serial.print(F("puff progress: dekomprimovaných ~"));
-                Serial.print(kb); Serial.println(F("kB"));
+                FOTA_DEBUG_PRINTLN("puff progress: dekomprimovaných ~%lu kB", (unsigned long)kb);
             } else {
-                Serial.println(F("(unknown)"));
+                FOTA_DEBUG_PRINTLN("(unknown)");
             }
             break;
     }
@@ -523,36 +512,33 @@ static void print_step(uint8_t step) {
 static void fota_print_flasher_trace() {
     const volatile uint32_t* t = (const volatile uint32_t*)FLASH_TRACE_ADDR;
     if (t[0] == 0xFFFFFFFFu) {
-        Serial.println(F("[FLASHER-TRACE] (prázdny — flasher nezapísal trace)"));
+        FOTA_DEBUG_PRINTLN("[FLASHER-TRACE] (prázdny — flasher nezapísal trace)");
         return;
     }
-    Serial.println(F("[FLASHER-TRACE] sekvencia eventov flashera:"));
+    FOTA_DEBUG_PRINTLN("[FLASHER-TRACE] sekvencia eventov flashera:");
     for (uint32_t i = 0; i < FLASH_TRACE_MAX; i++) {
         uint32_t code = t[i];
         if (code == 0xFFFFFFFFu) break;
-        if (code == 0xD0u) { Serial.print(F("  [chk] FNV-1a výstupu (nový FW) = 0x")); Serial.println(t[i + 1], HEX); i++; continue; }
-        if (code == 0xD1u) { Serial.print(F("  [vfy] FNV-1a zapísanej flash    = 0x")); Serial.println(t[i + 1], HEX); i++; continue; }
-        if (code == 0xD2u) { Serial.println(F("  [vfy] VERIFY OK — flash == hpatchi výstup")); continue; }
-        if (code == 0xEAu) { Serial.println(F("  [vfy] VERIFY FAIL — skok do DFU!")); continue; }
-        Serial.print(F("  ["));
-        if (i < 10) Serial.print(' ');
-        Serial.print(i); Serial.print(F("] "));
+        if (code == 0xD0u) { FOTA_DEBUG_PRINTLN("  [chk] FNV-1a výstupu (nový FW) = 0x%X", (unsigned)t[i + 1]); i++; continue; }
+        if (code == 0xD1u) { FOTA_DEBUG_PRINTLN("  [vfy] FNV-1a zapísanej flash    = 0x%X", (unsigned)t[i + 1]); i++; continue; }
+        if (code == 0xD2u) { FOTA_DEBUG_PRINTLN("  [vfy] VERIFY OK — flash == hpatchi výstup"); continue; }
+        if (code == 0xEAu) { FOTA_DEBUG_PRINTLN("  [vfy] VERIFY FAIL — skok do DFU!"); continue; }
+        FOTA_DEBUG_PRINT("  [%2lu] ", (unsigned long)i);
         print_step((uint8_t)(code & 0xFFu));
     }
 }
 
 void fota_print_flasher_debug() {
-    Serial.print(F("[FLASHER-DBG] GPREGRET2=0x")); Serial.print(s_gpret2_raw, HEX);
-    Serial.print(F("  RESETREAS=0x")); Serial.print(s_resetreas_raw, HEX);
-    Serial.print(F(" ("));
-    if (s_resetreas_raw & 0x01u) Serial.print(F("PIN "));
-    if (s_resetreas_raw & 0x02u) Serial.print(F("WDT! "));
-    if (s_resetreas_raw & 0x04u) Serial.print(F("SREQ "));
-    if (s_resetreas_raw & 0x08u) Serial.print(F("LOCKUP! "));
-    if (s_resetreas_raw == 0u)   Serial.print(F("power-on/none"));
-    Serial.println(')');
+    FOTA_DEBUG_PRINT("[FLASHER-DBG] GPREGRET2=0x%X  RESETREAS=0x%X (", (unsigned)s_gpret2_raw, (unsigned)s_resetreas_raw);
+    bool any = false;
+    if (s_resetreas_raw & 0x01u) { FOTA_DEBUG_PRINT("PIN "); any = true; }
+    if (s_resetreas_raw & 0x02u) { FOTA_DEBUG_PRINT("WDT! "); any = true; }
+    if (s_resetreas_raw & 0x04u) { FOTA_DEBUG_PRINT("SREQ "); any = true; }
+    if (s_resetreas_raw & 0x08u) { FOTA_DEBUG_PRINT("LOCKUP! "); any = true; }
+    if (!any && s_resetreas_raw == 0u) FOTA_DEBUG_PRINT("power-on/none");
+    FOTA_DEBUG_PRINTLN(")");
     if (s_flasher_step != 0u) {
-        Serial.print(F("[FLASHER-DBG] posledný krok: "));
+        FOTA_DEBUG_PRINT("[FLASHER-DBG] posledný krok: ");
         print_step(s_flasher_step);
         s_flasher_step = 0;
     }
@@ -561,25 +547,25 @@ void fota_print_flasher_debug() {
 
 // ── DEBUG: dekomprimuj patch.bin cez puff_stream, vypíš FNV celého raw ──────
 void fota_debug_decompress() {
-    Serial.print(F("[DBG] app flash @0x")); Serial.print(fota_running_fw_base(), HEX); Serial.print(F("[0:16]= "));
+    FOTA_DEBUG_PRINT("[DBG] app flash @0x%X [0:16]= ", (unsigned)fota_running_fw_base());
     const uint8_t* app = (const uint8_t*)fota_running_fw_base();
-    for (int i = 0; i < 16; i++) { if (app[i] < 0x10) Serial.print('0'); Serial.print(app[i], HEX); Serial.print(' '); }
-    Serial.println();
+    for (int i = 0; i < 16; i++) { FOTA_DEBUG_PRINT("%02X ", (unsigned)app[i]); }
+    FOTA_DEBUG_PRINTLN("");
 
     File f(FotaFS);
-    if (!f.open(FOTA_FS_PATCH, FILE_O_READ)) { Serial.println(F("[DBG] patch.bin chýba")); return; }
+    if (!f.open(FOTA_FS_PATCH, FILE_O_READ)) { FOTA_DEBUG_PRINTLN("[DBG] patch.bin chýba"); return; }
     uint32_t sz = (uint32_t)f.size();
     uint32_t magic = 0, uncomp = 0, newfw = 0;
     f.read((uint8_t*)&magic, 4); f.read((uint8_t*)&uncomp, 4); f.read((uint8_t*)&newfw, 4);
-    if (magic != 0x42494C5Au) { Serial.println(F("[DBG] nie ZLIB formát")); f.close(); return; }
+    if (magic != 0x42494C5Au) { FOTA_DEBUG_PRINTLN("[DBG] nie ZLIB formát"); f.close(); return; }
     uint32_t comp_sz = sz - 12;
     uint8_t* comp = (uint8_t*)malloc(comp_sz);
-    if (!comp) { Serial.println(F("[DBG] malloc comp fail")); f.close(); return; }
+    if (!comp) { FOTA_DEBUG_PRINTLN("[DBG] malloc comp fail"); f.close(); return; }
     uint32_t rd = (uint32_t)f.read(comp, comp_sz); f.close();
-    if (rd != comp_sz) { Serial.println(F("[DBG] read fail")); free(comp); return; }
+    if (rd != comp_sz) { FOTA_DEBUG_PRINTLN("[DBG] read fail"); free(comp); return; }
 
     puff_stream_t* ps = (puff_stream_t*)malloc(sizeof(puff_stream_t));
-    if (!ps) { Serial.println(F("[DBG] malloc ps fail")); free(comp); return; }
+    if (!ps) { FOTA_DEBUG_PRINTLN("[DBG] malloc ps fail"); free(comp); return; }
     puff_stream_init(ps, comp, comp_sz);
 
     uint32_t fnv = 2166136261u, total = 0;
@@ -593,11 +579,9 @@ void fota_debug_decompress() {
     int err = ps->error;
     free(ps); free(comp);
 
-    Serial.print(F("[DBG] puff_stream raw=")); Serial.print(total);
-    Serial.print(F("B (exp ")); Serial.print(uncomp); Serial.print(F(")"));
-    Serial.print(F("  FNV=0x")); Serial.print(fnv, HEX);
-    Serial.print(F("  err=")); Serial.print(err);
-    Serial.println(total == uncomp && err == 0 ? F("  [dekompr OK]") : F("  [DEKOMPR CHYBA!]"));
+    FOTA_DEBUG_PRINTLN("[DBG] puff_stream raw=%lu B (exp %lu)  FNV=0x%X  err=%d  %s",
+        (unsigned long)total, (unsigned long)uncomp, (unsigned)fnv, err,
+        (total == uncomp && err == 0) ? "[dekompr OK]" : "[DEKOMPR CHYBA!]");
 }
 
 #endif  // WITH_LORA_FOTA

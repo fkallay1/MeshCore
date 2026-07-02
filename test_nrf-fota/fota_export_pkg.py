@@ -46,6 +46,8 @@ def main():
     ap.add_argument('--channel-idx', type=int, default=1)
     ap.add_argument('--scope', choices=['zerohop','flood','direct'], default='zerohop')
     ap.add_argument('--path', default='')
+    # POZOR na defaulty rádia (idú DO .fotapkg.json → Flutter appka ich prevezme):
+    # 869.618/62.5/SF8 = náš FK pracovný kanál; FOTA FW envy + e2e test = CZ 869.525/SF7.
     ap.add_argument('--freq', type=float, default=869.618); ap.add_argument('--bw', type=float, default=62.5)
     ap.add_argument('--sf', type=int, default=8); ap.add_argument('--cr', type=int, default=5)
     ap.add_argument('--privkey'); ap.add_argument('--keyid', type=int, default=1)

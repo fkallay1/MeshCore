@@ -35,10 +35,6 @@
 #include <helpers/RegionMap.h>
 #include "RateLimiter.h"
 
-#ifdef WITH_LORA_FOTA
-#include "nrffota/FotaMesh.h"
-#endif
-
 #ifdef WITH_BRIDGE
 extern AbstractBridge* bridge;
 #endif
@@ -181,42 +177,7 @@ protected:
   void onControlDataRecv(mesh::Packet* packet) override;
 
 #ifdef WITH_LORA_FOTA
-  mesh::GroupChannel _fota_channel;
-  bool _fota_ready;
-  // Deferred FOTA spracovanie: onGroupDataRecv (volané z recv cesty) len ODLOŽÍ
-  // payload sem; pomalé FS I/O (CustomLFS) sa spraví až v loop() PO tom, čo
-  // dispatcher re-armne rádio do RX — inak by FS zápis v recv callbacku oneskoril
-  // re-arm a rádio by po prvom pakete prestalo prijímať.
-  uint8_t _fota_pending[MAX_PACKET_PAYLOAD];
-  int     _fota_pending_len;   // 0 = nič nečaká
-  float   _fota_pending_rssi, _fota_pending_snr;
-  // RAW príjem (PRED dekódovaním/dešifrovaním) — koľko surových rámcov rádio
-  // vôbec prijalo (CRC-OK). Ak rastie ale GRP_DATA neprichádza → problém je
-  // v dekódovaní/zhode kanála, nie v RF spoji.
-  volatile uint32_t _fota_raw_rx;
-  uint32_t          _fota_raw_last_len;
-  float             _fota_raw_last_rssi, _fota_raw_last_snr;
-  int searchChannelsByHash(const uint8_t* hash, mesh::GroupChannel channels[], int max_matches) override;
-  void onGroupDataRecv(mesh::Packet* packet, uint8_t type, const mesh::GroupChannel& channel, uint8_t* data, size_t len) override;
-
-  // ── Deferred FOTA CLI ─────────────────────────────────────────────────
-  // LoRa FOTA CLI príkazy by inak bežali HLBOKO v RX callstacku (Mesh
-  // dešifrovanie + temp[166]); ťažké (verify = hpatch + SHA256) by pretiekli
-  // 4 kB loop-task stack a TICHO prepísali susedný heap = stav rádia (rádio
-  // zamrzne, CPU/Serial bežia ďalej). Preto sa spracovanie odloží do loop()
-  // (plytký stack ako Serial). Snapshot klienta parkujeme do zdieľaného
-  // FotaBuffer — žiadny veľký permanentný člen v MyMesh.
-  bool     _fota_cli_pending;
-  uint8_t* _fota_cli_buf;       // požičaný FotaBuffer so snapshotom (NULL = nič)
-  unsigned long _fota_apply_deadline;  // 0=neaktívne; safety net pre odložený flash
-  bool deferFotaCli(const ClientInfo* client, const uint8_t* secret,
-                    const char* fargs, uint8_t path_hash_size,
-                    uint32_t sender_timestamp);
-  void runFotaCli(const char* fargs, char* reply);
-  void sendDeferredCliReply(const uint8_t* dest_pub, const uint8_t* secret,
-                            const uint8_t* out_path, uint8_t out_path_len,
-                            uint8_t path_hash_size, const char* text,
-                            uint32_t sender_timestamp);
+  #include "nrffota/FotaMyMesh.h"   // LoRa-FOTA: členy + deklarácie metód (telá vo FotaMyMesh.cpp)
 #endif
 
   void sendFloodReply(mesh::Packet* packet, unsigned long delay_millis, uint8_t path_hash_size);

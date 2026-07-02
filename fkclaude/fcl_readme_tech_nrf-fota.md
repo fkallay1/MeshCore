@@ -49,23 +49,33 @@ Všetko nové je v `examples/simple_repeater/nrffota/` (podadresár), guardovan�
 
 | Súbor | Účel |
 |-------|------|
-| `nrffota/FotaProtocol.h` | typy paketov (BEGIN/CHUNK/APPLY/STATUS/NACK), wire formát |
+| `nrffota/FotaProtocol.h` | typy paketov (META/SIG/CHUNK/APPLY/STATUS/NACK), wire formát |
 | `nrffota/FotaState.h` | stav session (recv_count, total_chunks, status, sha, err_code) |
 | `nrffota/FotaFs.h` | CustomLFS mount @ 0xD4000, cesty `/ota/*` |
 | `nrffota/FotaReceiver.{h,cpp}` | príjem chunkov, append-log, bitmap, assemble, SHA256 verify, NACK |
+| `nrffota/FotaReceiver_signkey.cpp` | Ed25519 author pubkeys (podpis HEADERu) |
 | `nrffota/FotaPatcher.{h,cpp}` | dry-run (`fota_patch_to_file`) a ostrý flash (`fota_apply`) |
-| `nrffota/FotaMesh.{h,cpp}` | glue: kanál z PSK, `fota_handle_command()` (status/verify/flash/...) |
+| `nrffota/FotaMesh.{h,cpp}` | glue: kanál (#-konvencia), `fota_handle_command()` (status/verify/flash/...) |
+| `nrffota/FotaMyMesh.cpp` | **FOTA časť triedy MyMesh** — telá metód/overridov + deferred CLI/paket/flash logika (od 2026-07-03; v MyMesh.cpp len tenké hooky) |
+| `nrffota/FotaDebug.h` | `FOTA_DEBUG_PRINT/PRINTLN` makrá (printf; gated `-D FOTA_DEBUG=1`, vzor MESH_DEBUG) |
+| `nrffota/FotaBuffer.{h,cpp}` | zdieľaný 512 B scratch (borrow/release) — hpatch cache + deferred CLI snapshot |
+| `nrffota/FwId.{h,cpp}` | FW identity trailer (build#, image_size, sha256) v .rodata |
 | `nrffota/puff_stream.{c,h}` | standalone streaming DEFLATE dekompresor (bez libc/setjmp) |
 | `nrffota/hpatchlite/*` | lokálna kópia HPatchLite (inplaceB patcher) |
 | `nrffota/flasher/flasher.{c,ld}` | standalone in-place flasher, ORIGIN 0xEB000 |
 | `nrffota/flasher_code.h` | vygenerovaný blob flashera (4096 B, board-agnostický) — `tools/build_flasher.py` |
-| `nrffota/flash_layout.h` | numerické flash adresy (zdieľané FW aj flasher) |
+| `nrffota/flash_layout.h` | numerické flash adresy (zdieľané FW aj flasher) — **kanonická flash mapa** |
 
-Integrácia do jadra repeatera (3 malé `#ifdef WITH_LORA_FOTA` zásahy):
-- `examples/simple_repeater/MyMesh.h` — členy kanála + buffer + override deklarácie.
-- `examples/simple_repeater/MyMesh.cpp` — init v `begin()`, hooky, `handleCommand` "ota" vetva,
-  heartbeat, `logRxRaw`, drain bufferu v `loop()`.
-- `variants/promicro/platformio.ini` — env `ProMicro_repeater_fota`.
+Integrácia do jadra repeatera (od 2026-07-03 minimalizovaná — telá presunuté do
+`nrffota/FotaMyMesh.cpp`, ten sa kompiluje ako súčasť `examples/simple_repeater`):
+- `examples/simple_repeater/MyMesh.h` — jeden súvislý `#ifdef WITH_LORA_FOTA` blok
+  (stav `_fota_*` + deklarácie metód/overridov).
+- `examples/simple_repeater/MyMesh.cpp` — **6 tenkých hookov** (~30 riadkov diff vs upstream):
+  `fotaLogRxRaw()` v `logRxRaw`, `fotaHandleLoRaCli()` v `onPeerDataRecv`,
+  `fotaEarlyInit()`+`fotaBegin()` v `begin`, `fotaHandleCliCommand()` v `handleCommand`,
+  `fotaLoop()` v `loop`.
+- `variants/promicro/platformio.ini`, `variants/sensecap_solar/platformio.ini` — envy
+  `ProMicro_repeater_fota` / `SenseCap_Solar_repeater_fota` (`WITH_LORA_FOTA`, `FOTA_DEBUG`).
 
 Testovacia infraštruktúra v `test_nrf-fota/`:
 - `fota_sender.py` — generuje patch (hdiffi+zlib), vysiela cez bridge (mode `meshcore`/`direct`).
@@ -110,9 +120,9 @@ APPLY (0x12), (STATUS/NACK 0x20/0x21 = spätný kanál).
 
 ### Deferred spracovanie (dôležité pre RX)
 `onGroupDataRecv()` (volané z recv cesty dispatchera) **len skopíruje payload** do
-`_ota_pending[]` a nastaví `_ota_pending_len`. Ťažké CustomLFS I/O (`fota_process`) sa robí až
-v `MyMesh::loop()` **PO** `mesh::Mesh::loop()` — t.j. po tom, čo dispatcher re-armne rádio do RX.
-Dôvod: FS zápis priamo v recv callbacku oneskoroval re-arm rádia.
+`_fota_pending[]` a nastaví `_fota_pending_len`. Ťažké CustomLFS I/O (`fota_process`) sa robí až
+vo `fotaLoop()` (hook v `MyMesh::loop()`) **PO** `mesh::Mesh::loop()` — t.j. po tom, čo dispatcher
+re-armne rádio do RX. Dôvod: FS zápis priamo v recv callbacku oneskoroval re-arm rádia.
 
 ---
 
@@ -127,14 +137,11 @@ Dôvod: FS zápis priamo v recv callbacku oneskoroval re-arm rádia.
 
 ## 5. Flash mapa (extrafs.ld — app končí 0xD4000)
 
-```
-0x26000–0xD4000   aplikačný kód repeatera (712 kB)        [s140 v6;  v7 = 0x27000]
-0xD4000–0xEB000   FOTA FS (CustomLFS, 92 kB)               recv.log / patch.bin / meta / bitmap
-0xEB000–0xEC000   flasher kód (4 kB)                       beží MIMO app flash aj InternalFS
-0xEC000–0xED000   flasher trace / meta (4 kB)
-0xED000–0xF4000   MeshCore InternalFS (identity/prefs/ACL) NEDOTKNUTÝ
-0xF4000+          bootloader
-```
+**Kanonický zdroj adries: [`nrffota/flash_layout.h`](../examples/simple_repeater/nrffota/flash_layout.h)**
+(jediné miesto, kde sa mapa udržiava — README modulu aj tento doc naň len odkazujú).
+V skratke: app 0x26000(v6)/0x27000(v7)–0xD4000 · FOTA FS 92 kB @ 0xD4000 · flasher 4 kB
+@ 0xEB000 · flasher trace @ 0xEC000 · MeshCore InternalFS @ 0xED000 **NEDOTKNUTÝ** ·
+bootloader @ 0xF4000.
 
 - Flasher na **0xEB000** (nie 0xF2000 ako pôvodný FK_lora sniffer) — aby sa vyhol MeshCore
   InternalFS na 0xED000.
@@ -176,17 +183,23 @@ pio run -e ProMicro_repeater_fota
 
 Príkazy (serial CLI alebo LoRa admin CLI cez `handleCommand`):
 ```
-ota status | verify | flash | clear | decompress | nack | miss | missall | dbg | agc | id
+fota status | verify | flash | clear | decompress | nack | miss | missall | dbg | agc | id
 ```
-(prefix `ota` aj `fota` funguje — keep-both po OTA→FOTA rename.)
-- `ota verify` = dry-run (aplikuje patch v RAM → SHA256, **nič nezapíše**).
-- `ota flash`  = **OSTRÝ** flash + reboot (pri úspechu sa nevráti).
-- `ota miss`   = chýbajúce chunky ako rozsahy „od-do" (napr. `H S 2 4-11 28 32-34 +N`),
+(legacy prefix `ota` stále funguje — alias `FOTA-CLI-ALIAS` vo FotaMyMesh.cpp, používa ho
+Flutter appka; po jej migrácii na `fota` sa alias zmaže.)
+- `fota verify` = dry-run (aplikuje patch v RAM → SHA256, **nič nezapíše**).
+- `fota flash`  = **OSTRÝ** flash + reboot (pri úspechu sa nevráti).
+- `fota miss`   = chýbajúce chunky ako rozsahy „od-do" (napr. `H S 2 4-11 28 32-34 +N`),
   strop `FOTA_MISS_OUTTOKENS` tokenov (číslo=1, rozsah=2; H/S sa nerátajú a vypíšu sa vždy).
-- `ota missall`= ako `miss`, ale **všetky** chýbajúce (capnuté len dĺžkou LoRa paketu).
-- `ota dbg`    = flasher debug (GPREGRET2/RESETREAS + trace z 0xEC000).
-- `ota agc`    = **read-only** AGC/gain diagnostika (viď §8.3).
-- `ota clear`  = zmaže FOTA session (`/ota/*`).
+- `fota missall`= ako `miss`, ale **všetky** chýbajúce (capnuté len dĺžkou LoRa paketu).
+- `fota dbg`    = flasher debug (GPREGRET2/RESETREAS + trace z 0xEC000).
+- `fota agc`    = **read-only** AGC/gain diagnostika (viď §8.3).
+- `fota clear`  = zmaže FOTA session (`/ota/*`).
+
+Diagnostické Serial výpisy (`[FOTA] …`, `[FLASHER-DBG] …`, heartbeat `AALIVE`) idú cez
+makrá `FOTA_DEBUG_PRINT/PRINTLN` (`nrffota/FotaDebug.h`) gated **`-D FOTA_DEBUG=1`**
+(FOTA envy default zapnuté). Bez flagu sa vôbec nekompilujú; CLI odpovede (reply buffer)
+fungujú vždy — sú to funkčné výstupy, nie diagnostika.
 
 ---
 
@@ -347,22 +360,15 @@ opakované PASS pri `agc_reset=0`. Build# je dočasné testovacie počítadlo (`
 
 ---
 
-## 11. OTVORENÝ BUG — po `ota clear` sa pakety zobrazia len ako RAW (2026-06-23)
+## 11. VYRIEŠENÉ — po `fota clear` sa re-send zobrazil len ako RAW (2026-06-23 → vyriešené)
 
-Zistené pri E2E teste FOTA cez Flutter appku (sibling `../meshcore-open`, web/Web Serial → companion
-→ LoRa → tento repeater). **Doručenie FOTA funguje** (chunky+META+SIG dorazia, CRC OK, base-FW check
-správny). **Problém:** keď po úspešnej dávke spravíš `ota clear` a znova odošleš celú dávku, pakety
-sa **už nedispatchujú cez FOTA logiku** a v logu sú len `[FOTA] RAW #N ... type=10`. Repeater pritom
-nemá žiadnu session.
+Symptóm pri E2E cez Flutter appku: po `fota clear` + re-send tej istej dávky sa pakety
+už nedispatchli cez FOTA logiku, v logu len `[FOTA] RAW #N ... type=10`.
 
-Lokalizované (env `ProMicro_repeater_fota`, `examples/simple_repeater/`):
-- RAW log + dispatch gate `if (dtype != FOTA_MAGIC) return;` — `MyMesh.cpp:488, 883–887`
-- `ota clear` handler („FOTA cleared") — `nrffota/FotaMesh.cpp:52`
-- chunk/META/SIG + base-FW kontroly — `nrffota/FotaReceiver.cpp`; stav — `nrffota/FotaState.h`
-
-Hypotéza: `ota clear` odregistruje FOTA kanál (channel secret/hash) alebo zhodí „armed" flag, takže
-prichádzajúce `#fkotanrf` GRP_DATA sa už nematchne na kanál → nedešifruje → ostane RAW (nedôjde
-k `FOTA_MAGIC` gate). Oprava: FOTA routing/kanál nech prežije `ota clear` (bezstavový gate len podľa
-`data_type==FOTA_MAGIC`), alebo `ota clear` čisti len patch/staging buffer, nie registráciu kanála.
-NEOVERENÉ — treba prejsť cez systematic-debugging (čítaj kód, nájdi čo presne `ota clear` nuluje vs.
-od čoho závisí dispatch). Appka NIE je príčina (posiela identické rámce, dokázané).
+**Skutočná príčina NEBOLA vo firmvéri** (pôvodná hypotéza o odregistrovaní kanála bola
+nesprávna): MeshCore **seen-table dedup** — `packet_hash = SHA256(typ‖payload)`; Flutter
+appka posielala **byte-identické** pakety (`tsBase=0`), takže repeater ich korektne
+zahodil ako duplikáty ešte pred dešifrovaním. `fota clear` čistí len FOTA session,
+seen-table zámerne nie. **Fix vo Flutter appke**: unikátny `ts` (epoch sekundy) pre každý
+paket. Detail: GOTCHA blok v [fcl_readme_nrf-fota.md](fcl_readme_nrf-fota.md) §2 Transport.
+Firmware dedup je korektný a nemení sa.

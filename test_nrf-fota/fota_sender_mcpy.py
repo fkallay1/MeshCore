@@ -131,6 +131,9 @@ def main():
     ap.add_argument('--reboot', action='store_true')
     ap.add_argument('--privkey')
     ap.add_argument('--keyid', type=int, default=1)
+    # POZOR na defaulty rádia: 869.618/62.5/SF8 = náš FK pracovný kanál. FOTA FW envy
+    # (ProMicro/SenseCap *_fota) a e2e test ale stavajú CZ test preset 869.525/62.5/SF7
+    # — pri ručnom použití zadaj --freq/--sf explicitne podľa repeatera, inak sa minú.
     ap.add_argument('--freq', type=float, default=869.618)
     ap.add_argument('--bw', type=float, default=62.5)
     ap.add_argument('--sf', type=int, default=8)

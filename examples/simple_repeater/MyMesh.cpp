@@ -1,22 +1,6 @@
 #include "MyMesh.h"
 #include <algorithm>
 
-#ifdef WITH_LORA_FOTA
-#include "nrffota/FotaReceiver.h"
-#include "nrffota/FotaPatcher.h"
-#include "nrffota/FotaBuffer.h"   // zdieľaný scratch — parkovisko snapshotu deferred CLI
-#if defined(FK_DEBUG_STACKTRACE) && defined(INCLUDE_pxTaskGetStackStart) && INCLUDE_pxTaskGetStackStart == 1
-#include <task.h>                 // pxTaskGetStackStart — AKTUÁLNE použitie loop-stacku (FK_DEBUG_STACKTRACE)
-#endif
-extern RADIO_CLASS radio;   // surový RadioLib SX1262 (z target.cpp) — pre AGC register read ('fota agc')
-#if __has_include("build_info.h")
-  #include "build_info.h"   // DOČASNÉ: test_nrf-fota/gen_build_info.py (pre-script)
-#endif
-#ifndef FW_BUILD_NUMBER
-  #define FW_BUILD_NUMBER 0
-#endif
-#endif
-
 /* ------------------------------ Config -------------------------------- */
 
 #ifndef LORA_FREQ
@@ -75,66 +59,6 @@ extern RADIO_CLASS radio;   // surový RadioLib SX1262 (z target.cpp) — pre AG
 #define CLI_REPLY_DELAY_MILLIS      600
 
 #define LAZY_CONTACTS_WRITE_DELAY    5000
-
-#ifdef WITH_LORA_FOTA
-// Rozpoznaj FOTA CLI príkaz a vráť smerník na argumenty (časť ZA 'fota'/'ota',
-// vrátane vedúcej medzery), alebo NULL ak to nie je FOTA príkaz. Jediný zdroj
-// pravdy pre detekciu — používa onPeerDataRecv (defer) aj handleCommand (serial).
-// FOTA-CLI-ALIAS: keď klienti prejdú na 'fota', zmaž 'ota' vetvu.
-static const char* fota_args_of(const char* cmd) {
-  if (memcmp(cmd, "fota", 4) == 0 && (cmd[4] == 0 || cmd[4] == ' ')) return cmd + 4;
-  if (memcmp(cmd, "ota",  3) == 0 && (cmd[3] == 0 || cmd[3] == ' ')) return cmd + 3;  // FOTA-CLI-ALIAS
-  return nullptr;
-}
-
-// Názov PAYLOAD_TYPE pre čitateľný RAW log.
-static const char* payload_type_name(uint8_t t) {
-  switch (t) {
-    case PAYLOAD_TYPE_REQ:        return "REQ";
-    case PAYLOAD_TYPE_RESPONSE:   return "RESPONSE";
-    case PAYLOAD_TYPE_TXT_MSG:    return "TXT_MSG";
-    case PAYLOAD_TYPE_ACK:        return "ACK";
-    case PAYLOAD_TYPE_ADVERT:     return "ADVERT";
-    case PAYLOAD_TYPE_GRP_TXT:    return "GRP_TXT";
-    case PAYLOAD_TYPE_GRP_DATA:   return "GRP_DATA";
-    case PAYLOAD_TYPE_ANON_REQ:   return "ANON_REQ";
-    case PAYLOAD_TYPE_PATH:       return "PATH";
-    case PAYLOAD_TYPE_TRACE:      return "TRACE";
-    case PAYLOAD_TYPE_MULTIPART:  return "MULTIPART";
-    case PAYLOAD_TYPE_CONTROL:    return "CONTROL";
-    case PAYLOAD_TYPE_RAW_CUSTOM: return "RAW_CUSTOM";
-    default:                      return "?";
-  }
-}
-
-// Snapshot kontextu klienta pre odloženú CLI odpoveď. Parkuje sa v zdieľanom
-// FotaBuffer (~182 B v 512 B okne), takže MyMesh nerastie o permanentný člen.
-struct FotaCliDefer {
-  uint8_t  dest_pub[PUB_KEY_SIZE];     // 32 — komu odpovedať (Identity)
-  uint8_t  secret[PUB_KEY_SIZE];       // 32 — shared secret na šifrovanie odpovede
-  uint8_t  out_path[MAX_PATH_SIZE];    // 64 — známa out-path (ak je)
-  uint32_t sender_timestamp;           // ts prijatého príkazu — odpoveď musí mať INÝ (CLI dedup)
-  uint8_t  out_path_len;               // OUT_PATH_UNKNOWN → flood reply
-  uint8_t  path_hash_size;             // pre flood reply
-  char     fargs[48];                  // argumenty (" verify", " agc", …)
-};
-
-// ── FK_DEBUG_STACKTRACE: dočasné meranie stacku — na ZÁVER CELÉ vyhodiť ─────
-#if defined(FK_DEBUG_STACKTRACE) && defined(INCLUDE_pxTaskGetStackStart) && INCLUDE_pxTaskGetStackStart == 1
-// AKTUÁLNE použitie loop-tasku stacku [B] (na rozdiel od uxTaskGetStackHighWaterMark,
-// ktorý je historické MINIMUM voľného). Hrubý odhad: SP ≈ adresa lokálu; pxTaskGetStackStart
-// vráti spodok (najnižšiu adresu) stacku tasku. Total = LOOP_STACK_SZ (256*4 slov) = 4096 B.
-#define FOTA_LOOP_STACK_TOTAL_B  4096u
-__attribute__((unused))
-static uint32_t loop_stack_used_now() {
-  uint8_t marker;
-  uint8_t* base = pxTaskGetStackStart(nullptr);
-  if (!base) return 0;
-  uint32_t free_now = (uint32_t)&marker - (uint32_t)base;   // voľné pod aktuálnym SP
-  return (free_now < FOTA_LOOP_STACK_TOTAL_B) ? (FOTA_LOOP_STACK_TOTAL_B - free_now) : 0;
-}
-#endif
-#endif
 
 void MyMesh::putNeighbour(const mesh::Identity &id, uint32_t timestamp, float snr) {
 #if MAX_NEIGHBOURS // check if neighbours enabled
@@ -541,59 +465,7 @@ const char *MyMesh::getLogDateTime() {
 
 void MyMesh::logRxRaw(float snr, float rssi, const uint8_t raw[], int len) {
 #ifdef WITH_LORA_FOTA
-  // RAW indikátor: každý surový (CRC-OK) rámec, ktorý rádio prijme, EŠTE PRED
-  // dekódovaním typu/route a dešifrovaním. Toto je odpoveď na otázku "prichádzajú
-  // na repeater hocijaké pakety?" — ak toto rastie ale GRP_DATA/onGroupDataRecv
-  // nie, chyba je v dekódovaní (typ/hash/krypto), nie v RF.
-  _fota_raw_rx++;
-  _fota_raw_last_len  = (uint32_t)len;
-  _fota_raw_last_rssi = rssi;
-  _fota_raw_last_snr  = snr;
-  Serial.print(F("[FOTA] RAW #")); Serial.print(_fota_raw_rx);
-  Serial.print(F(" len="));  Serial.print(len);
-  Serial.print(F(" rssi=")); Serial.print((int)rssi);
-  Serial.print(F(" snr="));  Serial.print(snr, 1);
-  if (len > 0) {
-    // PAYLOAD_TYPE = (hdr >> 2) & 0x0F (NIE dolné 4 bity — tie sú route+časť typu);
-    // route = hdr & 0x03.  (4=ADVERT, 7=ANON_REQ, 2=TXT, 1=RESPONSE, 5=GRP_TXT, 6=GRP_DATA)
-    uint8_t pt    = (raw[0] >> 2) & 0x0F;
-    uint8_t route = raw[0] & 0x03;
-    // Replikácia tryParsePacket() offsetov, aby sme vedeli vypísať CESTU a rozoznať
-    // FOTA bez dešifrovania:  [hdr][?transport 4B][path_len][path…][payload].
-    int i = 1;
-    if (route == ROUTE_TYPE_TRANSPORT_FLOOD || route == ROUTE_TYPE_TRANSPORT_DIRECT) i += 4;
-    int path_count = -1, path_off = i + 1, path_byte_len = 0, payload_off = -1;
-    if (i < len) {
-      uint8_t plen  = raw[i];
-      uint8_t hsize = (plen >> 6) + 1;       // path hash size (1 alebo 2 B)
-      path_count    = plen & 63;             // počet hopov (0 = zero-hop / čerstvý flood)
-      path_byte_len = path_count * hsize;
-      payload_off   = path_off + path_byte_len;
-    }
-    // Naša FOTA? GRP_DATA na našom FOTA kanáli — channel_hash je 1. bajt payloadu
-    // (Mesh.cpp: channel_hash = payload[0]); čitateľné už tu, pred dešifrovaním.
-    bool is_fota = (pt == PAYLOAD_TYPE_GRP_DATA && _fota_ready
-                    && payload_off >= 0 && payload_off < len
-                    && raw[payload_off] == _fota_channel.hash[0]);
-    Serial.print(F(" type=")); Serial.print(pt);
-    Serial.print('('); Serial.print(payload_type_name(pt));
-    if (is_fota) Serial.print(F("/FOTA"));
-    Serial.print(')');
-    Serial.print(F(" route=")); Serial.print(route);
-    Serial.print(F(" hdr=0x")); Serial.print(raw[0], HEX);
-    // Cesta: počet hopov + hash bajty.  path[0] = zero-hop alebo čerstvý flood od
-    // zdroja; každý preposielajúci repeater pripojí svoj hash → path[N] dlhšia.
-    if (path_count >= 0) {
-      Serial.print(F(" path[")); Serial.print(path_count); Serial.print(']');
-      if (path_byte_len > 0 && (path_off + path_byte_len) <= len) {
-        Serial.print('=');
-        mesh::Utils::printHex(Serial, &raw[path_off], path_byte_len);
-      }
-    }
-  }
-  Serial.print(F(" first="));
-  mesh::Utils::printHex(Serial, raw, len < 8 ? len : 8);
-  Serial.println();
+  fotaLogRxRaw(snr, rssi, raw, len);   // RAW diagnostika + FOTA značka (nrffota/FotaMyMesh.cpp)
 #endif
 #if MESH_PACKET_LOGGING
   Serial.print(getLogDateTime());
@@ -832,10 +704,6 @@ void MyMesh::onPeerDataRecv(mesh::Packet *packet, uint8_t type, int sender_idx, 
       // len can be > original length, but 'text' will be padded with zeroes
       data[len] = 0; // need to make a C string again, with null terminator
 
-      // Echo prijatého príkazu z LoRa admin CLI na Serial (diagnostika — operátor
-      // pri doske vidí, čo bolo zadané vzdialene). Bez retry duplikátov.
-      if (!is_retry) { Serial.print(F("[CLI<-LoRa] ")); Serial.println((char *)&data[5]); }
-
       if (flags == TXT_TYPE_PLAIN) { // for legacy CLI, send Acks
         uint32_t ack_hash; // calc truncated hash of the message timestamp + text + sender pub_key, to prove
                            // to sender that we got it
@@ -859,24 +727,10 @@ void MyMesh::onPeerDataRecv(mesh::Packet *packet, uint8_t type, int sender_idx, 
         *reply = 0;
       }
 #ifdef WITH_LORA_FOTA
-      else if (const char* fargs = fota_args_of(command)) {
-        // FOTA CLI cez LoRa: NEspracúvaj inline (sme hlboko v RX callstacku —
-        // verify by pretiekol stack a zhodil rádio). Odlož do loop() (plytký
-        // stack). Snapshot klienta → zdieľaný FotaBuffer; výsledok pošle loop().
-        if (_fota_cli_pending) {
-          strcpy(reply, "FOTA: zaneprázdnené, skús neskôr");
-        } else if (deferFotaCli(client, secret, fargs, packet->getPathHashSize(), sender_timestamp)) {
-#ifdef FOTA_INFO_MSG
-          // Voliteľný medzi-paket "spracúvam". DEFAULT VYP: cez repeater idú dva
-          // pakety (tento + výsledok z loop()) tesne za sebou a druhý — podstatný
-          // — sa môže stratiť. Bez flagu pošleme len jeden paket: finálny výsledok.
-          strcpy(reply, "FOTA: spracúvam, výsledok o chvíľu...");
-#else
-          *reply = 0;   // žiadny medzi-paket; odpoveď príde len raz, z loop()
-#endif
-        } else {
-          strcpy(reply, "FOTA: defer zlyhal (buffer)");
-        }
+      else if (fotaHandleLoRaCli(client, secret, command, reply,
+                                 packet->getPathHashSize(), sender_timestamp)) {
+        // FOTA CLI z LoRa — odložené do loop(); reply naplnené vo fotaHandleLoRaCli
+        // (nrffota/FotaMyMesh.cpp).
       }
 #endif
       else {
@@ -986,55 +840,7 @@ void MyMesh::onControlDataRecv(mesh::Packet* packet) {
   }
 }
 
-#ifdef WITH_LORA_FOTA
-// Repeater "subscribne" jediný FOTA kanál — keď sa channel_hash zhoduje,
-// MeshCore dešifruje GRP_DATA cez fota_channel.secret a zavolá onGroupDataRecv().
-int MyMesh::searchChannelsByHash(const uint8_t* hash, mesh::GroupChannel channels[], int max_matches) {
-  if (_fota_ready && max_matches > 0 && hash[0] == _fota_channel.hash[0]) {
-    channels[0] = _fota_channel;
-    return 1;
-  }
-  return 0;
-}
-
-// Dešifrovaný GRP_DATA payload: [ts 4B LE][fota_type 1B][...]. FOTA payload
-// začína za 4B timestampom (zhodné s fota_sender.py meshcore_grp_data_packet).
-void MyMesh::onGroupDataRecv(mesh::Packet* packet, uint8_t type, const mesh::GroupChannel& channel,
-                             uint8_t* data, size_t len) {
-  if (type != PAYLOAD_TYPE_GRP_DATA) return;
-  if (channel.hash[0] != _fota_channel.hash[0]) return;   // nie náš FOTA kanál
-  // Zjednotený FOTA formát: štandardný GRP_DATA plaintext = [data_type 2B][len 1B][ts 4B][fota_payload].
-  // Odlúpni [data_type][len]; ak data_type != FOTA_MAGIC, nie je to FOTA. Po odlúpnutí má
-  // buffer tvar [ts 4B][fota_payload] — zvyšok pipeline (loop +4) ostáva nezmenený.
-  if (len < 3 + 5) return;                               // [dt2][len1] + [ts4][type1]
-  uint16_t dtype = (uint16_t)data[0] | ((uint16_t)data[1] << 8);
-  if (dtype != FOTA_MAGIC) return;                        // nie náš FOTA data_type
-  // data[2] = pravá dĺžka [ts4][fota_payload]. MACThenDecrypt vracia AES-padovanú
-  // (16B) dĺžku, preto NEporovnávaj s len; použi data[2] na strhnutie paddingu.
-  uint8_t inner = data[2];
-  if (inner < 5 || (size_t)(3 + inner) > len) return;    // sanity vs padded buffer
-  data += 3; len = inner;                                // → presné [ts4][fota_payload]
-#ifdef FOTA_GDR_DIAG
-  Serial.print(F("[DIAG] GDR fota_type=0x")); Serial.print(data[4], HEX);
-  Serial.print(F(" len=")); Serial.print((int)len);
-  Serial.print(F(" pending=")); Serial.println(_fota_pending_len);
-#endif
-  // Odlož payload — pomalé CustomLFS I/O sa spraví v loop() PO tom, čo dispatcher
-  // re-armne rádio do RX. FS zápis priamo tu oneskoroval re-arm a rádio po prvom
-  // pakete prestávalo prijímať. Ak ešte čaká predošlý, tento zahodíme (loop ho
-  // stihne spracovať skôr ako príde ďalší LoRa paket pri SF7).
-  if (_fota_pending_len == 0) {
-    int n = (int)len;
-    if (n > (int)sizeof(_fota_pending)) n = (int)sizeof(_fota_pending);
-    memcpy(_fota_pending, data, n);
-    _fota_pending_len  = n;
-    _fota_pending_rssi = (float)radio_driver.getLastRSSI();
-    _fota_pending_snr  = packet->getSNR();
-  } else {
-    Serial.println(F("[FOTA] WARN pending busy, paket zahodený"));
-  }
-}
-#endif
+// (FOTA: searchChannelsByHash / onGroupDataRecv overrides sú v nrffota/FotaMyMesh.cpp)
 
 void MyMesh::sendNodeDiscoverReq() {
   uint8_t data[10];
@@ -1135,15 +941,7 @@ MyMesh::MyMesh(mesh::MainBoard &board, mesh::Radio &radio, mesh::MillisecondCloc
 
 void MyMesh::begin(FILESYSTEM *fs) {
 #ifdef WITH_LORA_FOTA
-  fota_check_flasher_debug();   // prečítaj GPREGRET2/RESETREAS čo najskôr po boote
-  _fota_ready = false;
-  _fota_pending_len = 0;
-  _fota_cli_pending = false;
-  _fota_cli_buf = nullptr;
-  _fota_apply_deadline = 0;
-  _fota_raw_rx = 0;
-  _fota_raw_last_len = 0;
-  _fota_raw_last_rssi = _fota_raw_last_snr = 0;
+  fotaEarlyInit();   // flasher debug marker čo najskôr po boote + reset FOTA stavu
 #endif
   mesh::Mesh::begin();
   _fs = fs;
@@ -1197,14 +995,7 @@ void MyMesh::begin(FILESYSTEM *fs) {
 #endif
 
 #ifdef WITH_LORA_FOTA
-  fota_init();                      // mount CustomLFS @ 0xD4000 + resume
-  fota_build_channel(_fota_channel); // FOTA GRP_DATA kanál (#-konvencia z FOTA_CHANNEL_NAME)
-  _fota_ready = true;
-  fota_print_flasher_debug();       // ak sa práve vrátil z flashera
-  Serial.print(F("[FOTA] build #")); Serial.print(FW_BUILD_NUMBER);
-  Serial.print(F("  freq=")); Serial.print(_prefs.freq, 3);
-  Serial.print(F(" sf=")); Serial.print(_prefs.sf);
-  Serial.print(F(" bw=")); Serial.println(_prefs.bw, 1);
+  fotaBegin();       // mount FOTA FS + kanál + boot banner (nrffota/FotaMyMesh.cpp)
 #endif
 }
 
@@ -1488,109 +1279,13 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
       strcpy(reply, "OK - Discover sent");
     }
 #ifdef WITH_LORA_FOTA
-  // FOTA CLI: prijíma 'fota ...' aj legacy 'ota ...'. MIGRÁCIA: keď Flutter/meshcore_py
-  // prejdú na 'fota', zmaž 'ota' vetvu — všetky miesta označené FOTA-CLI-ALIAS.
-  } else if (const char* fargs = fota_args_of(command)) {  // FOTA-CLI-ALIAS: 'fota'/'ota'
-    // Serial cesta (sender_timestamp==0) beží inline — plytký stack, bezpečné.
-    // LoRa cesta sem nepríde: onPeerDataRecv FOTA príkazy odloží do loop()
-    // (deferFotaCli → runFotaCli), aby nebežali v hlbokom RX callstacku.
-    runFotaCli(fargs, reply);
+  } else if (fotaHandleCliCommand(command, reply)) {
+    // FOTA CLI ('fota …' / legacy 'ota …') — nrffota/FotaMyMesh.cpp
 #endif
   } else{
     _cli.handleCommand(sender_timestamp, command, reply);  // common CLI commands
   }
 }
-
-#ifdef WITH_LORA_FOTA
-// Telo FOTA CLI (agc diagnostika + fota_handle_command). Volané z handleCommand
-// (Serial, inline) aj z loop() (odložená LoRa cesta) — VŽDY na plytkom stacku.
-void MyMesh::runFotaCli(const char* fargs, char* reply) {
-  if (strcmp(fargs, " agc") == 0) {
-    // AGC/gain diagnostika rádia (READ-ONLY — nemení konfiguráciu rádia, žiadny
-    // dopad na kompatibilitu s inými MeshCore zariadeniami). Pri point-blank
-    // (RSSI ~-23) overuje či sa receiver nedesenzitizoval / aký má gain mód.
-    uint8_t rxgain = 0;
-    radio.readRegister(0x08AC, &rxgain, 1);   // RADIOLIB_SX126X_REG_RX_GAIN
-    float inst_rssi = radio.getRSSI(false);   // okamžité RSSI kanála (GetRssiInst)
-    const char* gm = (rxgain == 0x96) ? "boosted" : (rxgain == 0x94 ? "power-save" : "?");
-    Serial.print(F("[FOTA] AGC rxgain_reg=0x")); Serial.print(rxgain, HEX);
-    Serial.print(F(" ")); Serial.print(gm);
-    Serial.print(F("  boost_pref=")); Serial.print(radio_driver.getRxBoostedGainMode() ? "on" : "off");
-    Serial.print(F("  inst_rssi=")); Serial.print(inst_rssi, 1);
-    Serial.print(F("dBm  nf=")); Serial.print(_radio->getNoiseFloor());
-    Serial.print(F("  agc_reset=")); Serial.print(((uint32_t)_prefs.agc_reset_interval) * 4);
-    Serial.println(F("s(0=vyp)"));
-    sprintf(reply, "AGC gain=0x%02X(%s) boost=%s rssi=%ddBm nf=%d agc_reset=%lus",
-            rxgain, gm, radio_driver.getRxBoostedGainMode() ? "on" : "off",
-            (int)inst_rssi, (int)_radio->getNoiseFloor(),
-            (unsigned long)(((uint32_t)_prefs.agc_reset_interval) * 4));
-  } else {
-    // POZOR: AGC auto-reset (set agc.reset.interval > 0) NEKOMBINOVAŤ s FOTA flashom!
-    // Ak agc resety (radio.sleep+calibrate) bežia počas FOTA session, nasledujúci
-    // 'fota flash' zlyhá (flasher sa zastaví po "Komprimovany format", repeater
-    // nabehne na OLD). Pri agc_reset=0 funguje príjem aj flash spoľahlivo.
-    // (Overené 2026-06-15: agc=0 #28→#29 PASS; agc=8 #28→#29 aj #30→#31 FAIL.)
-    fota_handle_command(fargs, reply);   // LoRa-FOTA: status|verify|flash|clear|id|...
-  }
-}
-
-// Zaparkuj snapshot klienta do zdieľaného FotaBuffer a označ čakajúci príkaz.
-// false = buffer nedostupný (už požičaný). Buffer drží snapshot až kým ho loop()
-// neprečíta a neuvoľní (potom ho fota_patch_to_file môže požičať na hpatch cache).
-bool MyMesh::deferFotaCli(const ClientInfo* client, const uint8_t* secret,
-                          const char* fargs, uint8_t path_hash_size,
-                          uint32_t sender_timestamp) {
-  uint8_t* buf = fota_get_buffer(sizeof(FotaCliDefer));
-  if (!buf) return false;
-  FotaCliDefer* s = (FotaCliDefer*)buf;
-  memcpy(s->dest_pub, client->id.pub_key, PUB_KEY_SIZE);
-  memcpy(s->secret, secret, PUB_KEY_SIZE);
-  s->sender_timestamp = sender_timestamp;
-  s->out_path_len   = client->out_path_len;
-  s->path_hash_size = path_hash_size;
-  if (client->out_path_len != OUT_PATH_UNKNOWN && client->out_path_len <= MAX_PATH_SIZE) {
-    memcpy(s->out_path, client->out_path, client->out_path_len);
-  }
-  strncpy(s->fargs, fargs, sizeof(s->fargs) - 1);
-  s->fargs[sizeof(s->fargs) - 1] = 0;
-  _fota_cli_buf     = buf;
-  _fota_cli_pending = true;
-  return true;
-}
-
-// Pošli CLI textovú odpoveď klientovi zo snapshotu (z loop(), po dobehnutí
-// odloženého príkazu). Vyfaktorované z onPeerDataRecv TXT_MSG vetvy.
-void MyMesh::sendDeferredCliReply(const uint8_t* dest_pub, const uint8_t* secret,
-                                  const uint8_t* out_path, uint8_t out_path_len,
-                                  uint8_t path_hash_size, const char* text,
-                                  uint32_t sender_timestamp) {
-  int text_len = strlen(text);
-  if (text_len <= 0) return;
-  if (text_len > 160) text_len = 160;
-  uint8_t temp[166];
-  uint32_t timestamp = getRTCClock()->getCurrentTimeUnique();
-  if (timestamp <= sender_timestamp) {
-    // Odpoveď musí mať timestamp VYŠŠÍ než príkaz, inak ju companion (seen-table
-    // dedup podľa ts) odfiltruje ako duplikát a nezobrazí. Pokrýva DVA prípady:
-    //  1) zosynced čas + rýchla odpoveď v kľude → reply_ts == sender_ts (kolízia),
-    //  2) ZLÝ čas repeatera (po reboote 2024) → reply_ts < sender_ts → companion by
-    //     odpoveď zoradil do minulosti / odfiltroval. V oboch ho ťaháme nad sender_ts.
-    // (Inline cesta cez CommonCLI si čas synchronizuje sama; FOTA cesta nie.)
-    timestamp = sender_timestamp + 1;
-  }
-  memcpy(temp, &timestamp, 4);
-  temp[4] = (TXT_TYPE_CLI_DATA << 2);
-  memcpy(&temp[5], text, text_len);
-  mesh::Identity id(dest_pub);
-  auto pkt = createDatagram(PAYLOAD_TYPE_TXT_MSG, id, secret, temp, 5 + text_len);
-  if (!pkt) return;
-  if (out_path_len == OUT_PATH_UNKNOWN) {
-    sendFloodReply(pkt, CLI_REPLY_DELAY_MILLIS, path_hash_size);
-  } else {
-    sendDirect(pkt, (uint8_t*)out_path, out_path_len, CLI_REPLY_DELAY_MILLIS);
-  }
-}
-#endif // WITH_LORA_FOTA
 
 void MyMesh::loop() {
 #ifdef WITH_BRIDGE
@@ -1637,80 +1332,7 @@ void MyMesh::loop() {
   last_millis = now;
 
 #ifdef WITH_LORA_FOTA
-  // Odložené FOTA spracovanie — mesh::Mesh::loop() vyššie už re-armol rádio do RX,
-  // takže pomalé CustomLFS I/O tu už nezablokuje príjem ďalšieho paketu.
-  if (_fota_pending_len > 0) {
-    int n = _fota_pending_len;
-    fota_print_pkt(_fota_pending + 4, n - 4, _fota_pending_rssi, _fota_pending_snr);
-    fota_process(_fota_pending + 4, n - 4);
-    _fota_pending_len = 0;   // uvoľni buffer až po spracovaní
-  }
-
-  // Odložené FOTA CLI (z LoRa) — tu beží na PLYTKOM stacku ako Serial cesta.
-  // Snapshot skopíruj zo zdieľaného FotaBuffer na (plytký) loop stack, buffer
-  // UVOĽNI (aby ho fota_patch_to_file mohol požičať na hpatch cache), a až POTOM
-  // spusti príkaz. Výsledok pošli klientovi. (flash → fota_apply nevráti sa.)
-  if (_fota_cli_pending && _fota_cli_buf) {
-    FotaCliDefer snap;
-    memcpy(&snap, _fota_cli_buf, sizeof(snap));
-    fota_put_buffer(_fota_cli_buf);
-    _fota_cli_buf     = nullptr;
-    _fota_cli_pending = false;
-
-    char reply[166];
-    reply[0] = 0;
-    runFotaCli(snap.fargs, reply);   // ťažká práca (verify=hpatch+SHA) na plytkom stacku
-    sendDeferredCliReply(snap.dest_pub, snap.secret, snap.out_path,
-                         snap.out_path_len, snap.path_hash_size, reply,
-                         snap.sender_timestamp);
-  }
-
-  // Odložený flash: 'fota flash' nastaví fota_apply_pending() a pošle ACK „accepted".
-  // Skutočný flash (fota_apply, NEVRÁTI sa) spustíme AŽ keď ACK reálne odíde z
-  // outbound queue — inak by reboot prišiel skôr než sa ACK odvysiela a odosielateľ
-  // by nič nedostal (presne to sa stalo). Safety net: deadline, aby flash nečakal
-  // donekonečna pri inej premávke v queue.
-  if (fota_apply_pending()) {
-    if (_fota_apply_deadline == 0) _fota_apply_deadline = futureMillis(6000);
-    if (_mgr->getOutboundTotal() == 0 || millisHasNowPassed(_fota_apply_deadline)) {
-      fota_clear_apply_pending();
-      _fota_apply_deadline = 0;
-      Serial.println(F("[FOTA] ACK odoslaný — spúšťam flash"));
-      fota_apply();   // NEVRÁTI sa pri úspechu (skok na flasher + reboot)
-      Serial.println(F("[FOTA] flash zlyhal pred skokom (pozri vyššie)"));
-    }
-  }
-
-#ifdef FK_DEBUG
-  // DOČASNÉ: heartbeat s build# (na detekciu verzie pri FOTA teste cez Serial)
-  static unsigned long s_next_build_print = 0;
-  if (s_next_build_print == 0 || millisHasNowPassed(s_next_build_print)) {
-    s_next_build_print = futureMillis(5000);
-    Serial.print(F("[FOTA] AALIVE build #")); Serial.print(FW_BUILD_NUMBER);
-    Serial.print(F("  freq=")); Serial.print(_prefs.freq, 3);
-    Serial.print(F(" sf="));    Serial.print(_prefs.sf);
-    Serial.print(F(" rawrx=")); Serial.print(_fota_raw_rx);       // surové rámce (pred dekódom)
-    Serial.print(F(" rxpkts=")); Serial.print(radio_driver.getPacketsRecv());
-    Serial.print(F(" rxerr=")); Serial.print(radio_driver.getPacketsRecvErrors());
-#ifdef FK_DEBUG_STACKTRACE
-    // [FK_DEBUG_STACKTRACE — na ZÁVER vyhodiť] stack loop-tasku (4096 B celkom).
-    // stk_minfree = historické MINIMUM voľného (najhlbší bod od bootu; dominuje Ed25519
-    // verify advertu). nowused = aktuálne (plytké, idle) použitie.
-    Serial.print(F(" stk_minfree=")); Serial.print((unsigned)(uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t))); Serial.print('B');
-#if defined(INCLUDE_pxTaskGetStackStart) && INCLUDE_pxTaskGetStackStart == 1
-    Serial.print(F(" nowused=")); Serial.print(loop_stack_used_now()); Serial.print(F("B/4096"));
-#endif
-#endif // FK_DEBUG_STACKTRACE
-    // Odhad zahodených/prepísaných paketov v rádiu (RxDone IRQ bez prečítania):
-    //   miss = isr_events - TX_sent - rx_ok - rx_crc_err
-    Serial.print(F(" isr=")); Serial.print(radio_driver.getIsrEvents());
-    Serial.print(F(" miss=")); Serial.print((long)radio_driver.getIsrEvents()
-        - (long)radio_driver.getPacketsSent()
-        - (long)radio_driver.getPacketsRecv()
-        - (long)radio_driver.getPacketsRecvErrors());
-    Serial.print(F(" nf=")); Serial.println((int)_radio->getNoiseFloor());
-  }
-#endif // FK_DEBUG
+  fotaLoop();   // deferred FOTA paket/CLI/flash + heartbeat (nrffota/FotaMyMesh.cpp)
 #endif
 }
 

@@ -19,8 +19,11 @@ Dvojfázový (patch potrebuje OLD != NEW; build# sa zvyšuje sám → diff vždy
   2) run
        - build REPEATER → NEW, vyrobí patch OLD→NEW
        - broadcast cez BRIDGE (fota_sender --mode meshcore)
-       - počká na VERIFIED (CLI 'ota status' cez COM5), spustí 'ota flash'
+       - počká na VERIFIED (CLI 'fota status' cez COM5), spustí 'fota flash'
        - po reboote overí build# == NEW + [FLASHER-DBG] marker
+  Pozn.: test posiela nové 'fota …' príkazy; FW stále prijíma aj legacy 'ota …'
+  (FOTA-CLI-ALIAS v nrffota/FotaMyMesh.cpp — používa ho Flutter appka).
+  Diagnostické výpisy repeatera vyžadujú build s -D FOTA_DEBUG=1 (default v FOTA env).
 
 Spúšťaj cez PlatformIO penv python (má pyserial + platformio):
    & "$HOME\\.platformio\\penv\\Scripts\\python.exe" \
@@ -195,17 +198,17 @@ def find_build(lines):
             found = int(m.group(1))
     return found
 
-def find_ota_status(lines):
+def find_fota_status(lines):
     """Vráti (recv, total, status) z posledného 'OTA n/m st=0x..' riadku, alebo None."""
     res = None
     for l in lines:
-        m = re.search(r"OTA\s+(\d+)/(\d+)\s+st=0x([0-9A-Fa-f]+)", l)
+        m = re.search(r"FOTA\s+(\d+)/(\d+)\s+st=0x([0-9A-Fa-f]+)", l)
         if m:
             res = (int(m.group(1)), int(m.group(2)), int(m.group(3), 16))
     return res
 
 def broadcast_until_verified(args, sender):
-    """Trpezlivý príjem: opakuj broadcast + poll 'ota status' kým nie je VERIFIED
+    """Trpezlivý príjem: opakuj broadcast + poll 'fota status' kým nie je VERIFIED
     alebo nevyprší --verify-wait. Fire-and-forget príjem niekedy stráca pakety na
     začiatku (zaseknuté/nečinné RX okno), takže jeden-dva cykly nemusia stačiť —
     kumulujeme chunky naprieč kolami a sledujeme rast recv/total, nie len VERIFIED.
@@ -215,7 +218,7 @@ def broadcast_until_verified(args, sender):
     while time.time() < deadline:
         rnd += 1
         remaining = int(deadline - time.time())
-        # Reboot LEN v 1. kole (čistý štart rádia po 'ota clear'). Ďalšie kolá už
+        # Reboot LEN v 1. kole (čistý štart rádia po 'fota clear'). Ďalšie kolá už
         # NEREBOOTUJÚ — session sa kumuluje v RAM naprieč kolami (strata paketov je
         # bežná, treba viac kôl). Reboot uprostred by zmazal <8-chunk session (bitmap
         # sa ukladá až od FOTA_BITMAP_SAVE_EVERY=8 chunkov), a NESMIE sa viazať na rast
@@ -228,10 +231,10 @@ def broadcast_until_verified(args, sender):
         else:
             print(cyan(f"\n────── broadcast kolo {rnd} (BEZ reboot — kumulujem, zostáva ~{remaining}s) ──────"))
         run(sender, f"fota_sender broadcast #{rnd} cez {args.bridge_port}", check=False)
-        # po každom broadcaste niekoľko trpezlivých 'ota status' pollov
+        # po každom broadcaste niekoľko trpezlivých 'fota status' pollov
         for _ in range(args.poll_tries):
-            lines = capture_serial(args.target_port, seconds=args.poll_secs, send_cmd="ota status\r")
-            st = find_ota_status(lines)
+            lines = capture_serial(args.target_port, seconds=args.poll_secs, send_cmd="fota status\r")
+            st = find_fota_status(lines)
             if st:
                 last = st
                 print(cyan(f"   OTA stav: {st[0]}/{st[1]} st=0x{st[2]:02X}"))
@@ -274,9 +277,9 @@ def phase_baseline(args):
     # Po DFU: počkaj na port, vyčisti starú OTA session (CustomLFS @0xD4000 prežije
     # reflash!) a spáľ čistý reboot — rádio RX po DFU/CLI býva v zaseknutom stave.
     wait_port_back(args.target_port, timeout=30)
-    print(cyan(">>> set radio CZ + ota clear + reboot (prefs prežívajú → vynúť CZ preset)"))
+    print(cyan(">>> set radio CZ + fota clear + reboot (prefs prežívajú → vynúť CZ preset)"))
     capture_serial(args.target_port, seconds=4, send_cmd="set radio 869.525,62.5,7,5\r")
-    capture_serial(args.target_port, seconds=3, send_cmd="ota clear\r")
+    capture_serial(args.target_port, seconds=3, send_cmd="fota clear\r")
     capture_serial(args.target_port, seconds=14, send_cmd="reboot\r")
     print(yellow("\n>>> Hotovo. Build# sa zvýši sám, potom:"))
     print(yellow(f"      {PY} test_nrf-fota/fota_test_lora_repeater.py run "
@@ -300,9 +303,9 @@ def phase_baseline_mcpy(args):
     old_build = read_build_number()
     print(green(f"[OK] OLD app obraz ({sz}B)  build #{old_build}"))
     wait_port_back(args.target_port, timeout=30)
-    print(cyan(">>> set radio SK + ota clear + reboot na repeateri (COM5)"))
+    print(cyan(">>> set radio SK + fota clear + reboot na repeateri (COM5)"))
     capture_serial(args.target_port, seconds=4, send_cmd="set radio 869.618,62.5,8,5\r")
-    capture_serial(args.target_port, seconds=3, send_cmd="ota clear\r")
+    capture_serial(args.target_port, seconds=3, send_cmd="fota clear\r")
     capture_serial(args.target_port, seconds=14, send_cmd="reboot\r")
     print(yellow("\n>>> Hotovo. Build# sa zvýši sám, potom:"))
     print(yellow(f"      {PY} test_nrf-fota/fota_test_lora_repeater.py run --sender mcpy "
@@ -356,29 +359,29 @@ def phase_run(args):
     # Pozn.: reboot repeatera robí broadcast_until_verified PRED KAŽDÝM kolom
     # (čerstvé RX okno proti "stuck receiver"), takže sa tu už nerebootuje.
 
-    # 1) Trpezlivý príjem: broadcast + poll 'ota status' kým VERIFIED / --verify-wait.
+    # 1) Trpezlivý príjem: broadcast + poll 'fota status' kým VERIFIED / --verify-wait.
     #    (Nahradilo fixný --cycles loop, ktorý pri strate paketov na začiatku zlyhal
     #    skôr, než sa session skumulovala — viď readme_verified_pooling.md.)
     if not broadcast_until_verified(args, sender):
         print(red("[FAIL] Repeater nedosiahol VERIFIED v --verify-wait okne. "
                   "Skús väčší --verify-wait / menší --drop / over LoRa spoj."))
-        print(yellow(">>> 'ota nack' (chýbajúce chunky):"))
-        capture_serial(args.target_port, seconds=5, send_cmd="ota nack\r")
+        print(yellow(">>> 'fota nack' (chýbajúce chunky):"))
+        capture_serial(args.target_port, seconds=5, send_cmd="fota nack\r")
         sys.exit(1)
 
-    # 3) Dry-run (opt-in cez --verify-first). DEFAULT VYPNUTÝ: 'ota verify' robí
-    #    malloc + streaming rekonštrukciu celého FW; po ňom nasledujúci 'ota flash'
+    # 3) Dry-run (opt-in cez --verify-first). DEFAULT VYPNUTÝ: 'fota verify' robí
+    #    malloc + streaming rekonštrukciu celého FW; po ňom nasledujúci 'fota flash'
     #    občas hardfaultne na malloc (heap stav po dry-rune) → flasher sa zastaví po
     #    "Komprimovany format" a repeater nabehne na OLD. Manuálny flash bez dry-runu
-    #    je spoľahlivý; bezpečnosť drží base-FW SHA256 check vnútri 'ota flash'.
+    #    je spoľahlivý; bezpečnosť drží base-FW SHA256 check vnútri 'fota flash'.
     #    (viď readme_verified_pooling.md)
     if args.verify_first:
-        print(cyan("\n>>> Dry-run 'ota verify' (bez zápisu)..."))
-        capture_serial(args.target_port, seconds=12, send_cmd="ota verify\r")
+        print(cyan("\n>>> Dry-run 'fota verify' (bez zápisu)..."))
+        capture_serial(args.target_port, seconds=12, send_cmd="fota verify\r")
 
     # 4) Ostrý flash + reboot, čítaj cez reboot
-    print(cyan("\n>>> 'ota flash' — OSTRÝ flash + reboot..."))
-    lines = capture_serial(args.target_port, seconds=args.capture, send_cmd="ota flash\r")
+    print(cyan("\n>>> 'fota flash' — OSTRÝ flash + reboot..."))
+    lines = capture_serial(args.target_port, seconds=args.capture, send_cmd="fota flash\r")
     evaluate(lines, new_build, fnv1a(NEW_BIN.read_bytes()))
 
 def evaluate(lines, new_build, expected_fnv):
@@ -427,18 +430,18 @@ def main():
     ap.add_argument("--cycle-delay", type=float, default=2.0,
                     help="Pauza medzi broadcast kolami [s]")
     ap.add_argument("--capture", type=int, default=60,
-                    help="Sekundy čítania serialu pri 'ota flash' (pokrýva flash+reboot)")
+                    help="Sekundy čítania serialu pri 'fota flash' (pokrýva flash+reboot)")
     # Spevnenie VERIFIED-pollingu (viď readme_verified_pooling.md)
     ap.add_argument("--verify-wait", type=int, default=60,
                     help="Max sekúnd opakovať broadcast+poll kým príjem dosiahne VERIFIED")
     ap.add_argument("--poll-tries", type=int, default=2,
-                    help="Počet 'ota status' pollov po každom broadcast kole")
+                    help="Počet 'fota status' pollov po každom broadcast kole")
     ap.add_argument("--poll-secs", type=int, default=5,
-                    help="Sekundy čítania serialu na jeden 'ota status' poll")
+                    help="Sekundy čítania serialu na jeden 'fota status' poll")
     ap.add_argument("--reboot-settle", type=int, default=4,
                     help="Sekundy po reboote pred prvým broadcastom (RX arm)")
     ap.add_argument("--verify-first", action="store_true",
-                     help="Spustiť 'ota verify' (dry-run) pred ostrým flashom. DEFAULT vyp — "
+                     help="Spustiť 'fota verify' (dry-run) pred ostrým flashom. DEFAULT vyp — "
                           "dry-run pred flashom občas spôsobí hardfault flashera (heap).")
     ap.add_argument("--privkey", default=str(DEFAULT_PRIVKEY) if DEFAULT_PRIVKEY.exists() else None,
                      help="Ed25519 private key (DER/PEM) na podpis OTA HEADER "

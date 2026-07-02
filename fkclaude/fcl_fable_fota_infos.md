@@ -107,7 +107,74 @@ Rovnaké ako v [docs/fota-rename-handoff.md](docs/fota-rename-handoff.md) §5:
 8. (Nápad) pridať pytest golden test na `fota miss`/`missall` reply formát (rozsahy,
    tokenový strop) — dnes pokryté len ručne.
 
-## 5. Dotknuté súbory (tento audit)
+## 5. ČASŤ 2 (2026-07-03, ten istý deň) — realizácia cleanupu + FOTA_DEBUG + presun do nrffota
+
+Používateľ schválil „urob všetko" z §4 + zadal navyše FOTA_DEBUG makrá a presun kódu.
+**NEcommitnuté — čaká na review.** Stav: build oba FOTA envy PASS, pytest 9/9 PASS.
+
+### 5a. FOTA_DEBUG makrá (nové)
+- **`nrffota/FotaDebug.h`** — `FOTA_DEBUG_PRINT/PRINTLN(fmt, ...)` = `Serial.printf`,
+  vzor `MESH_DEBUG_PRINT` (MeshCore.h); gated `#if FOTA_DEBUG && ARDUINO`, bez flagu
+  sa nekompilujú. **Všetky** diagnostické `Serial.print*` vo FOTA kóde skonvertované
+  (FotaReceiver ~47, FotaPatcher ~53, FotaMesh, FotaBuffer, FotaMyMesh) — printf štýl,
+  texty správ byte-zhodné (e2e parsuje `[FLASHER-DBG]`, `FOTA n/m st=0x`, `AALIVE`).
+  CLI reply buffre (sprintf) nezmenené — funkčný výstup. `Serial.flush()` pred skokom
+  do flashera ponechaný (funkčný). Oba FOTA envy: **`-D FOTA_DEBUG=1`** (default ZAP).
+- **CRLF fix (po HW teste)**: `FOTA_DEBUG_PRINTLN` lepí **`"\r\n"`** ako `Serial.println`
+  — samotné `"\n"` (štýl MESH_DEBUG) robilo na termináli „rosypaný" výpis (schodíky bez
+  návratu vozíka). Newline sa do formátov nedáva ručne — riadok vždy končí cez PRINTLN.
+  CLI reply cesta cez Serial je ako v pôvodnom kóde: reply plní sprintf, tlačí ho
+  upstream `main.cpp` (`  -> reply`) — **nezávislé od FOTA_DEBUG**.
+
+### 5b. Presun FOTA kódu z MyMesh do nrffota (minimalizácia diffu vs upstream)
+- **`nrffota/FotaMyMesh.cpp`** (nový) — telá VŠETKÝCH FOTA metód MyMesh + lokálne
+  helpery (fota_args_of, payload_type_name, FotaCliDefer, stacktrace meranie):
+  `fotaLogRxRaw, searchChannelsByHash, onGroupDataRecv, fotaEarlyInit, fotaBegin,
+  fotaHandleCliCommand, fotaHandleLoRaCli, runFotaCli, deferFotaCli,
+  sendDeferredCliReply, fotaLoop`. Kompiluje sa automaticky (`nrffota/*.cpp` vo filtri).
+- **MyMesh.cpp**: diff vs `dev` klesol zo **408 na ~30 riadkov** = 6 tenkých hookov
+  (logRxRaw, onPeerDataRecv else-if, begin ×2, handleCommand else-if, loop).
+  LoRa CLI echo presunuté do fotaHandleLoRaCli (predtým negated aj v stock buildoch)
+  a doplnená symetria: `[LoRa->CLI] <príkaz>` (prijaté) + `[CLI->LoRa] <odpoveď>`
+  (odosielané, v sendDeferredCliReply — upstream odpoveď nikdy nevypisoval, ani
+  s MESH_DEBUG; platí len pre FOTA príkazy, štandardné CLI nechané bez zmeny).
+- **MyMesh.h**: diff vs upstream = **4 riadky** — celý FOTA blok (stav `_fota_*` +
+  deklarácie metód) je v `nrffota/FotaMyMesh.h`, ktorý sa `#include`-uje **vnútri
+  tela `class MyMesh`** (preprocessor vlepí member deklarácie; súbor má výrazné
+  varovanie, že sa nesmie includovať samostatne). Include `nrffota/FotaMesh.h`
+  z headera odstránený (netreba).
+- Pozn.: `FOTA_CLI_REPLY_DELAY_MILLIS 600` vo FotaMyMesh.cpp musí sedieť
+  s `CLI_REPLY_DELAY_MILLIS` v MyMesh.cpp (private define, zámerná duplicita s komentom).
+
+### 5c. Cleanup z §4 (zrealizované)
+- **e2e test** `fota_test_lora_repeater.py` → posiela **`fota …`** príkazy,
+  `find_ota_status`→`find_fota_status`, regex `FOTA\s+`; FW alias `ota` OSTÁVA
+  (Flutter appka) — zmaže sa až po jej migrácii.
+- **Docs dedup**: flash mapa kanonicky **len `flash_layout.h`** (+ stručne AGENTS.md);
+  nrffota/README.md, fcl_readme aj tech doc §5 už len linkujú + one-liner.
+- **fcl_readme_nrf-fota.md zoštíhlený**: historické „Kľúčové nálezy/Ladenie 2026-06-14/15"
+  nahradené krátkym stavom + odkazmi na tech §8.3–8.5 a docs/conv_claude (obsah tam už bol).
+- **`conv_claude_20260615.md`** presunutý z rootu → `fkclaude/docs/` (link opravený).
+- **Tech doc**: §2 tabuľka doplnená (FotaMyMesh/FotaDebug/FotaBuffer/FwId/signkey),
+  integrácia prepísaná na 6 hookov, §11 „OTVORENÝ BUG" prepísaný na **VYRIEŠENÉ**
+  (skutočná príčina = Flutter tsBase=0/seen-table, nie kanál), CLI na `fota`.
+- **Sender defaulty**: komentáre vo fota_sender_mcpy.py + fota_export_pkg.py
+  (869.618/SF8 = FK pracovný kanál ≠ CZ e2e/FW env 869.525/SF7 — zadávaj explicitne).
+
+### 5d. Incident počas práce
+Časť práce bežala omylom na inom modeli — po ňom dohľadané a opravené: neplatný
+„build PASS" (bežal počas rozpracovaných editov; přebuildované po dokončení),
+kompilačná chyba `FOTA_DEBUG_PRINTLN(buf)` (makro lepí literál — fix `("%s", buf)`).
+
+### 5e. Zostáva / na zváženie
+- HW e2e test po refaktore (kód je len presunutý/print-makrá, wire nezmenený — ale
+  pred nasadením odporúčam jeden `run` cyklus).
+- `%f`/`%.3f` v printf: upstream ho používa (MESH_DEBUG v RAK senzoroch), na nRF52
+  by mal fungovať — pri prvom HW teste over výstup `AALIVE freq=…` (ak by bol prázdny,
+  Adafruit printf bez float supportu → prepnúť na celočíselný výpis).
+- Body §4/5 (build# lešenie) a §4/8 (pytest na miss formát) zostávajú otvorené.
+
+## 6. Dotknuté súbory (audit, časť 1)
 FW: `MyMesh.{h,cpp}`, `nrffota/{FotaReceiver.{h,cpp},FotaMesh.{h,cpp},FotaProtocol.h,`
 `FotaState.h,FotaFs.h,FotaPatcher.{h,cpp},FotaReceiver_signkey.cpp,flash_layout.h,`
 `puff_stream.c,flasher/flasher.ld,flasher_code.h,tools/build_flasher.py,README.md}`
