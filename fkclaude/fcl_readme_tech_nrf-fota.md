@@ -299,6 +299,29 @@ DIO1 / SysTick prerušenie → skok cez VTOR do app handlera (SD už disabled, F
 **Overené na HW: 2 čisté flash cykly (#101→#102, #102→#103, neskôr #104→#105).** Toto je
 pravdepodobne aj príčina §8.4 (agc sleep+calibrate = rádio v zlom stave → DIO ISR rozbije flash).
 
+### 8.7 CAD / LBT a FOTA — držať vypnuté (default)
+MeshCore má pred TX „listen-before-talk" gate v `Dispatcher::checkSend()` cez
+`_radio->isReceiving()`. Tá vetví na dve úrovne v `RadioLibWrapper::isChannelActive()`
+([RadioLibWrappers.cpp:207](src/helpers/radiolib/RadioLibWrappers.cpp#L207)):
+1. **RSSI prah** voči noise floor (`_threshold`) — lacné, rádio **neopúšťa RX**.
+2. **Hardvérové CAD** (`_cad_enabled`) — synchrónne `_radio->scanChannel()` (na SX1262
+   blokujúce CAD: RX→CAD→RX prepnutie + čakanie na CAD-done DIO). Po scane si vetva sama
+   čistí CAD-done IRQ a re-armuje RX (`state = STATE_IDLE; startRecv()`).
+
+**`setCADEnabled()` NIE je RadioLib API** — je to MeshCore `mesh::Radio` virtuál, len uloží
+bool (`RadioLibWrappers.h:54`). Default `getCADEnabled()=false` (`Dispatcher.h:171`); u repeatera
+runtime pref `_prefs.cad_enabled = 0` (`MyMesh.cpp:1103`, prepínateľné `set cad on`).
+
+**Pre FOTA: nechaj CAD vypnuté (default).** Kód sám je korektný (upratanie IRQ + re-arm je
+nutné), ale CAD beží len na **TX ceste** (re-flood chunku, STATUS/NACK, CLI reply) a zapnuté
+pridáva RX→CAD→RX mode-churn. SX1262 buffruje ~1 paket; naše tiché straty boli práve
+„rádio/CPU zaneprázdnené → zhltne back-to-back chunk" (§8.6, [[fota_apply_resend_dispatch_20260624]]).
+Ďalšie okno mimo RX = vyššie riziko straty chunku, plus blokujúci scan stalluje `loop()`, kde
+robíme odložené NVMC zápisy. Kolíznu ochranu z veľkej časti dáva už RSSI-prah (vetva 1), ktorá
+RX neopúšťa. Konzistentné s [[agc_keep_standard]]: drž MeshCore defaulty.
+Ak by si chcel agresívnejšiu ochranu, `set cad on` je runtime (bez rebuildu) — A/B meraj
+`getPacketsRecvErrors()` / RAW counter pred a po.
+
 ---
 
 ## 9. Známe obmedzenia / TODO
@@ -307,6 +330,7 @@ pravdepodobne aj príčina §8.4 (agc sleep+calibrate = rádio v zlom stave → 
   timingu (manuálny flash s hotovou VERIFIED session vždy prejde). → viď
   [fcl_readme_verified_pooling.md](fcl_readme_verified_pooling.md) (spevnenie VERIFIED-pollingu).
 - **agc_reset držať na 0** (viď §8.4).
+- **CAD/LBT držať vypnuté** (`cad_enabled = 0`, default) — viď §8.7.
 - Cieľovo: globálny build flag pre všetky nRF52840 boardy (teraz dedikovaný env).
 - XIAO/SenseCap (v7) ako FOTA cieľ: nič špeciálne — jeden board-agnostický `flasher_code.h` (app base runtime z linker symbolu); HOTOVÉ 2026-06-25.
 - `build_number.txt` / `gen_build_info.py` sú **dočasné testovacie lešenie** (build# vo FW na
