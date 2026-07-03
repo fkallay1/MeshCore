@@ -44,6 +44,14 @@ Reťaz `extra_scripts` v `variants/*/platformio.ini` urobí pri KAŽDOM builde:
 > stačí zbuildovať a hook to vyrobí sám. (Napr. archív mal `sensecap.fw_205`, build dá 208 →
 > hook vyrobí `205-208.sensecap.fotapkg.json`.)
 
+> **Overovací build bez fotapkg:** `FOTAPKG_SKIP=1 pio run -e …` — hook krok 3 sa preskočí
+> (archív aj pkg), build# sa ale bumpne vždy (krok 1). Legacy meno `OTAPKG_SKIP` tiež funguje.
+
+Pozn.: FOTA envy majú `-D FOTA_DEBUG=1` — diagnostické `[FOTA]`/`[FLASHER-DBG]` výpisy na
+Serial (makrá v `nrffota/FotaDebug.h`). Vypnutie = zakomentovať flag v ini; CLI odpovede
+fungujú aj bez neho. Komentáre v FOTA zdrojákoch sú dvojjazyčné `//en:`+`//sk:`
+(strip: `python fkclaude/tools/strip_lang_comments.py --keep en|sk <cesty>`).
+
 ---
 
 ## 2. Ručné generovanie otapkg (ľubovoľný pár buildov)

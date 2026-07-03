@@ -212,6 +212,11 @@ v puff_stream.c bez značiek, `flasher/flasher.ld` (GNU ld má len /* */ bloky �
 konvencie, komentáre ostali ako sú), `flasher_code.h` (generovaný). Docstringy v .py
 bez značiek (konvencia pokrýva len riadkové komentáre).
 
+**ROZSAH: len zdrojáky.** Dokumentácia sa NEprekladá (potvrdené 2026-07-04):
+`fkclaude/fcl_*`, `fkclaude/docs/`, `nrffota/README.md` aj `test_nrf-fota/` py nástroje
+ostávajú čisto slovenské. (Ak raz pôjde upstream PR, `nrffota/README.md` bude
+potrebovať jednorazový EN preklad — samostatný krok, nie súčasť konvencie.)
+
 ## 7. Dotknuté súbory (audit, časť 1)
 FW: `MyMesh.{h,cpp}`, `nrffota/{FotaReceiver.{h,cpp},FotaMesh.{h,cpp},FotaProtocol.h,`
 `FotaState.h,FotaFs.h,FotaPatcher.{h,cpp},FotaReceiver_signkey.cpp,flash_layout.h,`
