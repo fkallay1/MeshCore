@@ -4,8 +4,8 @@
  The MIT License (MIT)
  Copyright (c) 2020-2022 HouSisong All Rights Reserved.
 */
-// Aktívne len v OTA FW builde (-DWITH_LORA_FOTA) alebo standalone flasheri
-// (-DFOTA_FLASHER_BUILD). V stock buildoch ostáva prázdne (--gc-sections).
+// Active only in the FOTA FW build (-DWITH_LORA_FOTA) or in the standalone
+// flasher (-DFOTA_FLASHER_BUILD). In stock builds this stays empty (--gc-sections).
 #if defined(WITH_LORA_FOTA) || defined(FOTA_FLASHER_BUILD)
 
 #include "hpatch_lite.h"

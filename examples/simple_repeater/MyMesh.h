@@ -177,7 +177,7 @@ protected:
   void onControlDataRecv(mesh::Packet* packet) override;
 
 #ifdef WITH_LORA_FOTA
-  #include "nrffota/FotaMyMesh.h"   // LoRa-FOTA: členy + deklarácie metód (telá vo FotaMyMesh.cpp)
+  #include "nrffota/FotaMyMesh.h"   //en: LoRa-FOTA: members + method declarations (bodies in FotaMyMesh.cpp)
 #endif
 
   void sendFloodReply(mesh::Packet* packet, unsigned long delay_millis, uint8_t path_hash_size);

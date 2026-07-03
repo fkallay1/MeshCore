@@ -1,19 +1,24 @@
 // =====================================================================
-// FotaReceiver.cpp — FOTA prijímač (MeshCore port z FK_lora-sniffer)
+//en: FotaReceiver.cpp — FOTA receiver (MeshCore port of FK_lora-sniffer)
 //
-// Spracováva dešifrovaný FOTA payload, ukladá chunky do CustomLFS append-logu,
-// po COMPLETE zostaví patch.bin a overí SHA256. Reboot-resilient (meta+bitmap).
+//en: Processes the decrypted FOTA payload, stores chunks into the CustomLFS append-log,
+//en: after COMPLETE assembles patch.bin and verifies SHA256. Reboot-resilient (meta+bitmap).
+//
+//sk: FotaReceiver.cpp — FOTA prijímač (MeshCore port z FK_lora-sniffer)
+//
+//sk: Spracováva dešifrovaný FOTA payload, ukladá chunky do CustomLFS append-logu,
+//sk: po COMPLETE zostaví patch.bin a overí SHA256. Reboot-resilient (meta+bitmap).
 // =====================================================================
 #ifdef WITH_LORA_FOTA
 #include "FotaReceiver.h"
 #include "FotaFs.h"
-#include "FwId.h"             // fw_id_trailer (build#, image_size, sha256)
+#include "FwId.h"             //en: fw_id_trailer (build#, image_size, sha256)
 #include "FotaDebug.h"
 #include <Arduino.h>
-#include <SHA256.h>          // rweather/Crypto — rovnaká dep ako mesh::Utils
-#include <Ed25519.h>         // rweather/Crypto —Ed25519::verify()
+#include <SHA256.h>          //en: rweather/Crypto — same dep as mesh::Utils
+#include <Ed25519.h>         //en: rweather/Crypto —Ed25519::verify()
 
-// Globálna inštancia FotaFS — CustomLFS na 0xD4000 (92kB)
+//en: Global FotaFS instance — CustomLFS at 0xD4000 (92kB)
 CustomLFS FotaFS(FOTA_FS_FLASH_ADDR, FOTA_FS_FLASH_SIZE, FOTA_FS_BLOCK_SIZE);
 
 static bool verify_header_signature(const uint8_t* sig,
@@ -29,37 +34,56 @@ static bool verify_header_signature(const uint8_t* sig,
 }
 
 // =====================================================================
-// RAM stav
+//en: RAM state
 // =====================================================================
 static FotaState   fota;
 static uint16_t   s_bitmap_dirty = 0;
 
-// Offset tabuľka pre assembly krok: byte offset DATA v recv.log pre každý chunk.
-// 4B × 1024 = 4KB BSS, acceptable pre nRF52840 (248KB RAM).
+//en: Offset table for the assembly step: byte offset of DATA in recv.log for each chunk.
+//en: 4B × 1024 = 4KB BSS, acceptable for the nRF52840 (248KB RAM).
+//sk: Offset tabuľka pre assembly krok: byte offset DATA v recv.log pre každý chunk.
+//sk: 4B × 1024 = 4KB BSS, acceptable pre nRF52840 (248KB RAM).
 static uint32_t s_log_data_offset[FOTA_MAX_CHUNKS];
 
 // =====================================================================
-// Veľkosť bežiaceho FW image — z linker symbolov (žiadna zmena ld scriptu,
-// žiadny post-build). nrf52_common.ld exportuje __etext (= LMA .data, t.j.
-// koniec .text/.exidx vo flashi), __data_start__/__data_end__ (VMA .data
-// v RAM) a __flash_arduino_start (= ORIGIN(FLASH), reálny app base z aktívneho
-// ld). .data má v RAM rovnakú veľkosť ako jej flash LMA-obraz, takže:
-//   image_end = __etext + (__data_end__ - __data_start__)
-//   fw_size   = image_end - __flash_arduino_start
-// Zhoduje sa s firmware.bin z DFU zipu (= old_fw_size od sendera). Overené.
+//en: Size of the running FW image — from linker symbols (no ld script change,
+//en: no post-build). nrf52_common.ld exports __etext (= LMA of .data, i.e. the
+//en: end of .text/.exidx in flash), __data_start__/__data_end__ (VMA of .data
+//en: in RAM) and __flash_arduino_start (= ORIGIN(FLASH), the real app base of the
+//en: active ld). .data has the same size in RAM as its flash LMA image, so:
+//en:   image_end = __etext + (__data_end__ - __data_start__)
+//en:   fw_size   = image_end - __flash_arduino_start
+//en: Matches firmware.bin from the DFU zip (= old_fw_size from the sender). Verified.
 //
-// Base berieme z linker symbolu __flash_arduino_start (NIE hardcoded
-// APP_FLASH_START) — symbol vždy odráža reálny link base aktívneho ld scriptu
-// (v6=0x26000, v7=0x27000) a je tak robustnejší zdroj pravdy než makro.
-// APP_FLASH_START/MAX makrá ostávajú pre compile-time kontexty (symbol tam
-// nie je konštantný výraz). Hodnoty sú link-time konštanty (relokácie) — pri
-// kompilácii neznáme, ale to runtime aritmetike nevadí.
+//en: We take the base from the linker symbol __flash_arduino_start (NOT the hardcoded
+//en: APP_FLASH_START) — the symbol always reflects the real link base of the active
+//en: ld script (v6=0x26000, v7=0x27000) and is thus a more robust source of truth
+//en: than the macro. The APP_FLASH_START/MAX macros remain for compile-time contexts
+//en: (the symbol is not a constant expression there). The values are link-time
+//en: constants (relocations) — unknown at compile time, but that does not matter
+//en: for runtime arithmetic.
+//
+//sk: Veľkosť bežiaceho FW image — z linker symbolov (žiadna zmena ld scriptu,
+//sk: žiadny post-build). nrf52_common.ld exportuje __etext (= LMA .data, t.j.
+//sk: koniec .text/.exidx vo flashi), __data_start__/__data_end__ (VMA .data
+//sk: v RAM) a __flash_arduino_start (= ORIGIN(FLASH), reálny app base z aktívneho
+//sk: ld). .data má v RAM rovnakú veľkosť ako jej flash LMA-obraz, takže:
+//sk:   image_end = __etext + (__data_end__ - __data_start__)
+//sk:   fw_size   = image_end - __flash_arduino_start
+//sk: Zhoduje sa s firmware.bin z DFU zipu (= old_fw_size od sendera). Overené.
+//
+//sk: Base berieme z linker symbolu __flash_arduino_start (NIE hardcoded
+//sk: APP_FLASH_START) — symbol vždy odráža reálny link base aktívneho ld scriptu
+//sk: (v6=0x26000, v7=0x27000) a je tak robustnejší zdroj pravdy než makro.
+//sk: APP_FLASH_START/MAX makrá ostávajú pre compile-time kontexty (symbol tam
+//sk: nie je konštantný výraz). Hodnoty sú link-time konštanty (relokácie) — pri
+//sk: kompilácii neznáme, ale to runtime aritmetike nevadí.
 // =====================================================================
 extern "C" {
     extern char __etext;
     extern char __data_start__;
     extern char __data_end__;
-    extern char __flash_arduino_start;   // = ORIGIN(FLASH) = app base
+    extern char __flash_arduino_start;   //en: = ORIGIN(FLASH) = app base
 }
 
 static inline uint32_t fw_image_size(void) {
@@ -69,17 +93,25 @@ static inline uint32_t fw_image_size(void) {
     return image_end - (uint32_t)(uintptr_t)&__flash_arduino_start;
 }
 
-// Reálny app base z linker symbolu (= ORIGIN(FLASH) aktívneho ld scriptu):
-// v6=0x26000, v7=0x27000. Toto je zdroj pravdy pre device-side SHA — NIE makro
-// APP_FLASH_START, ktoré je pri zlej/chýbajúcej board konfigurácii (napr. v7
-// board bez FOTA_SOFTDEVICE_V7) nesprávne a hash by sa počítal z inej oblasti.
-// (Flasher je standalone bez linker symbolov → tam makro ostáva, viď flash_layout.h.)
+//en: Real app base from the linker symbol (= ORIGIN(FLASH) of the active ld script):
+//en: v6=0x26000, v7=0x27000. This is the source of truth for the device-side SHA — NOT
+//en: the APP_FLASH_START macro, which is wrong with a bad/missing board configuration
+//en: (e.g. a v7 board without FOTA_SOFTDEVICE_V7) and the hash would be computed over a
+//en: different region.
+//en: (The flasher is standalone without linker symbols → the macro stays there, see flash_layout.h.)
+//sk: Reálny app base z linker symbolu (= ORIGIN(FLASH) aktívneho ld scriptu):
+//sk: v6=0x26000, v7=0x27000. Toto je zdroj pravdy pre device-side SHA — NIE makro
+//sk: APP_FLASH_START, ktoré je pri zlej/chýbajúcej board konfigurácii (napr. v7
+//sk: board bez FOTA_SOFTDEVICE_V7) nesprávne a hash by sa počítal z inej oblasti.
+//sk: (Flasher je standalone bez linker symbolov → tam makro ostáva, viď flash_layout.h.)
 static inline uint32_t fw_flash_base(void) {
     return (uint32_t)(uintptr_t)&__flash_arduino_start;
 }
 
-// Exportované pre FotaPatcher / FotaMesh — jeden zdroj pravdy pre app base a
-// veľkosť bežiaceho FW (z linker symbolov, nie z makra).
+//en: Exported for FotaPatcher / FotaMesh — single source of truth for the app base and
+//en: the size of the running FW (from linker symbols, not from the macro).
+//sk: Exportované pre FotaPatcher / FotaMesh — jeden zdroj pravdy pre app base a
+//sk: veľkosť bežiaceho FW (z linker symbolov, nie z makra).
 uint32_t fota_running_fw_base(void) { return fw_flash_base(); }
 uint32_t fota_running_fw_size(void) { return fw_image_size(); }
 
@@ -89,10 +121,14 @@ static void print_sha_full(const uint8_t* h) {
     FOTA_DEBUG_PRINTLN("");
 }
 
-// "fota id" — vypíš FW identitu a dopočítaj plný SHA256 bežiaceho FW.
-// running sha256 sa počíta nad [base, +image_size) AS-IS (vrátane vyplneného
-// traileru) → ZHODUJE sa s old_sha256 v .fotapkg.json (to PC počíta nad rovnakým
-// app image). Trailer.sha256 je iný hash (self-hash so sha[]=0) — len referencia.
+//en: "fota id" — print the FW identity and compute the full SHA256 of the running FW.
+//en: The running sha256 is computed over [base, +image_size) AS-IS (including the filled
+//en: trailer) → it MATCHES old_sha256 in .fotapkg.json (the PC computes that over the same
+//en: app image). Trailer.sha256 is a different hash (self-hash with sha[]=0) — reference only.
+//sk: "fota id" — vypíš FW identitu a dopočítaj plný SHA256 bežiaceho FW.
+//sk: running sha256 sa počíta nad [base, +image_size) AS-IS (vrátane vyplneného
+//sk: traileru) → ZHODUJE sa s old_sha256 v .fotapkg.json (to PC počíta nad rovnakým
+//sk: app image). Trailer.sha256 je iný hash (self-hash so sha[]=0) — len referencia.
 void fota_print_fw_id(char* reply) {
     uint32_t base      = fw_flash_base();
     uint32_t link_size = fw_image_size();
@@ -124,8 +160,10 @@ void fota_print_fw_id(char* reply) {
     }
 }
 
-// Cross-check: zodpovedá deklarovaná old_fw_size reálne bežiacemu FW?
-// Lacná brána pred drahým SHA256 — ak veľkosť nesedí, base FW je iný.
+//en: Cross-check: does the declared old_fw_size match the actually running FW?
+//en: Cheap gate before the expensive SHA256 — if the size differs, the base FW is different.
+//sk: Cross-check: zodpovedá deklarovaná old_fw_size reálne bežiacemu FW?
+//sk: Lacná brána pred drahým SHA256 — ak veľkosť nesedí, base FW je iný.
 static bool fota_fw_size_matches(uint32_t fw_size) {
     uint32_t self = fw_image_size();
     if (fw_size == self) return true;
@@ -135,17 +173,19 @@ static bool fota_fw_size_matches(uint32_t fw_size) {
 }
 
 // =====================================================================
-// Base FW cache — rýchla validácia bez reštartu SHA256 výpočtu
+//en: Base FW cache — fast validation without redoing the SHA256 computation
 // =====================================================================
 static bool fota_base_fw_validated(uint32_t fw_size, const uint8_t* prefix) {
-    // Cross-check oproti bežiacemu FW (z linker symbolov) — odmietni hneď
-    // bez SHA256, ak patch cieli na iný base.
+    //en: Cross-check against the running FW (from linker symbols) — reject right away
+    //en: without SHA256 if the patch targets a different base.
+    //sk: Cross-check oproti bežiacemu FW (z linker symbolov) — odmietni hneď
+    //sk: bez SHA256, ak patch cieli na iný base.
     if (!fota_fw_size_matches(fw_size)) return false;
-    // Ak je cache plná a veľkosť sedí → porovnaj prefix
+    //en: If the cache is filled and the size matches → compare the prefix
     if (fota.base_fw_size == fw_size) {
         return memcmp(fota.base_fw_sha256, prefix, 4) == 0;
     }
-    // Veľkosť sa zmenila alebo cache prázdna → re-počítaj
+    //en: Size changed or cache empty → recompute
     if (fw_size > (APP_FLASH_END - fw_flash_base())) {
         FOTA_DEBUG_PRINTLN("[FOTA] base FW: fw_size %lu > app okno", (unsigned long)fw_size);
         return false;
@@ -162,7 +202,7 @@ static bool fota_base_fw_validated(uint32_t fw_size, const uint8_t* prefix) {
     return memcmp(fota.base_fw_sha256, prefix, 4) == 0;
 }
 
-// Overenie base FW cez kompletný SHA256 (pre HEADER s full old_sha256)
+//en: Base FW verification via the complete SHA256 (for a HEADER with full old_sha256)
 static bool fota_base_fw_check_full(uint32_t fw_size, const uint8_t* sha256_full) {
     if (!fota_fw_size_matches(fw_size)) return false;
     if (fw_size > (APP_FLASH_END - fw_flash_base())) return false;
@@ -175,14 +215,22 @@ static bool fota_base_fw_check_full(uint32_t fw_size, const uint8_t* sha256_full
     return memcmp(h, sha256_full, 32) == 0;
 }
 
-// Base FW gating pre META/SIG — tie nesú plný old_sha256[32] ale NIE old_fw_size.
-// Over ho voči bežiacemu FW VŽDY (aj keď HEADER/SIG príde PRED akýmkoľvek chunkom):
-//  - ak už máme cache (base_fw_size>0, naplnené chunkom/skorším META) → porovnaj lacno
-//    bez nového SHA (base_fw_sha256 == SHA bežiaceho FW; base_fw_size je vždy ==
-//    fw_image_size, lebo fota_fw_size_matches to gat­uje pred cache zápisom);
-//  - inak doráta SHA nad celým bežiacim image (fw_image_size). Pre legitímny patch
-//    platí old_fw_size == fw_image_size (invariant z FwId.h), takže to sedí.
-// Bez tohto sa pri HEADER-first / SIG-first zakladala session pre CUDZÍ patch.
+//en: Base FW gating for META/SIG — they carry the full old_sha256[32] but NOT old_fw_size.
+//en: Verify it against the running FW ALWAYS (even when HEADER/SIG arrives BEFORE any chunk):
+//en:  - if the cache is already filled (base_fw_size>0, set by a chunk/earlier META) → compare
+//en:    cheaply without a new SHA (base_fw_sha256 == SHA of the running FW; base_fw_size is
+//en:    always == fw_image_size, because fota_fw_size_matches gates it before the cache write);
+//en:  - otherwise compute the SHA over the whole running image (fw_image_size). For a legitimate
+//en:    patch old_fw_size == fw_image_size holds (invariant from FwId.h), so it matches.
+//en: Without this, HEADER-first / SIG-first used to start a session for a FOREIGN patch.
+//sk: Base FW gating pre META/SIG — tie nesú plný old_sha256[32] ale NIE old_fw_size.
+//sk: Over ho voči bežiacemu FW VŽDY (aj keď HEADER/SIG príde PRED akýmkoľvek chunkom):
+//sk:  - ak už máme cache (base_fw_size>0, naplnené chunkom/skorším META) → porovnaj lacno
+//sk:    bez nového SHA (base_fw_sha256 == SHA bežiaceho FW; base_fw_size je vždy ==
+//sk:    fw_image_size, lebo fota_fw_size_matches to gat­uje pred cache zápisom);
+//sk:  - inak doráta SHA nad celým bežiacim image (fw_image_size). Pre legitímny patch
+//sk:    platí old_fw_size == fw_image_size (invariant z FwId.h), takže to sedí.
+//sk: Bez tohto sa pri HEADER-first / SIG-first zakladala session pre CUDZÍ patch.
 static bool fota_meta_base_ok(const uint8_t* old_sha256_full) {
     if (fota.base_fw_size > 0) {
         return memcmp(fota.base_fw_sha256, old_sha256_full, 32) == 0;
@@ -191,7 +239,7 @@ static bool fota_meta_base_ok(const uint8_t* old_sha256_full) {
 }
 
 // =====================================================================
-// Interné pomocné funkcie
+//en: Internal helpers
 // =====================================================================
 static void fota_clear() {
     memset(&fota, 0, sizeof(fota));
@@ -205,7 +253,7 @@ static void fota_set_error(uint8_t code) {
     FOTA_DEBUG_PRINTLN("[FOTA] CHYBA=0x%X", (unsigned)code);
 }
 
-// Kernighan bit count
+//en: Kernighan bit count
 static uint16_t bitmap_popcount() {
     uint16_t n = 0, bytes = (fota.total_chunks + 7u) / 8u;
     for (uint16_t i = 0; i < bytes; i++) {
@@ -216,7 +264,7 @@ static uint16_t bitmap_popcount() {
 }
 
 // =====================================================================
-// CustomLFS — meta.bin
+//en: CustomLFS — meta.bin
 // =====================================================================
 static bool save_meta() {
     FotaMetaPersist mp;
@@ -258,7 +306,7 @@ static bool load_meta(FotaMetaPersist* out) {
 }
 
 // =====================================================================
-// CustomLFS — bitmap.bin
+//en: CustomLFS — bitmap.bin
 // =====================================================================
 static void save_bitmap() {
     if (fota.total_chunks == 0) return;
@@ -282,8 +330,9 @@ static bool load_bitmap() {
 }
 
 // =====================================================================
-// CustomLFS — recv.log (append log)
-// Každý záznam: [idx 2B LE][data_len 2B LE][data N]
+//en: CustomLFS — recv.log (append log)
+//en: Each record: [idx 2B LE][data_len 2B LE][data N]
+//sk: Každý záznam: [idx 2B LE][data_len 2B LE][data N]
 // =====================================================================
 static bool log_append(uint16_t idx, const uint8_t* data, uint16_t data_len) {
     File f(FotaFS);
@@ -300,17 +349,20 @@ static bool log_append(uint16_t idx, const uint8_t* data, uint16_t data_len) {
 }
 
 // =====================================================================
-// Assembly z recv.log — spoločné pomocné funkcie
+//en: Assembly from recv.log — shared helpers
 // =====================================================================
-// Presná dĺžka chunku i (bez AES paddingu): plné chunky = FOTA_CHUNK_DATA_MAX,
-// posledný = zvyšok z patch_size.
+//en: Exact length of chunk i (without AES padding): full chunks = FOTA_CHUNK_DATA_MAX,
+//en: the last one = the remainder of patch_size.
+//sk: Presná dĺžka chunku i (bez AES paddingu): plné chunky = FOTA_CHUNK_DATA_MAX,
+//sk: posledný = zvyšok z patch_size.
 static uint16_t chunk_exp_len(uint16_t i) {
     if (i < fota.total_chunks - 1u) return FOTA_CHUNK_DATA_MAX;
     uint32_t rem = fota.patch_size - (uint32_t)(fota.total_chunks - 1u) * FOTA_CHUNK_DATA_MAX;
     return (rem > FOTA_CHUNK_DATA_MAX) ? FOTA_CHUNK_DATA_MAX : (uint16_t)rem;
 }
 
-// Prechod 1: naplň s_log_data_offset[] z recv.log (posledný výskyt idx vyhrá).
+//en: Pass 1: fill s_log_data_offset[] from recv.log (the last occurrence of an idx wins).
+//sk: Prechod 1: naplň s_log_data_offset[] z recv.log (posledný výskyt idx vyhrá).
 static void build_log_offsets(File& log_r) {
     memset(s_log_data_offset, 0xFF, sizeof(s_log_data_offset));
     uint32_t log_pos = 0;
@@ -325,8 +377,10 @@ static void build_log_offsets(File& log_r) {
     }
 }
 
-// Zostaví patch z recv.log priamo do RAM (buf, kapacita cap).
-// Vráti zostavenú veľkosť (== fota.patch_size) alebo 0 pri chybe/chýbajúcom chunku.
+//en: Assembles the patch from recv.log directly into RAM (buf, capacity cap).
+//en: Returns the assembled size (== fota.patch_size) or 0 on error/missing chunk.
+//sk: Zostaví patch z recv.log priamo do RAM (buf, kapacita cap).
+//sk: Vráti zostavenú veľkosť (== fota.patch_size) alebo 0 pri chybe/chýbajúcom chunku.
 static uint32_t assemble_log_to_buf(uint8_t* buf, uint32_t cap) {
     if (fota.total_chunks == 0 || fota.patch_size == 0 || fota.patch_size > cap) return 0;
     File log_r(FotaFS);
@@ -346,7 +400,8 @@ static uint32_t assemble_log_to_buf(uint8_t* buf, uint32_t cap) {
 }
 
 #ifndef USE_PATCHBIN_FILE
-// RAM mód: SHA256 patchu streamovo z recv.log (bez patch.bin, bez veľkého buffra).
+//en: RAM mode: patch SHA256 streamed from recv.log (no patch.bin, no large buffer).
+//sk: RAM mód: SHA256 patchu streamovo z recv.log (bez patch.bin, bez veľkého buffra).
 static bool verify_log_sha() {
     File log_r(FotaFS);
     if (!log_r.open(FOTA_FS_LOG, FILE_O_READ)) {
@@ -379,9 +434,12 @@ static bool verify_log_sha() {
 #endif
 
 // =====================================================================
-// Assembly + SHA256 verifikácia (po COMPLETE)
-//   default:           over SHA streamovo z recv.log, NEpíš patch.bin (úspora FS)
-//   USE_PATCHBIN_FILE: zostav recv.log → patch.bin (FS) + over SHA, zmaž recv.log
+//en: Assembly + SHA256 verification (after COMPLETE)
+//en:   default:           verify the SHA streamed from recv.log, do NOT write patch.bin (saves FS)
+//en:   USE_PATCHBIN_FILE: assemble recv.log → patch.bin (FS) + verify the SHA, delete recv.log
+//sk: Assembly + SHA256 verifikácia (po COMPLETE)
+//sk:   default:           over SHA streamovo z recv.log, NEpíš patch.bin (úspora FS)
+//sk:   USE_PATCHBIN_FILE: zostav recv.log → patch.bin (FS) + over SHA, zmaž recv.log
 // =====================================================================
 static bool assemble_and_verify() {
 #ifndef USE_PATCHBIN_FILE
@@ -428,17 +486,21 @@ static bool assemble_and_verify() {
         return false;
     }
     FOTA_DEBUG_PRINTLN("[FOTA] patch.bin SHA256 OK");
-    FotaFS.remove(FOTA_FS_LOG);   // recv.log cleanup — patch.bin je odteraz zdroj
+    FotaFS.remove(FOTA_FS_LOG);   //en: recv.log cleanup — patch.bin is the source from now on
     FOTA_DEBUG_PRINTLN("[FOTA] recv.log zmazaný (patch.bin je zdroj)");
     return true;
 #endif
 }
 
 // =====================================================================
-// fota_acquire_patch_ram — patch do čerstvo malloc-nutého RAM buffra.
-//   default:           zostaví z recv.log (žiadny patch.bin, žiadny 2× FS)
-//   USE_PATCHBIN_FILE: prečíta /ota/patch.bin
-// Caller uvoľní cez free(). *out_size = veľkosť. NULL pri chybe/malloc zlyhaní.
+//en: fota_acquire_patch_ram — patch into a freshly malloc'd RAM buffer.
+//en:   default:           assembles from recv.log (no patch.bin, no 2× FS)
+//en:   USE_PATCHBIN_FILE: reads /ota/patch.bin
+//en: Caller frees via free(). *out_size = size. NULL on error/malloc failure.
+//sk: fota_acquire_patch_ram — patch do čerstvo malloc-nutého RAM buffra.
+//sk:   default:           zostaví z recv.log (žiadny patch.bin, žiadny 2× FS)
+//sk:   USE_PATCHBIN_FILE: prečíta /ota/patch.bin
+//sk: Caller uvoľní cez free(). *out_size = veľkosť. NULL pri chybe/malloc zlyhaní.
 // =====================================================================
 uint8_t* fota_acquire_patch_ram(uint32_t* out_size) {
 #ifdef USE_PATCHBIN_FILE
@@ -470,7 +532,7 @@ uint8_t* fota_acquire_patch_ram(uint32_t* out_size) {
 }
 
 // =====================================================================
-// Resume po reboote
+//en: Resume after reboot
 // =====================================================================
 static void try_resume() {
     FotaMetaPersist mp;
@@ -500,12 +562,13 @@ static void try_resume() {
 }
 
 // =====================================================================
-// Verejné API
+//en: Public API
 // =====================================================================
 void fota_init() {
     fota_clear();
     if (!FotaFS.begin()) {
-        // Po flasheri je 0xD4000 prepísaný raw patch dátami — reformátuj
+        //en: After the flasher, 0xD4000 is overwritten with raw patch data — reformat
+        //sk: Po flasheri je 0xD4000 prepísaný raw patch dátami — reformátuj
         FOTA_DEBUG_PRINTLN("[FOTA] FS poškodený (post-flash?), reformátujem...");
         FotaFS.format();
         if (!FotaFS.begin()) {
@@ -547,25 +610,35 @@ void fota_send_nack() {
     FOTA_DEBUG_PRINTLN("");
 }
 
-// Rozsah na počítanie chýbajúcich chunkov [*lo .. *hi].
-//  - HEADER známy (total_chunks>0): [0 .. total_chunks-1].
-//  - HEADER neznámy (total_chunks==0): okno [najnižší .. najvyšší prijatý] z bitmapy
-//    (chunky pod najnižším prijatým nevieme bez HEADER-a spoľahlivo nárokovať).
-// Vracia false = "zero info yet" (žiaden chunk a žiaden HEADER).
+//en: Range for counting missing chunks [*lo .. *hi].
+//en:  - HEADER known (total_chunks>0): [0 .. total_chunks-1].
+//en:  - HEADER unknown (total_chunks==0): window [lowest .. highest received] from the bitmap
+//en:    (chunks below the lowest received cannot be reliably claimed without the HEADER).
+//en: Returns false = "zero info yet" (no chunk and no HEADER).
+//sk: Rozsah na počítanie chýbajúcich chunkov [*lo .. *hi].
+//sk:  - HEADER známy (total_chunks>0): [0 .. total_chunks-1].
+//sk:  - HEADER neznámy (total_chunks==0): okno [najnižší .. najvyšší prijatý] z bitmapy
+//sk:    (chunky pod najnižším prijatým nevieme bez HEADER-a spoľahlivo nárokovať).
+//sk: Vracia false = "zero info yet" (žiaden chunk a žiaden HEADER).
 static bool fota_missing_range(uint16_t* lo, uint16_t* hi) {
     if (fota.total_chunks > 0) { *lo = 0; *hi = (uint16_t)(fota.total_chunks - 1u); return true; }
-    // HEADER neznámy — počítaj diery od chunku 0 po NAJVYŠŠÍ prijatý (chunky pod
-    // najnižším prijatým reálne existujú a chýbajú, preto počítame od 0).
+    //en: HEADER unknown — count holes from chunk 0 up to the HIGHEST received (chunks below
+    //en: the lowest received really exist and are missing, hence we count from 0).
+    //sk: HEADER neznámy — počítaj diery od chunku 0 po NAJVYŠŠÍ prijatý (chunky pod
+    //sk: najnižším prijatým reálne existujú a chýbajú, preto počítame od 0).
     int fhi = -1;
     for (uint16_t i = 0; i < FOTA_MAX_CHUNKS; i++)
         if (FOTA_BIT_GET(fota.bitmap, i)) fhi = (int)i;
-    if (fhi < 0) return false;   // žiaden chunk
+    if (fhi < 0) return false;   //en: no chunk
     *lo = 0; *hi = (uint16_t)fhi; return true;
 }
 
-// Vypočíta chýbajúce chunky v rozsahu z fota_missing_range().
-// Návratová hodnota: celkový počet chýbajúcich; -1 = "zero info yet".
-// out[] (ak != NULL) sa naplní prvými max_out indexmi, *out_n = koľko ich tam je.
+//en: Computes the missing chunks within the range from fota_missing_range().
+//en: Return value: total number of missing ones; -1 = "zero info yet".
+//en: out[] (if != NULL) is filled with the first max_out indices, *out_n = how many are there.
+//sk: Vypočíta chýbajúce chunky v rozsahu z fota_missing_range().
+//sk: Návratová hodnota: celkový počet chýbajúcich; -1 = "zero info yet".
+//sk: out[] (ak != NULL) sa naplní prvými max_out indexmi, *out_n = koľko ich tam je.
 int fota_calc_missing(uint16_t* out, int max_out, int* out_n) {
     if (out_n) *out_n = 0;
     uint16_t lo, hi;
@@ -576,17 +649,22 @@ int fota_calc_missing(uint16_t* out, int max_out, int* out_n) {
             if (out && n < max_out) out[n++] = i;
             total++;
         }
-        if (i == hi) break;   // bezpečné aj pre uint16_t (hi môže byť 0/65535)
+        if (i == hi) break;   //en: safe even for uint16_t (hi can be 0/65535)
     }
     if (out_n) *out_n = n;
     return total;
 }
 
-// Vypíše chýbajúce CHUNKY na Serial (bez prefixu/newline; H/S a riadok rieši volajúci).
-// Súvislý beh chýbajúcich sa zlúči do rozsahu "od-do" (napr. "4-11"), jednotlivý ako "5".
-// 'limit' = strop v TOKENOCH (jednotlivé číslo = 1 token, rozsah "od-do" = 2); <=0 = bez stropu.
-// Beh sa NEoreže — vypíše sa celý; po vyčerpaní tokenov sa zvyšok zhrnie do "+N" (počet
-// zvyšných chýbajúcich CHUNKOV). Nič netlačí ak niet rozsahu.
+//en: Prints the missing CHUNKS to Serial (no prefix/newline; H/S and the line are the caller's job).
+//en: A contiguous run of missing ones is merged into a "from-to" range (e.g. "4-11"), a single one as "5".
+//en: 'limit' = cap in TOKENS (a single number = 1 token, a "from-to" range = 2); <=0 = no cap.
+//en: A run is NOT truncated — it is printed whole; once tokens are exhausted the rest is summarized
+//en: as "+N" (count of the remaining missing CHUNKS). Prints nothing if there is no range.
+//sk: Vypíše chýbajúce CHUNKY na Serial (bez prefixu/newline; H/S a riadok rieši volajúci).
+//sk: Súvislý beh chýbajúcich sa zlúči do rozsahu "od-do" (napr. "4-11"), jednotlivý ako "5".
+//sk: 'limit' = strop v TOKENOCH (jednotlivé číslo = 1 token, rozsah "od-do" = 2); <=0 = bez stropu.
+//sk: Beh sa NEoreže — vypíše sa celý; po vyčerpaní tokenov sa zvyšok zhrnie do "+N" (počet
+//sk: zvyšných chýbajúcich CHUNKOV). Nič netlačí ak niet rozsahu.
 void fota_print_missing(int limit) {
     uint16_t lo, hi;
     if (!fota_missing_range(&lo, &hi)) return;
@@ -598,7 +676,7 @@ void fota_print_missing(int limit) {
             total++;
             if (!in_run) { rs = re = i; in_run = true; } else re = i;
         }
-        if (in_run && (!missing || i == hi)) {     // koniec behu: vypíš ho celý (ak je budget)
+        if (in_run && (!missing || i == hi)) {     //en: end of run: print it whole (if budget allows)
             if (limit <= 0 || tokens < limit) {
                 if (re != rs) { FOTA_DEBUG_PRINT("%u-%u ", (unsigned)rs, (unsigned)re); tokens += 2; }
                 else          { FOTA_DEBUG_PRINT("%u ", (unsigned)rs); tokens += 1; }
@@ -611,19 +689,23 @@ void fota_print_missing(int limit) {
     if (limit > 0 && total > shown) { FOTA_DEBUG_PRINT("+%d", total - shown); }
 }
 
-// Naformátuje chýbajúce CHUNKY do 'out' ako rozsahy s vedúcou medzerou (" 5", " 4-11").
-// 'limit' = strop v TOKENOCH (číslo = 1, rozsah = 2); <=0 = bez stropu. Beh sa NEoreže.
-// Po vyčerpaní tokenov ALEBO pri zaplnení out sa zvyšok zhrnie do " +N" (počet chunkov).
-// Vracia počet znakov. Bez veľkého stack-bufferu — píše priamo do 'out' (LoRa reply ~160 B).
+//en: Formats the missing CHUNKS into 'out' as ranges with a leading space (" 5", " 4-11").
+//en: 'limit' = cap in TOKENS (number = 1, range = 2); <=0 = no cap. A run is NOT truncated.
+//en: Once tokens are exhausted OR out fills up, the rest is summarized as " +N" (chunk count).
+//en: Returns the number of chars. No large stack buffer — writes directly into 'out' (LoRa reply ~160 B).
+//sk: Naformátuje chýbajúce CHUNKY do 'out' ako rozsahy s vedúcou medzerou (" 5", " 4-11").
+//sk: 'limit' = strop v TOKENOCH (číslo = 1, rozsah = 2); <=0 = bez stropu. Beh sa NEoreže.
+//sk: Po vyčerpaní tokenov ALEBO pri zaplnení out sa zvyšok zhrnie do " +N" (počet chunkov).
+//sk: Vracia počet znakov. Bez veľkého stack-bufferu — píše priamo do 'out' (LoRa reply ~160 B).
 int fota_format_missing(char* out, int out_sz, int limit) {
     if (out_sz <= 0) return 0;
     out[0] = 0;
     uint16_t lo, hi;
     if (!fota_missing_range(&lo, &hi)) return 0;
     char* p = out;
-    char* cap = out + out_sz - 12;                 // rezerva na " +NNNNN"
+    char* cap = out + out_sz - 12;                 //en: reserve for " +NNNNN"
     int total = 0, shown = 0, tokens = 0;
-    bool full = false;                             // buffer plný (zvyšok do "+N")
+    bool full = false;                             //en: buffer full (rest goes into "+N")
     bool in_run = false; uint16_t rs = 0, re = 0;
     for (uint16_t i = lo; ; i++) {
         bool missing = !FOTA_BIT_GET(fota.bitmap, i);
@@ -635,7 +717,7 @@ int fota_format_missing(char* out, int out_sz, int limit) {
             if (!full && (limit <= 0 || tokens < limit)) {
                 int w = (re == rs) ? snprintf(p, cap - p, " %u", (unsigned)rs)
                                    : snprintf(p, cap - p, " %u-%u", (unsigned)rs, (unsigned)re);
-                if (w < 0 || p + w >= cap) full = true;     // nezmestí → zvyšok do "+N"
+                if (w < 0 || p + w >= cap) full = true;     //en: does not fit → rest goes into "+N"
                 else { p += w; tokens += (re == rs) ? 1 : 2; shown += (int)(re - rs + 1); }
             }
             in_run = false;
@@ -646,13 +728,14 @@ int fota_format_missing(char* out, int out_sz, int limit) {
     return (int)(p - out);
 }
 
-// ---- Odložená žiadosť o flash (ACK „accepted" musí odísť PRED rebootom) ----
+//en: ---- Deferred flash request (the "accepted" ACK must go out BEFORE the reboot) ----
+//sk: ---- Odložená žiadosť o flash (ACK „accepted" musí odísť PRED rebootom) ----
 static bool s_apply_pending = false;
 void fota_request_apply()      { s_apply_pending = true; }
 bool fota_apply_pending()      { return s_apply_pending; }
 void fota_clear_apply_pending(){ s_apply_pending = false; }
 
-// Postav STATUS paket (6B). Vždy dostupný ak je session.
+//en: Build a STATUS packet (6B). Always available if there is a session.
 int fota_build_status(uint8_t* out) {
     if (fota.total_chunks == 0) return 0;
     FotaStatusPkt* p = (FotaStatusPkt*)out;
@@ -663,7 +746,7 @@ int fota_build_status(uint8_t* out) {
     return (int)sizeof(FotaStatusPkt);
 }
 
-// Postav NACK paket (2 + count*2). Vracia 0 ak nič nechýba.
+//en: Build a NACK packet (2 + count*2). Returns 0 if nothing is missing.
 int fota_build_nack(uint8_t* out) {
     if (fota.total_chunks == 0) return 0;
     FotaNackPkt* p = (FotaNackPkt*)out;
@@ -677,10 +760,12 @@ int fota_build_nack(uint8_t* out) {
 }
 
 // =====================================================================
-// Spracovanie FOTA_HEADER
+//en: FOTA_HEADER processing
 // =====================================================================
-// Zrekonštruuje 102 B META z uložených polí (MUSÍ byť bajt-identické s FotaHeaderPkt
-// a s tým, čo podpísal sender — inak Ed25519 verify zlyhá).
+//en: Reconstructs the 102 B META from the stored fields (MUST be byte-identical to
+//en: FotaHeaderPkt and to what the sender signed — otherwise Ed25519 verify fails).
+//sk: Zrekonštruuje 102 B META z uložených polí (MUSÍ byť bajt-identické s FotaHeaderPkt
+//sk: a s tým, čo podpísal sender — inak Ed25519 verify zlyhá).
 static void rebuild_meta(uint8_t out[102]) {
     out[0] = FOTA_PKT_HEADER;
     out[1] = fota.fota_prot_inf;
@@ -690,12 +775,15 @@ static void rebuild_meta(uint8_t out[102]) {
     memcpy(out + 70, fota.old_sha256, 32);
 }
 
-// Keď máme META aj SIG → over podpis a "promuj" hlavičku (nastav total_chunks).
-// Bezpečnostný invariant: total_chunks (a teda completion/flash) sa nastaví LEN po
-// úspešnom overení podpisu nad rekonštruovanou 102 B META.
+//en: Once we have both META and SIG → verify the signature and "promote" the header (set total_chunks).
+//en: Security invariant: total_chunks (and thus completion/flash) is set ONLY after a
+//en: successful signature verification over the reconstructed 102 B META.
+//sk: Keď máme META aj SIG → over podpis a "promuj" hlavičku (nastav total_chunks).
+//sk: Bezpečnostný invariant: total_chunks (a teda completion/flash) sa nastaví LEN po
+//sk: úspešnom overení podpisu nad rekonštruovanou 102 B META.
 static void try_verify_header() {
     if (!(fota.meta_recv && fota.sig_recv)) return;
-    if (fota.total_chunks > 0) return;            // už promované
+    if (fota.total_chunks > 0) return;            //en: already promoted
 
     uint8_t meta[102];
     rebuild_meta(meta);
@@ -725,7 +813,8 @@ static void try_verify_header() {
     save_meta();
     FOTA_DEBUG_PRINTLN("[FOTA] HEADER OK (META+SIG overené) chunks=%lu  mám %u chunkov", (unsigned long)tc, (unsigned)fota.recv_count);
 
-    // Chunky mohli doraziť pred hlavičkou → over COMPLETE hneď
+    //en: Chunks may have arrived before the header → check COMPLETE right away
+    //sk: Chunky mohli doraziť pred hlavičkou → over COMPLETE hneď
     if (fota.recv_count >= fota.total_chunks) {
         fota.status |= FOTA_ST_COMPLETE;
         save_meta();
@@ -739,24 +828,34 @@ static void try_verify_header() {
     }
 }
 
-// FOTA_PKT_HEADER = META (metadáta patchu, podpisované). Idempotentné (opätovné
-// prijatie len prepíše rovnaké polia). Verify+promócia spraví try_verify_header.
+//en: FOTA_PKT_HEADER = META (patch metadata, signed). Idempotent (receiving it again
+//en: just rewrites the same fields). Verify+promotion is done by try_verify_header.
+//sk: FOTA_PKT_HEADER = META (metadáta patchu, podpisované). Idempotentné (opätovné
+//sk: prijatie len prepíše rovnaké polia). Verify+promócia spraví try_verify_header.
 static void handle_meta(const uint8_t* plain, int plen) {
     if (plen < (int)sizeof(FotaHeaderPkt)) { FOTA_DEBUG_PRINTLN("[FOTA] META: krátky"); return; }
     const FotaHeaderPkt* pkt = (const FotaHeaderPkt*)plain;
 
-    // Base FW gating — META.old_sha256 MUSÍ sedieť s bežiacim FW, inak patch nepatrí
-    // tomuto zariadeniu. Platí AJ keď HEADER príde pred prvým chunkom (vtedy
-    // base_fw_size==0 a SHA sa doráta nad fw_image_size). Drop (nie ERROR) — cudzí
-    // paket nesmie zhodiť ani založiť NAŠU session. Vypíš (ako pri chunku).
+    //en: Base FW gating — META.old_sha256 MUST match the running FW, otherwise the patch
+    //en: does not belong to this device. Applies EVEN when the HEADER arrives before the
+    //en: first chunk (then base_fw_size==0 and the SHA is computed over fw_image_size).
+    //en: Drop (not ERROR) — a foreign packet must neither kill nor start OUR session.
+    //en: Print it (like for a chunk).
+    //sk: Base FW gating — META.old_sha256 MUSÍ sedieť s bežiacim FW, inak patch nepatrí
+    //sk: tomuto zariadeniu. Platí AJ keď HEADER príde pred prvým chunkom (vtedy
+    //sk: base_fw_size==0 a SHA sa doráta nad fw_image_size). Drop (nie ERROR) — cudzí
+    //sk: paket nesmie zhodiť ani založiť NAŠU session. Vypíš (ako pri chunku).
     if (!fota_meta_base_ok(pkt->old_sha256)) {
         FOTA_DEBUG_PRINTLN("[FOTA] META: base FW nezhoda — patch nie je pre toto zariadenie, drop");
         return;
     }
 
-    // Re-send identickej META? Spočítaj PRED prípadným fota_clear (ten zeruje
-    // patch_sha256). Ak je to DUP, preskočíme save_meta() — flash-zápis blokuje
-    // RX cestu (nRF52 NVMC halt) a spôsobí stratu nasledujúceho SIG/APPLY paketu.
+    //en: Re-send of an identical META? Evaluate BEFORE a possible fota_clear (it zeroes
+    //en: patch_sha256). If it is a DUP we skip save_meta() — a flash write blocks the
+    //en: RX path (nRF52 NVMC halt) and causes loss of the following SIG/APPLY packet.
+    //sk: Re-send identickej META? Spočítaj PRED prípadným fota_clear (ten zeruje
+    //sk: patch_sha256). Ak je to DUP, preskočíme save_meta() — flash-zápis blokuje
+    //sk: RX cestu (nRF52 NVMC halt) a spôsobí stratu nasledujúceho SIG/APPLY paketu.
     bool dup_meta = fota.meta_recv && (fota.status & FOTA_ST_RECEIVING)
                  && fota.patch_size == pkt->patch_size
                  && memcmp(fota.patch_sha256, pkt->patch_sha256, 32) == 0;
@@ -765,7 +864,7 @@ static void handle_meta(const uint8_t* plain, int plen) {
     bool other_patch = (fota.status & FOTA_ST_RECEIVING) && fota.total_chunks > 0 &&
                        memcmp(fota.patch_sha256, pkt->patch_sha256, 32) != 0;
     if (!(fota.status & FOTA_ST_RECEIVING) || other_patch) {
-        // Nová session (alebo iný patch beží) — vyčisti FS
+        //en: New session (or a different patch is running) — clean the FS
         FotaFS.remove(FOTA_FS_LOG);
         FotaFS.remove(FOTA_FS_PATCH);
         FotaFS.remove(FOTA_FS_BITMAP);
@@ -773,7 +872,7 @@ static void handle_meta(const uint8_t* plain, int plen) {
         fota.status = FOTA_ST_RECEIVING;
         fota.total_chunks = 0;
     }
-    (void)partial;   // partial chunky sa zachovajú (merge), nič nemažeme
+    (void)partial;   //en: partial chunks are kept (merge), nothing is deleted
 
     fota.fota_prot_inf = pkt->fota_prot_inf;
     fota.patch_size   = pkt->patch_size;
@@ -781,14 +880,14 @@ static void handle_meta(const uint8_t* plain, int plen) {
     memcpy(fota.new_sha256,   pkt->new_sha256,   32);
     memcpy(fota.old_sha256,   pkt->old_sha256,   32);
     fota.meta_recv = 1;
-    if (!dup_meta) save_meta();   // DUP re-send → žiadny flash zápis (nestalluj RX)
+    if (!dup_meta) save_meta();   //en: DUP re-send → no flash write (do not stall RX)
     FOTA_DEBUG_PRINT("[FOTA] META prijaté patch_size=%lu B  patch_sha256=", (unsigned long)pkt->patch_size);
     for (int i = 0; i < 6; i++) { FOTA_DEBUG_PRINT("%02X", (unsigned)pkt->patch_sha256[i]); }
     FOTA_DEBUG_PRINTLN("...  %s", dup_meta ? "meta_recv=1 DUP → skip save" : "NEW/CHANGED → save");
     try_verify_header();
 }
 
-// FOTA_PKT_HDR_SIG = SIG (Ed25519 podpis META). Gating cez old_sha256.
+//en: FOTA_PKT_HDR_SIG = SIG (Ed25519 signature of META). Gating via old_sha256.
 static void handle_sig(const uint8_t* plain, int plen) {
     if (plen < (int)sizeof(FotaHdrSigPkt)) { FOTA_DEBUG_PRINTLN("[FOTA] SIG: krátky"); return; }
     const FotaHdrSigPkt* pkt = (const FotaHdrSigPkt*)plain;
@@ -798,29 +897,33 @@ static void handle_sig(const uint8_t* plain, int plen) {
             FOTA_DEBUG_PRINTLN("[FOTA] SIG: old_sha256 nezhoda s META — drop"); return;
         }
     } else if (!fota_meta_base_ok(pkt->old_sha256)) {
-        // SIG prišiel pred META — over base FW VŽDY (aj pri base_fw_size==0), inak by
-        // SIG-first založil session pre cudzí patch. (SIG.old_sha256 = "gating patrí mne".)
+        //en: SIG arrived before META — verify the base FW ALWAYS (even with base_fw_size==0),
+        //en: otherwise SIG-first would start a session for a foreign patch.
+        //en: (SIG.old_sha256 = "the gating belongs to me".)
+        //sk: SIG prišiel pred META — over base FW VŽDY (aj pri base_fw_size==0), inak by
+        //sk: SIG-first založil session pre cudzí patch. (SIG.old_sha256 = "gating patrí mne".)
         FOTA_DEBUG_PRINTLN("[FOTA] SIG: base FW nezhoda — patch nie je pre toto zariadenie, drop"); return;
     }
     if (!(fota.status & FOTA_ST_RECEIVING)) { fota.status = FOTA_ST_RECEIVING; fota.total_chunks = 0; }
 
-    // Re-send identického SIG? DUP → preskoč save_meta() (rovnaký dôvod ako META).
+    //en: Re-send of an identical SIG? DUP → skip save_meta() (same reason as META).
+    //sk: Re-send identického SIG? DUP → preskoč save_meta() (rovnaký dôvod ako META).
     bool dup_sig = fota.sig_recv && fota.hdr_key_id == pkt->key_id
                 && memcmp(fota.hdr_sig, pkt->signature, 64) == 0;
     fota.hdr_key_id = pkt->key_id;
     memcpy(fota.hdr_sig, pkt->signature, 64);
     fota.sig_recv = 1;
-    if (!dup_sig) save_meta();   // DUP re-send → žiadny flash zápis (nestalluj RX)
+    if (!dup_sig) save_meta();   //en: DUP re-send → no flash write (do not stall RX)
     FOTA_DEBUG_PRINTLN("[FOTA] SIG prijaté key_id=0x%X  %s", (unsigned)pkt->key_id,
         dup_sig ? "sig_recv=1 DUP → skip save" : "NEW/CHANGED → save");
     try_verify_header();
 }
 
 // =====================================================================
-// Spracovanie FOTA_CHUNK
+//en: FOTA_CHUNK processing
 // =====================================================================
 static void handle_chunk(const uint8_t* plain, int plen) {
-    if (plen < 13) return;  // min: type(1)+idx(2)+crc(2)+old_fw_size(4)+prefix(4) = 13B
+    if (plen < 13) return;  //en: min: type(1)+idx(2)+crc(2)+old_fw_size(4)+prefix(4) = 13B
 
     const FotaChunkPkt* pkt = (const FotaChunkPkt*)plain;
     uint16_t idx = pkt->chunk_idx;
@@ -828,45 +931,58 @@ static void handle_chunk(const uint8_t* plain, int plen) {
     const uint8_t* data = pkt->data;
     uint16_t data_len = (uint16_t)(plen - (int)(sizeof(FotaChunkPkt) - FOTA_CHUNK_DATA_MAX));
 
-    // Base FW validácia — over, že chunk je pre aktuálny FW na zariadení
+    //en: Base FW validation — verify that the chunk is for the FW currently on the device
     if (!fota_base_fw_validated(pkt->old_fw_size, pkt->old_sha256_prefix)) {
         FOTA_DEBUG_PRINTLN("[FOTA] CHUNK: base FW nezhoda — drop");
         return;
     }
 
-    // Session init alebo merge:
-    //  - žiadna session → vytvor partial (total_chunks=0, base z chunku);
-    //    skoré chunky sa rovno bufferujú, HEADER ich neskôr "promuje".
-    //  - existujúca session s INÝM base FW → ignoruj (nemiešaj patche).
+    //en: Session init or merge:
+    //en:  - no session → create a partial one (total_chunks=0, base from the chunk);
+    //en:    early chunks are buffered right away, the HEADER "promotes" them later.
+    //en:  - existing session with a DIFFERENT base FW → ignore (do not mix patches).
+    //sk: Session init alebo merge:
+    //sk:  - žiadna session → vytvor partial (total_chunks=0, base z chunku);
+    //sk:    skoré chunky sa rovno bufferujú, HEADER ich neskôr "promuje".
+    //sk:  - existujúca session s INÝM base FW → ignoruj (nemiešaj patche).
     if (!(fota.status & FOTA_ST_RECEIVING)) {
         FotaFS.remove(FOTA_FS_LOG);
         FotaFS.remove(FOTA_FS_PATCH);
         FotaFS.remove(FOTA_FS_BITMAP);
         fota_clear();
         fota.old_fw_size = pkt->old_fw_size;
-        memcpy(fota.old_sha256, pkt->old_sha256_prefix, 4);  // zvyšok doplní HEADER
+        memcpy(fota.old_sha256, pkt->old_sha256_prefix, 4);  //en: the rest is filled in by the HEADER
         fota.status = FOTA_ST_RECEIVING;
-        fota.total_chunks = 0;  // čaká HEADER (alebo promóciu)
+        fota.total_chunks = 0;  //en: waiting for the HEADER (or promotion)
         save_meta();
         FOTA_DEBUG_PRINTLN("[FOTA] CHUNK: partial session z chunku (čaká HEADER)");
     } else if (memcmp(fota.old_sha256, pkt->old_sha256_prefix, 4) != 0) {
-        return;  // chunk patrí inému base FW než bežiaca session
+        return;  //en: the chunk belongs to a different base FW than the running session
     }
-    // HEADER nenesie old_fw_size — session ho preberá z chunku (base už overený
-    // vyššie cez fota_base_fw_validated). Bez tohto by ostal 0 po HEADER ceste.
+    //en: The HEADER does not carry old_fw_size — the session takes it from the chunk (the
+    //en: base was already verified above via fota_base_fw_validated). Without this it would
+    //en: stay 0 on the HEADER path.
+    //sk: HEADER nenesie old_fw_size — session ho preberá z chunku (base už overený
+    //sk: vyššie cez fota_base_fw_validated). Bez tohto by ostal 0 po HEADER ceste.
     fota.old_fw_size = pkt->old_fw_size;
 
-    // Hranica idx: kým nepoznáme total_chunks (pred HEADER), bufferuj až po MAX.
+    //en: idx bound: until total_chunks is known (before the HEADER), buffer up to MAX.
+    //sk: Hranica idx: kým nepoznáme total_chunks (pred HEADER), bufferuj až po MAX.
     uint16_t max_idx = (fota.total_chunks > 0) ? fota.total_chunks : (uint16_t)FOTA_MAX_CHUNKS;
     if (idx >= max_idx) {
         if (fota.total_chunks > 0) fota_set_error(FOTA_ERR_OVERFLOW);
         return;
     }
 
-    // Presná dĺžka chunku — AES-ECB dopĺňa plaintext na 16B blok; padding treba
-    // strhnúť, inak CRC (sender ráta cez presnú dĺžku) nesedí. Posledný chunk má
-    // dĺžku z patch_size, tú poznáme až po HEADER — preto sa posledný chunk PRED
-    // HEADER neuloží (CRC zlyhá na paddingu) a príde znova v ďalšom cykle.
+    //en: Exact chunk length — AES-ECB pads the plaintext to a 16B block; the padding must
+    //en: be stripped, otherwise the CRC (the sender computes it over the exact length) fails.
+    //en: The last chunk's length comes from patch_size, known only after the HEADER — hence
+    //en: the last chunk is NOT stored BEFORE the HEADER (its CRC fails on the padding) and
+    //en: arrives again in the next cycle.
+    //sk: Presná dĺžka chunku — AES-ECB dopĺňa plaintext na 16B blok; padding treba
+    //sk: strhnúť, inak CRC (sender ráta cez presnú dĺžku) nesedí. Posledný chunk má
+    //sk: dĺžku z patch_size, tú poznáme až po HEADER — preto sa posledný chunk PRED
+    //sk: HEADER neuloží (CRC zlyhá na paddingu) a príde znova v ďalšom cykle.
     uint16_t exp_len = FOTA_CHUNK_DATA_MAX;
     if (fota.total_chunks > 0 && idx == (uint16_t)(fota.total_chunks - 1u)) {
         uint32_t rem = fota.patch_size - (uint32_t)(fota.total_chunks - 1u) * FOTA_CHUNK_DATA_MAX;
@@ -880,7 +996,7 @@ static void handle_chunk(const uint8_t* plain, int plen) {
         return;
     }
 
-    if (FOTA_BIT_GET(fota.bitmap, idx)) return;  // duplikát s OK CRC
+    if (FOTA_BIT_GET(fota.bitmap, idx)) return;  //en: duplicate with OK CRC
 
     if (!log_append(idx, data, data_len)) {
         fota_set_error(FOTA_ERR_STORAGE); return;
@@ -915,7 +1031,7 @@ static void handle_chunk(const uint8_t* plain, int plen) {
 }
 
 // =====================================================================
-// Spracovanie FOTA_APPLY
+//en: FOTA_APPLY processing
 // =====================================================================
 static void handle_apply(const uint8_t* plain, int plen) {
     if (plen < (int)sizeof(FotaApplyPkt)) return;
@@ -927,14 +1043,14 @@ static void handle_apply(const uint8_t* plain, int plen) {
 }
 
 // =====================================================================
-// Výpis FOTA paketu
+//en: FOTA packet dump
 // =====================================================================
 void fota_print_pkt(const uint8_t* plain, int plen, float rssi, float snr) {
     if (plen < 1) return;
     uint8_t type = plain[0];
 
     switch (type) {
-        case FOTA_PKT_HEADER: {   // META
+        case FOTA_PKT_HEADER: {   //en: META
             if (plen < (int)sizeof(FotaHeaderPkt)) { FOTA_DEBUG_PRINTLN("[FOTA] META (krátky)"); return; }
             const FotaHeaderPkt* p = (const FotaHeaderPkt*)plain;
             uint32_t ps; memcpy(&ps, &p->patch_size, 4);
@@ -946,7 +1062,7 @@ void fota_print_pkt(const uint8_t* plain, int plen, float rssi, float snr) {
             FOTA_DEBUG_PRINTLN("...");
             return;
         }
-        case FOTA_PKT_HDR_SIG: {  // SIG
+        case FOTA_PKT_HDR_SIG: {  //en: SIG
             if (plen < (int)sizeof(FotaHdrSigPkt)) { FOTA_DEBUG_PRINTLN("[FOTA] SIG (krátky)"); return; }
             const FotaHdrSigPkt* p = (const FotaHdrSigPkt*)plain;
             FOTA_DEBUG_PRINT("[FOTA] SIG  v%u  key_id=0x%X  sig=", (unsigned)p->fota_prot_inf, (unsigned)p->key_id);
@@ -988,7 +1104,7 @@ void fota_print_pkt(const uint8_t* plain, int plen, float rssi, float snr) {
 }
 
 // =====================================================================
-// Dispatch
+//en: Dispatch
 // =====================================================================
 bool fota_process(const uint8_t* plain, int plen) {
     if (plen < 1) return false;
@@ -1002,27 +1118,29 @@ bool fota_process(const uint8_t* plain, int plen) {
 }
 
 // =====================================================================
-// fota_apply — spustí skutočný flash (fota_flash_via_flasher, NEVRÁTI SA pri úspechu)
+//en: fota_apply — starts the real flash (fota_flash_via_flasher, does NOT return on success)
+//sk: fota_apply — spustí skutočný flash (fota_flash_via_flasher, NEVRÁTI SA pri úspechu)
 // =====================================================================
 bool fota_apply() {
     if (!(fota.status & FOTA_ST_VERIFIED)) {
         FOTA_DEBUG_PRINTLN("[FOTA] APPLY: nie je verifikované — spusti príjem chunkov"); return false;
     }
-    uint8_t prev_status = fota.status;   // pre obnovu ak flash zlyhá (base-check a pod.)
+    uint8_t prev_status = fota.status;   //en: to restore if the flash fails (base-check etc.)
     fota.status = FOTA_ST_APPLYING;
     save_meta();
 
     extern bool fota_flash_via_flasher();
-    if (fota_flash_via_flasher()) return true;  // NEVRÁTI SA pri úspechu
+    if (fota_flash_via_flasher()) return true;  //en: does NOT return on success
 
-    // Flash zlyhal pred skokom (napr. base FW != old). Obnov VERIFIED.
+    //en: The flash failed before the jump (e.g. base FW != old). Restore VERIFIED.
+    //sk: Flash zlyhal pred skokom (napr. base FW != old). Obnov VERIFIED.
     fota.status = prev_status;
     save_meta();
     return false;
 }
 
 // =====================================================================
-// fota_clear_session — vymaže FOTA súbory z FS, resetuje RAM stav
+//en: fota_clear_session — deletes the FOTA files from the FS, resets the RAM state
 // =====================================================================
 void fota_clear_session() {
     FOTA_DEBUG_PRINTLN("[FOTA] Mazem FOTA session...");

@@ -25,29 +25,32 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-# ── Konfigurácia ──────────────────────────────────────────────────────
-FLASHER_ADDR  = 0xEB000    # adresa kde beží flasher (info; reálne z flasher.ld)
+# ── Configuration ─────────────────────────────────────────────────────
+FLASHER_ADDR  = 0xEB000    #en: address where the flasher runs (info; the real one comes from flasher.ld)
 SCRIPT_DIR    = Path(__file__).parent
 NRFOTA_DIR    = SCRIPT_DIR.parent
 FLASHER_SRC   = NRFOTA_DIR / "flasher" / "flasher.c"
-# Streaming DEFLATE — puff_stream (z nrffota/, kompiluje sa aj do hlavného FW pre dry-run).
+#en: Streaming DEFLATE — puff_stream (from nrffota/, also compiled into the main FW for the dry-run).
 PUFF_SRC      = NRFOTA_DIR / "puff_stream.c"
 PUFF_HDR      = NRFOTA_DIR / "puff_stream.h"
-# Per-board flash adresy (freestanding-safe) — single source pre flasher aj FW.
+#en: Per-board flash addresses (freestanding-safe) — single source for the flasher and the FW.
 FLASH_LAYOUT  = NRFOTA_DIR / "flash_layout.h"
 FLASHER_LD    = NRFOTA_DIR / "flasher" / "flasher.ld"
-# JEDEN board-agnostický flasher: app base (v6=0x26000 / v7=0x27000) sa neviaže
-# compile-time, FW ho odovzdá flasheru RUNTIME ako 4. arg flasher_entry (viď
-# s_app_base vo flasher.c). APP_FLASH_END (0xD4000) je board-nezávislé.
+#en: ONE board-agnostic flasher: the app base (v6=0x26000 / v7=0x27000) is not bound
+#en: compile-time, the FW hands it to the flasher at RUNTIME as the 4th arg of
+#en: flasher_entry (see s_app_base in flasher.c). APP_FLASH_END (0xD4000) is board-independent.
+#sk: JEDEN board-agnostický flasher: app base (v6=0x26000 / v7=0x27000) sa neviaže
+#sk: compile-time, FW ho odovzdá flasheru RUNTIME ako 4. arg flasher_entry (viď
+#sk: s_app_base vo flasher.c). APP_FLASH_END (0xD4000) je board-nezávislé.
 OUT_HEADER    = NRFOTA_DIR / "flasher_code.h"
 HPATCH_DIR    = NRFOTA_DIR / "hpatchlite"
 HPATCH_SRCS   = ["hpatch_lite.c"]
 HPATCH_HDRS   = ["hpatch_lite.h", "hpatch_lite_types.h", "hpatch_lite_input_cache.h"]
 
-# ── Hľadanie arm-none-eabi toolchain ─────────────────────────────────
+# ── Locating the arm-none-eabi toolchain ─────────────────────────────
 def find_toolchain():
     username = os.environ.get("USERNAME", os.environ.get("USER", ""))
-    # PLATFORMIO_CORE_DIR má prednosť (setup s core dir mimo HOME, napr. D:\FkDev\.platformio)
+    #en: PLATFORMIO_CORE_DIR takes precedence (setup with a core dir outside HOME, e.g. D:\FkDev\.platformio)
     core = os.environ.get("PLATFORMIO_CORE_DIR")
     pio_roots = [
         Path(core) / "packages" if core else None,
@@ -98,14 +101,14 @@ def main():
     print(f"[toolchain] {tc}-gcc")
 
     GCC  = tc + "-gcc"
-    LD   = tc + "-gcc"   # gcc ako linker (zahrnie libgcc, libc automaticky)
+    LD   = tc + "-gcc"   #en: gcc as the linker (pulls in libgcc, libc automatically)
     OCP  = tc + "-objcopy"
     DUMP = tc + "-objdump"
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
 
-        # Kopíruj HPatchLite, puff_stream, flash_layout, flasher do tmp (flat include)
+        #en: Copy HPatchLite, puff_stream, flash_layout, flasher into tmp (flat include)
         for fn in HPATCH_SRCS + HPATCH_HDRS:
             shutil.copy(HPATCH_DIR / fn, tmpdir / fn)
         shutil.copy(FLASHER_SRC, tmpdir / "flasher.c")
@@ -115,16 +118,18 @@ def main():
 
         cflags = [
             "-mcpu=cortex-m4", "-mthumb", "-mfloat-abi=soft",
-            "-Os", "-fno-stack-protector",   # -Os: minimalizuj veľkosť (4kB limit)
+            "-Os", "-fno-stack-protector",   #en: -Os: minimize size (4kB limit)
             "-ffunction-sections", "-fdata-sections",
             "-ffreestanding", "-nostdlib",
             f"-I{tmpdir}",
-            "-DFOTA_FLASHER_BUILD",   # zapne telá flasher.c/puff_stream.c/hpatch_lite.c
+            "-DFOTA_FLASHER_BUILD",   #en: enables the bodies of flasher.c/puff_stream.c/hpatch_lite.c
             "-DHPATCH_LITE_INCLUDE_DECOMPRESS=0",
-            "-DNDEBUG",              # zakáže assert() v hpatch_lite.c → žiadny newlib I/O
-            "-DFLASHER_DEBUG=0",     # produkcia: trace OFF (miesto), verify+DFU ON (bezpečnosť)
-            # POZN.: žiadny -DBOARD_* — flasher nepoužíva APP_FLASH_START makro,
-            # app base dostáva runtime (s_app_base). APP_FLASH_END je board-nezávislé.
+            "-DNDEBUG",              #en: disables assert() in hpatch_lite.c → no newlib I/O
+            "-DFLASHER_DEBUG=0",     #en: production: trace OFF (space), verify+DFU ON (safety)
+            #en: NOTE: no -DBOARD_* — the flasher does not use the APP_FLASH_START macro,
+            #en: the app base is passed at runtime (s_app_base). APP_FLASH_END is board-independent.
+            #sk: POZN.: žiadny -DBOARD_* — flasher nepoužíva APP_FLASH_START makro,
+            #sk: app base dostáva runtime (s_app_base). APP_FLASH_END je board-nezávislé.
         ]
 
         obj_hpatch  = tmpdir / "hpatch_lite.o"
@@ -161,8 +166,10 @@ def main():
     while len(data) % 4:
         data += b'\xff'
 
-    # POZOR: 0xEB000-0xEC000 = flasher kód (4kB), 0xEC000-0xED000 = flash trace log.
-    # Flasher kód NESMIE prekročiť 4096B, inak prepíše trace stránku.
+    #en: WARNING: 0xEB000-0xEC000 = flasher code (4kB), 0xEC000-0xED000 = flash trace log.
+    #en: The flasher code MUST NOT exceed 4096B, otherwise it overwrites the trace page.
+    #sk: POZOR: 0xEB000-0xEC000 = flasher kód (4kB), 0xEC000-0xED000 = flash trace log.
+    #sk: Flasher kód NESMIE prekročiť 4096B, inak prepíše trace stránku.
     if len(data) > 4096:
         print(f"CHYBA: flasher.bin = {len(data)}B > 4096B — prepísal by trace stránku 0xEC000!")
         sys.exit(1)

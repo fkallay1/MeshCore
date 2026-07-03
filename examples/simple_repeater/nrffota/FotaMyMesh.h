@@ -1,29 +1,41 @@
 #pragma once
 // =====================================================================
-// FotaMyMesh.h — FOTA členy a deklarácie metód triedy MyMesh.
+//en: FotaMyMesh.h — FOTA member variables and method declarations of the
+//en: MyMesh class.
+//sk: FotaMyMesh.h — FOTA členy a deklarácie metód triedy MyMesh.
 //
-// POZOR: NEinclude-ovať samostatne! Tento súbor sa vkladá VNÚTRI tela
-// `class MyMesh { ... }` v examples/simple_repeater/MyMesh.h (protected
-// sekcia) — obsahuje surové member deklarácie bez obalu triedy. Zmysel:
-// jediný 3-riadkový #include hook v MyMesh.h namiesto ~38-riadkového
-// bloku (minimálny diff vs upstream). Telá metód: FotaMyMesh.cpp.
+//en: WARNING: do NOT include standalone! This file is pasted INSIDE the
+//en: body of `class MyMesh { ... }` in examples/simple_repeater/MyMesh.h
+//en: (protected section) — it contains raw member declarations without a
+//en: class wrapper. Purpose: a single 3-line #include hook in MyMesh.h
+//en: instead of a ~38-line block (minimal diff vs upstream). Method
+//en: bodies: FotaMyMesh.cpp.
+//sk: POZOR: NEinclude-ovať samostatne! Tento súbor sa vkladá VNÚTRI tela
+//sk: `class MyMesh { ... }` v examples/simple_repeater/MyMesh.h (protected
+//sk: sekcia) — obsahuje surové member deklarácie bez obalu triedy. Zmysel:
+//sk: jediný 3-riadkový #include hook v MyMesh.h namiesto ~38-riadkového
+//sk: bloku (minimálny diff vs upstream). Telá metód: FotaMyMesh.cpp.
 //
-// Kľúčové návrhy (detaily pri definíciách): deferred spracovanie paketov
-// aj CLI (RX callstack je hlboký, 4 kB loop stack; ťažká práca beží až
-// z loop() po re-arme rádia), deferred flash (ACK musí odísť pred rebootom).
+//en: Key designs (details at the definitions): deferred handling of both
+//en: packets and CLI (the RX callstack is deep, 4 kB loop stack; heavy work
+//en: runs from loop() after the radio is re-armed), deferred flash (the ACK
+//en: must leave before reboot).
+//sk: Kľúčové návrhy (detaily pri definíciách): deferred spracovanie paketov
+//sk: aj CLI (RX callstack je hlboký, 4 kB loop stack; ťažká práca beží až
+//sk: z loop() po re-arme rádia), deferred flash (ACK musí odísť pred rebootom).
 // =====================================================================
 
   mesh::GroupChannel _fota_channel;
   bool _fota_ready;
-  uint8_t _fota_pending[MAX_PACKET_PAYLOAD];  // odložený FOTA paket pre loop()
-  int     _fota_pending_len;                  // 0 = nič nečaká
+  uint8_t _fota_pending[MAX_PACKET_PAYLOAD];  //en: deferred FOTA packet for loop()
+  int     _fota_pending_len;                  //en: 0 = nothing pending
   float   _fota_pending_rssi, _fota_pending_snr;
-  volatile uint32_t _fota_raw_rx;             // RAW rámce (pred dekódom/dešifrou)
+  volatile uint32_t _fota_raw_rx;             //en: RAW frames (before decode/decrypt)
   uint32_t          _fota_raw_last_len;
   float             _fota_raw_last_rssi, _fota_raw_last_snr;
-  bool     _fota_cli_pending;                 // odložený LoRa CLI príkaz
-  uint8_t* _fota_cli_buf;                     // požičaný FotaBuffer so snapshotom
-  unsigned long _fota_apply_deadline;         // safety net pre odložený flash
+  bool     _fota_cli_pending;                 //en: deferred LoRa CLI command
+  uint8_t* _fota_cli_buf;                     //en: borrowed FotaBuffer with the snapshot
+  unsigned long _fota_apply_deadline;         //en: safety net for the deferred flash
   int  searchChannelsByHash(const uint8_t* hash, mesh::GroupChannel channels[], int max_matches) override;
   void onGroupDataRecv(mesh::Packet* packet, uint8_t type, const mesh::GroupChannel& channel, uint8_t* data, size_t len) override;
   void fotaLogRxRaw(float snr, float rssi, const uint8_t raw[], int len);

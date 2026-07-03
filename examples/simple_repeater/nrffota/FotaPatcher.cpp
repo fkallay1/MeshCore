@@ -1,17 +1,17 @@
 // =====================================================================
-// FotaPatcher.cpp — aplikácia FOTA patchu (MeshCore port z FK_lora-sniffer)
+//en: FotaPatcher.cpp — FOTA patch application (MeshCore port from FK_lora-sniffer)
 // =====================================================================
 #ifdef WITH_LORA_FOTA
 #include "FotaPatcher.h"
 #include "FotaFs.h"
 #include "FotaState.h"
-#include "FotaBuffer.h"   // zdieľaný scratch (static .bss, nie stack)
+#include "FotaBuffer.h"   //en: shared scratch (static .bss, not stack)
 #include "FotaDebug.h"
 #include <Arduino.h>
-#include <SHA256.h>          // rweather/Crypto
-#include <nrf.h>             // NRF_NVMC, NVMC_CONFIG_WEN_*
+#include <SHA256.h>          //en: rweather/Crypto
+#include <nrf.h>             //en: NRF_NVMC, NVMC_CONFIG_WEN_*
 
-// HPatchLite — vendorovaná v nrffota/hpatchlite/ (include path z build_flags)
+//en: HPatchLite — vendored in nrffota/hpatchlite/ (include path from build_flags)
 #if __has_include("hpatch_lite.h")
   #include "hpatch_lite.h"
   #define FOTA_HAS_HPATCH 1
@@ -19,12 +19,15 @@
   #define FOTA_HAS_HPATCH 0
 #endif
 
-// Streaming DEFLATE decompressor pre ZLIB dry-run
+//en: Streaming DEFLATE decompressor for the ZLIB dry-run
 #include "puff_stream.h"
 
-// JEDEN board-agnostický flasher blob — app base dostáva RUNTIME (4. arg flasher_entry,
-// viď s_app_base vo flasher.c), nie compile-time. Generuj:
-//   python nrffota/tools/build_flasher.py
+//en: ONE board-agnostic flasher blob — the app base is passed at RUNTIME (4th arg of
+//en: flasher_entry, see s_app_base in flasher.c), not compile-time. Generate with:
+//en:   python nrffota/tools/build_flasher.py
+//sk: JEDEN board-agnostický flasher blob — app base dostáva RUNTIME (4. arg flasher_entry,
+//sk: viď s_app_base vo flasher.c), nie compile-time. Generuj:
+//sk:   python nrffota/tools/build_flasher.py
 #if __has_include("flasher_code.h")
   #include "flasher_code.h"
   #define FOTA_HAS_FLASHER 1
@@ -33,9 +36,11 @@
 #endif
 
 extern const FotaState* fota_get_state();
-// Patch do RAM: default zostaví z recv.log, -D USE_PATCHBIN_FILE číta patch.bin
+//en: Patch into RAM: by default assembled from recv.log, -D USE_PATCHBIN_FILE reads patch.bin
+//sk: Patch do RAM: default zostaví z recv.log, -D USE_PATCHBIN_FILE číta patch.bin
 extern uint8_t* fota_acquire_patch_ram(uint32_t* out_size);
-// App base z linker symbolu (v6=0x26000, v7=0x27000) — viac robustné než makro.
+//en: App base from a linker symbol (v6=0x26000, v7=0x27000) — more robust than a macro.
+//sk: App base z linker symbolu (v6=0x26000, v7=0x27000) — viac robustné než makro.
 extern uint32_t fota_running_fw_base(void);
 
 __attribute__((unused))
@@ -43,8 +48,11 @@ static void print_sha16(const uint8_t* h) {
     for (int i = 0; i < 16; i++) { FOTA_DEBUG_PRINT("%02X", (unsigned)h[i]); }
 }
 
-// Overí, že aktuálne bežiaci FW (app flash @ APP_FLASH_START) zodpovedá 'old'
-// z ktorého fota_sender.py vygeneroval patch. Ak base nesedí → NEPREPISOVAŤ.
+//en: Verifies that the currently running FW (app flash @ APP_FLASH_START) matches the
+//en: 'old' from which fota_sender.py generated the patch. If the base doesn't match →
+//en: do NOT rewrite.
+//sk: Overí, že aktuálne bežiaci FW (app flash @ APP_FLASH_START) zodpovedá 'old'
+//sk: z ktorého fota_sender.py vygeneroval patch. Ak base nesedí → NEPREPISOVAŤ.
 static bool fota_verify_old_fw() {
     const FotaState* st = fota_get_state();
     bool all_zero = true;
@@ -72,7 +80,7 @@ static bool fota_verify_old_fw() {
 }
 
 #if FOTA_HAS_FLASHER
-// ── NVMC (priamy prístup po sd_softdevice_disable) ─────────────────────
+// ── NVMC (direct access after sd_softdevice_disable) ───────────────────
 static void nvmc_erase_page(uint32_t addr) {
     while (!NRF_NVMC->READY);
     NRF_NVMC->CONFIG = NVMC_CONFIG_WEN_Een;
@@ -113,13 +121,15 @@ static bool ensure_flasher_written() {
 #endif
 
 // ================================================================
-// HPatchLite callbacky
-// Patch formát: HPatchLite inplaceB (hdiffi -inplaceB old.bin new.bin patch.bin)
+//en: HPatchLite callbacks
+//en: Patch format: HPatchLite inplaceB (hdiffi -inplaceB old.bin new.bin patch.bin)
 // ================================================================
 #if FOTA_HAS_HPATCH
 
-// Sekvenčné čítanie z File (ponechané pre prípadné súborové cesty; teraz sa patch
-// načítava do RAM cez fota_acquire_patch_ram, takže je nepoužité → unused)
+//en: Sequential read from File (kept for possible file-based paths; the patch is now
+//en: loaded into RAM via fota_acquire_patch_ram, so it is unused)
+//sk: Sekvenčné čítanie z File (ponechané pre prípadné súborové cesty; teraz sa patch
+//sk: načítava do RAM cez fota_acquire_patch_ram, takže je nepoužité → unused)
 __attribute__((unused))
 static hpi_BOOL patch_file_read(hpi_TInputStreamHandle h,
                                 hpi_byte* out, hpi_size_t* size) {
@@ -131,9 +141,10 @@ static hpi_BOOL patch_file_read(hpi_TInputStreamHandle h,
     return hpi_TRUE;
 }
 
-// SHA256-only listener pre test mód (hpatchi_listener_t musí byť prvý člen)
+//en: SHA256-only listener for test mode (hpatchi_listener_t must be the first member)
+//sk: SHA256-only listener pre test mód (hpatchi_listener_t musí byť prvý člen)
 typedef struct {
-    hpatchi_listener_t base;   // MUSÍ byť prvý
+    hpatchi_listener_t base;   //en: MUST be first
     SHA256   sha;
     uint32_t written;
 } ShaListener;
@@ -154,10 +165,10 @@ static hpi_BOOL sha_write_new(hpatchi_listener_t* l,
     return hpi_TRUE;
 }
 
-// Magic komprimovaného patch formátu: 'Z','L','I','B' (LE uint32)
+//en: Magic of the compressed patch format: 'Z','L','I','B' (LE uint32)
 #define ZPATCH_MAGIC  0x42494C5Au
 
-// HPatchLite read_diff callback — streaming DEFLATE z RAM buffra
+//en: HPatchLite read_diff callback — streaming DEFLATE from a RAM buffer
 static hpi_BOOL patch_zlib_read(hpi_TInputStreamHandle h,
                                 hpi_byte* out, hpi_size_t* size) {
     if (*size == 0) return hpi_TRUE;
@@ -167,7 +178,7 @@ static hpi_BOOL patch_zlib_read(hpi_TInputStreamHandle h,
     return (n > 0 || ps->state == PS_DONE) ? hpi_TRUE : hpi_FALSE;
 }
 
-// Sekvenčné čítanie z RAM buffra (pre nekomprimovaný patch zostavený do RAM)
+//en: Sequential read from a RAM buffer (for an uncompressed patch assembled into RAM)
 typedef struct { const uint8_t* p; uint32_t len; uint32_t pos; } MemStream;
 static hpi_BOOL patch_mem_read(hpi_TInputStreamHandle h,
                                hpi_byte* out, hpi_size_t* size) {
@@ -182,27 +193,28 @@ static hpi_BOOL patch_mem_read(hpi_TInputStreamHandle h,
     return hpi_TRUE;
 }
 
-// Krátky strojový dôvod do 'err' (ASCII — ide aj cez LoRa CLI). err môže byť NULL.
+//en: Short machine-readable reason into 'err' (ASCII — also goes over the LoRa CLI). err may be NULL.
+//sk: Krátky strojový dôvod do 'err' (ASCII — ide aj cez LoRa CLI). err môže byť NULL.
 static void set_err(char* err, size_t n, const char* msg) {
     if (err && n) { strncpy(err, msg, n - 1); err[n - 1] = 0; }
 }
 
-// ── TEST MÓD: SHA256-only, nič nezapisuje do flash ────────────────────
-// err/err_sz (voliteľné, môže byť NULL): krátky dôvod FAIL alebo poznámka pri OK.
+// ── TEST MODE: SHA256-only, writes nothing to flash ───────────────────
+//en: err/err_sz (optional, may be NULL): short FAIL reason or a note on OK.
 bool fota_patch_to_file(char* err, size_t err_sz) {
     const FotaState* st = fota_get_state();
     FOTA_DEBUG_PRINTLN("[PATCH] Test: SHA256 verify (bez flash)...");
-    fota_verify_old_fw();   // len informatívne v dry-rune (neblokuje test)
+    fota_verify_old_fw();   //en: informative only in the dry-run (does not block the test)
 
     uint32_t patch_size = 0;
-    uint8_t* patch_buf = fota_acquire_patch_ram(&patch_size);   // RAM: z recv.log | patch.bin
+    uint8_t* patch_buf = fota_acquire_patch_ram(&patch_size);   //en: RAM: from recv.log | patch.bin
     if (!patch_buf) { FOTA_DEBUG_PRINTLN("[PATCH] patch nedostupný"); set_err(err, err_sz, "ziadne patch data"); return false; }
 
-    // Detekuj komprimovaný formát (magic 'ZLIB' v prvých 4 bajtoch)
+    //en: Detect the compressed format (magic 'ZLIB' in the first 4 bytes)
     uint32_t magic = 0;
     if (patch_size >= 4) memcpy(&magic, patch_buf, 4);
     if (magic == ZPATCH_MAGIC) {
-        // ── ZLIB streaming dry-run (komprimovaný patch v RAM) ──────────────
+        // ── ZLIB streaming dry-run (compressed patch in RAM) ───────────────
         uint32_t uncomp_sz = 0, new_fw_sz = 0;
         memcpy(&uncomp_sz, patch_buf + 4, 4);
         memcpy(&new_fw_sz, patch_buf + 8, 4);
@@ -217,7 +229,7 @@ bool fota_patch_to_file(char* err, size_t err_sz) {
             set_err(err, err_sz, "OOM puff_stream");
             return false;
         }
-        puff_stream_init(ps, patch_buf + 12, comp_sz);   // komprimované telo z RAM
+        puff_stream_init(ps, patch_buf + 12, comp_sz);   //en: compressed body from RAM
 
         hpi_compressType compress_type = hpi_compressType_no;
         hpi_pos_t new_size = 0, uncomp_size_hpi = 0;
@@ -239,8 +251,10 @@ bool fota_patch_to_file(char* err, size_t err_sz) {
         sl.base.read_old  = sha_read_old;
         sl.base.write_new = sha_write_new;
 
-        // scratch z FotaBuffer (static .bss, NIE stack — LoRa RX callstack je
-        // tesný; 2 kB na stacku tu pretekalo loop-task stack → mŕtve rádio).
+        //en: scratch from FotaBuffer (static .bss, NOT the stack — the LoRa RX callstack
+        //en: is tight; 2 kB on the stack here overflowed the loop-task stack → dead radio).
+        //sk: scratch z FotaBuffer (static .bss, NIE stack — LoRa RX callstack je
+        //sk: tesný; 2 kB na stacku tu pretekalo loop-task stack → mŕtve rádio).
         uint8_t* cache = fota_get_buffer(FOTA_BUF_CAP);
         if (!cache) { free(ps); free(patch_buf); FOTA_DEBUG_PRINTLN("[PATCH] scratch buffer nedostupný"); set_err(err, err_sz, "scratch busy"); return false; }
         bool ok = (bool)hpatch_lite_patch(&sl.base, new_size, cache, FOTA_BUF_CAP);
@@ -281,7 +295,7 @@ bool fota_patch_to_file(char* err, size_t err_sz) {
         return true;
     }
 
-    // Pôvodný formát: nekomprimovaný HPatchLite (z RAM cez MemStream)
+    //en: Original format: uncompressed HPatchLite (from RAM via MemStream)
     MemStream ms = { patch_buf, patch_size, 0 };
     hpi_compressType compress_type = hpi_compressType_no;
     hpi_pos_t new_size = 0, uncomp_size = 0;
@@ -310,7 +324,7 @@ bool fota_patch_to_file(char* err, size_t err_sz) {
     sl.base.read_old  = sha_read_old;
     sl.base.write_new = sha_write_new;
 
-    // scratch z FotaBuffer (static .bss, NIE stack — viď komentár vyššie)
+    //en: scratch from FotaBuffer (static .bss, NOT the stack — see comment above)
     uint8_t* cache = fota_get_buffer(FOTA_BUF_CAP);
     if (!cache) { free(patch_buf); FOTA_DEBUG_PRINTLN("[PATCH] scratch buffer nedostupný"); set_err(err, err_sz, "scratch busy"); return false; }
     bool ok = (bool)hpatch_lite_patch(&sl.base, new_size, cache, FOTA_BUF_CAP);
@@ -342,22 +356,25 @@ bool fota_patch_to_file(char* err, size_t err_sz) {
     return true;
 }
 
-// ── PRODUKČNÝ MÓD: patch→RAM → jump flasher@0xEB000 ──────────────────
+// ── PRODUCTION MODE: patch→RAM → jump flasher@0xEB000 ────────────────
 bool fota_flash_via_flasher() {
 #if !FOTA_HAS_FLASHER
     FOTA_DEBUG_PRINTLN("[FLASHER] flasher_code.h chýba.");
     FOTA_DEBUG_PRINTLN("[FLASHER] Spusti: python nrffota/tools/build_flasher.py");
     return false;
 #else
-    // ── 0: overenie base FW ──
+    // ── 0: base FW verification ──
     if (!fota_verify_old_fw()) {
         FOTA_DEBUG_PRINTLN("[FLASHER] PRERUŠENÉ — base FW nesedí, neriskujem prepis.");
         return false;
     }
 
-    // ── 1: načítaj patch do RAM (recv.log assembly | patch.bin), new_fw_size z hlavičky ──
-    //    fota_acquire_patch_ram: default zostaví z recv.log priamo do RAM (žiadny patch.bin),
-    //    -D USE_PATCHBIN_FILE číta /ota/patch.bin. FS sa použije TU, pred FotaFS.end() nižšie.
+    // ── 1: load the patch into RAM (recv.log assembly | patch.bin), new_fw_size from header ──
+    //en: fota_acquire_patch_ram: by default assembles from recv.log straight into RAM
+    //en: (no patch.bin), -D USE_PATCHBIN_FILE reads /ota/patch.bin. The FS is used HERE,
+    //en: before FotaFS.end() below.
+    //sk: fota_acquire_patch_ram: default zostaví z recv.log priamo do RAM (žiadny patch.bin),
+    //sk: -D USE_PATCHBIN_FILE číta /ota/patch.bin. FS sa použije TU, pred FotaFS.end() nižšie.
     uint32_t patch_size = 0;
     uint8_t* patch_buf = fota_acquire_patch_ram(&patch_size);
     if (!patch_buf) {
@@ -402,19 +419,23 @@ bool fota_flash_via_flasher() {
     }
     FOTA_DEBUG_PRINTLN("[FLASHER] Patch v RAM (%lu B)", (unsigned long)patch_size);
 
-    const uint32_t PATCH_RAM_ADDR = 0x20000000u;   // zhodné s flasher.c
-    if (patch_size > 0x20000u) {   // 128kB — limit RAM oblasti pre patch (flasher.ld)
+    const uint32_t PATCH_RAM_ADDR = 0x20000000u;   //en: matches flasher.c
+    if (patch_size > 0x20000u) {   //en: 128kB — limit of the patch RAM region (flasher.ld)
         free(patch_buf);
         FOTA_DEBUG_PRINTLN("[FLASHER] Patch > 128kB — nezmestí sa do RAM oblasti");
         return false;
     }
 
-    // ── 3: zavrieť CustomLFS (len odmount — FS dáta vo flash ZOSTANÚ) ──
+    //en: ── 3: close CustomLFS (unmount only — FS data STAYS in flash) ──
+    //sk: ── 3: zavrieť CustomLFS (len odmount — FS dáta vo flash ZOSTANÚ) ──
     FotaFS.end();
 
-    // ── 4: BYE + disable SoftDevice (USB CDC zmizne) ──
-    // app_base z linker symbolu (v6=0x26000, v7=0x27000) — odovzdáme flasheru ako
-    // 4. arg, takže je JEDEN board-agnostický blob (nie compile-time per-board).
+    //en: ── 4: BYE + disable SoftDevice (USB CDC disappears) ──
+    //en: app_base from a linker symbol (v6=0x26000, v7=0x27000) — passed to the flasher
+    //en: as the 4th arg, so there is ONE board-agnostic blob (not compile-time per-board).
+    //sk: ── 4: BYE + disable SoftDevice (USB CDC zmizne) ──
+    //sk: app_base z linker symbolu (v6=0x26000, v7=0x27000) — odovzdáme flasheru ako
+    //sk: 4. arg, takže je JEDEN board-agnostický blob (nie compile-time per-board).
     uint32_t app_base = fota_running_fw_base();
     typedef void(*flasher_fn_t)(uint32_t, uint32_t, uint32_t, uint32_t);
     FOTA_DEBUG_PRINTLN("[FLASHER] → 0x%X [BYE] (streaming)", (unsigned)FLASHER_CODE_ADDR);
@@ -423,26 +444,36 @@ bool fota_flash_via_flasher() {
     extern uint32_t sd_softdevice_disable(void);
     sd_softdevice_disable();
 
-    // Po sd_disable ZAKÁŽ IRQ pred NVMC zápisom + skokom na flasher. Bez tohto
-    // môže počas NVMC okna prísť rádio DIO1 / SysTick ISR → skok cez VTOR do app
-    // handlera (SD už disabled, FS odmountovaný) → fault/hang (flasher nenabehne
-    // alebo s pokazeným blobom; prázdny trace). sd_disable necháme s IRQ povolenými
-    // (SVC sa dokončí); chránime kritické NVMC okno. Flasher si robí vlastný cpsid i.
+    //en: After sd_disable, DISABLE IRQs before the NVMC write + jump to the flasher.
+    //en: Without this, a radio DIO1 / SysTick ISR can arrive during the NVMC window →
+    //en: jump via VTOR into an app handler (SD already disabled, FS unmounted) →
+    //en: fault/hang (the flasher doesn't start, or starts with a corrupted blob; empty
+    //en: trace). We leave sd_disable with IRQs enabled (the SVC completes); we protect
+    //en: the critical NVMC window. The flasher does its own cpsid i.
+    //sk: Po sd_disable ZAKÁŽ IRQ pred NVMC zápisom + skokom na flasher. Bez tohto
+    //sk: môže počas NVMC okna prísť rádio DIO1 / SysTick ISR → skok cez VTOR do app
+    //sk: handlera (SD už disabled, FS odmountovaný) → fault/hang (flasher nenabehne
+    //sk: alebo s pokazeným blobom; prázdny trace). sd_disable necháme s IRQ povolenými
+    //sk: (SVC sa dokončí); chránime kritické NVMC okno. Flasher si robí vlastný cpsid i.
     __disable_irq();
 
-    // ── 5: flasher kód do 0xEB000 (nvmc, až po sd_disable) ──
+    //en: ── 5: flasher code into 0xEB000 (nvmc, only after sd_disable) ──
+    //sk: ── 5: flasher kód do 0xEB000 (nvmc, až po sd_disable) ──
     if (!ensure_flasher_written()) {
         NVIC_SystemReset();
     }
 
-    // ── 6: komprimovaný patch do RAM @ PATCH_RAM_ADDR. Po tomto bode ŽIADNE
-    //       Serial (USB buffer mohol byť prepísaný). FS sa NEdotýka. ──
+    //en: ── 6: compressed patch into RAM @ PATCH_RAM_ADDR. Past this point NO
+    //en:       Serial (the USB buffer may have been overwritten). FS is NOT touched. ──
+    //sk: ── 6: komprimovaný patch do RAM @ PATCH_RAM_ADDR. Po tomto bode ŽIADNE
+    //sk:       Serial (USB buffer mohol byť prepísaný). FS sa NEdotýka. ──
     memmove((void*)PATCH_RAM_ADDR, patch_buf, patch_size);
 
-    // ── 7: skok na flasher — NEVRÁTI SA. ──
+    //en: ── 7: jump to the flasher — DOES NOT RETURN. ──
+    //sk: ── 7: skok na flasher — NEVRÁTI SA. ──
     ((flasher_fn_t)(FLASHER_CODE_ADDR | 1u))(PATCH_RAM_ADDR, patch_size, new_fw_size, app_base);
     while (1);
-    return false;  // unreachable
+    return false;  //en: unreachable
 #endif  // FOTA_HAS_FLASHER
 }
 
@@ -470,11 +501,11 @@ static uint32_t s_resetreas_raw = 0;
 void fota_check_flasher_debug() {
     s_gpret2_raw = NRF_POWER_GPREGRET2 & 0xFFu;
     if (s_gpret2_raw != 0u) {
-        NRF_POWER_GPREGRET2 = 0u;          // vymaž (SD ešte nebeží → priamy zápis OK)
+        NRF_POWER_GPREGRET2 = 0u;          //en: clear it (SD not running yet → direct write OK)
         s_flasher_step = (uint8_t)s_gpret2_raw;
     }
     s_resetreas_raw = NRF_POWER_RESETREAS;
-    NRF_POWER_RESETREAS = s_resetreas_raw; // write-1-to-clear
+    NRF_POWER_RESETREAS = s_resetreas_raw; //en: write-1-to-clear
 }
 
 __attribute__((unused))
@@ -507,7 +538,8 @@ static void print_step(uint8_t step) {
     }
 }
 
-// ── Flash trace log — flasher appenduje eventy do FLASH_TRACE_ADDR ──────
+//en: ── Flash trace log — the flasher appends events to FLASH_TRACE_ADDR ──
+//sk: ── Flash trace log — flasher appenduje eventy do FLASH_TRACE_ADDR ──
 #define FLASH_TRACE_MAX  512u
 static void fota_print_flasher_trace() {
     const volatile uint32_t* t = (const volatile uint32_t*)FLASH_TRACE_ADDR;
@@ -545,7 +577,8 @@ void fota_print_flasher_debug() {
     fota_print_flasher_trace();
 }
 
-// ── DEBUG: dekomprimuj patch.bin cez puff_stream, vypíš FNV celého raw ──────
+//en: ── DEBUG: decompress patch.bin via puff_stream, print the FNV of the whole raw output ──
+//sk: ── DEBUG: dekomprimuj patch.bin cez puff_stream, vypíš FNV celého raw ──
 void fota_debug_decompress() {
     FOTA_DEBUG_PRINT("[DBG] app flash @0x%X [0:16]= ", (unsigned)fota_running_fw_base());
     const uint8_t* app = (const uint8_t*)fota_running_fw_base();

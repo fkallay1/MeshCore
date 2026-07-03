@@ -97,3 +97,9 @@ CLI commands: `fota status | verify | flash | clear | decompress | nack | dbg | 
 - Use `extern RADIO_CLASS radio;` for direct radio access (e.g. in `MyMesh.cpp`).
 - `#ifdef` guards are preferred over compile-time flags for optional features.
 - Deferred processing pattern: `onGroupDataRecv()` copies data to buffer, heavy work happens in `loop()`.
+- **Bilingual comments (fork FOTA code only)**: line comments in `nrffota/`, the MyMesh FOTA
+  hooks and the FOTA env sections of `variants/*/platformio.ini` are marked `//en: ` / `//sk: `
+  (ini `;en:`/`;sk:`, py `#en:`/`#sk:`). English is canonical (upstream PR), Slovak is kept for
+  substantive "why" comments; trivial ones are en-only. Maintain BOTH when editing such a comment.
+  One language can be stripped with `python fkclaude/tools/strip_lang_comments.py --keep en|sk <paths>`
+  (e.g. `--keep en` on a PR branch). Unmarked comments = structural tags / third-party — leave alone.

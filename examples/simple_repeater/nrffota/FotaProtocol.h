@@ -1,102 +1,126 @@
 #pragma once
 // =====================================================================
-// FotaProtocol.h — on-air protokol FOTA-over-LoRa (MeshCore port)
-//
-// Port z FK_lora-sniffer/src/fota_proto.h. Portable: žiadne Arduino
-// závislosti, použiteľné aj na PC strane (fota_sender.py / ctypes).
-//
-// V MeshCore prichádzajú FOTA pakety zabalené v GRP_DATA (AES-128-ECB +
-// HMAC-SHA256), repeater ich dešifruje cez mesh::Utils::MACThenDecrypt
-// a v onGroupDataRecv() odovzdá do FotaReceiver. Plaintext má tvar:
-//   [ts 4B LE][fota_type 1B][...]   — FOTA payload začína na fota_type.
+//en: FotaProtocol.h — FOTA-over-LoRa on-air protocol (MeshCore port)
+//en:
+//en: Port of FK_lora-sniffer/src/fota_proto.h. Portable: no Arduino
+//en: dependencies, usable on the PC side too (fota_sender.py / ctypes).
+//en:
+//en: In MeshCore, FOTA packets arrive wrapped in GRP_DATA (AES-128-ECB +
+//en: HMAC-SHA256); the repeater decrypts them via mesh::Utils::MACThenDecrypt
+//en: and hands them to FotaReceiver in onGroupDataRecv(). The plaintext is:
+//en:   [ts 4B LE][fota_type 1B][...]   — the FOTA payload starts at fota_type.
+//sk: FotaProtocol.h — on-air protokol FOTA-over-LoRa (MeshCore port)
+//sk:
+//sk: Port z FK_lora-sniffer/src/fota_proto.h. Portable: žiadne Arduino
+//sk: závislosti, použiteľné aj na PC strane (fota_sender.py / ctypes).
+//sk:
+//sk: V MeshCore prichádzajú FOTA pakety zabalené v GRP_DATA (AES-128-ECB +
+//sk: HMAC-SHA256), repeater ich dešifruje cez mesh::Utils::MACThenDecrypt
+//sk: a v onGroupDataRecv() odovzdá do FotaReceiver. Plaintext má tvar:
+//sk:   [ts 4B LE][fota_type 1B][...]   — FOTA payload začína na fota_type.
 // =====================================================================
 #include <stdint.h>
 
 // =====================================================================
-// Typy FOTA paketov (prvý bajt FOTA payloadu — za 4B timestampom GRP_DATA)
+//en: FOTA packet types (first byte of the FOTA payload — after the 4B GRP_DATA timestamp)
 // =====================================================================
-#define FOTA_PKT_HEADER    0x10   // PC → zariadenie: META (metadáta patchu, podpisované)
-#define FOTA_PKT_CHUNK    0x11   // PC → zariadenie: jeden chunk patch dát
-#define FOTA_PKT_APPLY    0x12   // PC → zariadenie: aplikuj patch
-#define FOTA_PKT_HDR_SIG   0x13   // PC → zariadenie: SIG (Ed25519 podpis META) — 2. časť HEADER
-#define FOTA_PKT_STATUS   0x20   // zariadenie → PC: stav prijímania
-#define FOTA_PKT_NACK     0x21   // zariadenie → PC: chýbajúce chunky
+#define FOTA_PKT_HEADER    0x10   //en: PC → device: META (patch metadata, signed)
+#define FOTA_PKT_CHUNK    0x11   //en: PC → device: one chunk of patch data
+#define FOTA_PKT_APPLY    0x12   //en: PC → device: apply the patch
+#define FOTA_PKT_HDR_SIG   0x13   //en: PC → device: SIG (Ed25519 signature of META) — 2nd part of HEADER
+#define FOTA_PKT_STATUS   0x20   //en: device → PC: reception status
+#define FOTA_PKT_NACK     0x21   //en: device → PC: missing chunks
 
-// Zjednotený FOTA formát v0 (bridge aj companion) — viď
-// fkclaude/docs/superpowers/specs/2026-06-23-fota-companion-mcpy-design.md
-#define FOTA_MAGIC         0x07A0 // GRP_DATA data_type pre FOTA (gating diskriminátor)
-#define FOTA_PROT_INF_V0   0x00   // verzia FOTA protokolu/štruktúr
+//en: Unified FOTA format v0 (bridge and companion) — see
+//en: fkclaude/docs/superpowers/specs/2026-06-23-fota-companion-mcpy-design.md
+//sk: Zjednotený FOTA formát v0 (bridge aj companion) — viď
+//sk: fkclaude/docs/superpowers/specs/2026-06-23-fota-companion-mcpy-design.md
+#define FOTA_MAGIC         0x07A0 //en: GRP_DATA data_type for FOTA (gating discriminator)
+#define FOTA_PROT_INF_V0   0x00   //en: version of the FOTA protocol/structs
 
-// Max dát v jednom FOTA_CHUNK. Cez štandardný GRP_DATA (sendGroupData) je
-// data_len ≤ MAX_GROUP_DATA_LENGTH(165); data = [ts 4B] + chunk(13 + DATA),
-// teda DATA ≤ 148. Volíme 144 s rezervou (zhodné s fota_sender.py FOTA_CHUNK_DATA).
+//en: Max data in one FOTA_CHUNK. Via standard GRP_DATA (sendGroupData),
+//en: data_len ≤ MAX_GROUP_DATA_LENGTH(165); data = [ts 4B] + chunk(13 + DATA),
+//en: so DATA ≤ 148. We pick 144 with margin (matches fota_sender.py FOTA_CHUNK_DATA).
+//sk: Max dát v jednom FOTA_CHUNK. Cez štandardný GRP_DATA (sendGroupData) je
+//sk: data_len ≤ MAX_GROUP_DATA_LENGTH(165); data = [ts 4B] + chunk(13 + DATA),
+//sk: teda DATA ≤ 148. Volíme 144 s rezervou (zhodné s fota_sender.py FOTA_CHUNK_DATA).
 #define FOTA_CHUNK_DATA_MAX  144
 
-// Max chunkov, ktoré zmestíme do jedného FOTA_NACK
+//en: Max chunks that fit into one FOTA_NACK
 #define FOTA_NACK_MAX_IDX    60
 
 // =====================================================================
-// On-air štruktúry (packed, bez paddingu)
+//en: On-air structures (packed, no padding)
 // =====================================================================
 
-// FOTA_PKT_HEADER — META, 102 B = CELÁ podpisovaná správa (Ed25519). Zmestí sa do
-// GRP_DATA (data_len = 4B ts + 102 = 106 ≤ 165). total_chunks sa NEposiela
-// (odvodí sa z patch_size/FOTA_CHUNK_DATA_MAX), old_sha256_prefix sa NEposiela
-// (= old_sha256[:4]) — obe sú funkciou podpísaných polí → integrita zachovaná.
+//en: FOTA_PKT_HEADER — META, 102 B = the WHOLE signed message (Ed25519). Fits into
+//en: GRP_DATA (data_len = 4B ts + 102 = 106 ≤ 165). total_chunks is NOT sent
+//en: (derived from patch_size/FOTA_CHUNK_DATA_MAX), old_sha256_prefix is NOT sent
+//en: (= old_sha256[:4]) — both are functions of signed fields → integrity preserved.
+//sk: FOTA_PKT_HEADER — META, 102 B = CELÁ podpisovaná správa (Ed25519). Zmestí sa do
+//sk: GRP_DATA (data_len = 4B ts + 102 = 106 ≤ 165). total_chunks sa NEposiela
+//sk: (odvodí sa z patch_size/FOTA_CHUNK_DATA_MAX), old_sha256_prefix sa NEposiela
+//sk: (= old_sha256[:4]) — obe sú funkciou podpísaných polí → integrita zachovaná.
 typedef struct __attribute__((packed)) {
-    uint8_t  type;             // FOTA_PKT_HEADER
-    uint8_t  fota_prot_inf;     // FOTA_PROT_INF_V0 — verzia protokolu/štruktúr
-    uint32_t patch_size;       // LE [bajty]; total_chunks = ceil(patch_size/FOTA_CHUNK_DATA_MAX)
-    uint8_t  patch_sha256[32]; // SHA256 patch.bin (na overenie príjmu)
-    uint8_t  new_sha256[32];   // SHA256 nového firmware po aplikácii patchu
-    uint8_t  old_sha256[32];   // SHA256 starého fw — base gating + overenie pred prepisom
-} FotaHeaderPkt;                // = 102 B
+    uint8_t  type;             //en: FOTA_PKT_HEADER
+    uint8_t  fota_prot_inf;     //en: FOTA_PROT_INF_V0 — protocol/struct version
+    uint32_t patch_size;       //en: LE [bytes]; total_chunks = ceil(patch_size/FOTA_CHUNK_DATA_MAX)
+    uint8_t  patch_sha256[32]; //en: SHA256 of patch.bin (to verify reception)
+    uint8_t  new_sha256[32];   //en: SHA256 of the new firmware after applying the patch
+    uint8_t  old_sha256[32];   //en: SHA256 of the old fw — base gating + verification before rewrite
+} FotaHeaderPkt;                //en: = 102 B
 
-// FOTA_PKT_HDR_SIG — SIG, 99 B (2. časť HEADER). data_len = 4 + 99 = 103 ≤ 165.
-// Podpis kryje LEN 102 B META; key_id mimo podpisu (zlý key_id → verify zlyhá).
+//en: FOTA_PKT_HDR_SIG — SIG, 99 B (2nd part of HEADER). data_len = 4 + 99 = 103 ≤ 165.
+//en: The signature covers ONLY the 102 B META; key_id is outside the signature
+//en: (a wrong key_id → verify fails).
+//sk: FOTA_PKT_HDR_SIG — SIG, 99 B (2. časť HEADER). data_len = 4 + 99 = 103 ≤ 165.
+//sk: Podpis kryje LEN 102 B META; key_id mimo podpisu (zlý key_id → verify zlyhá).
 typedef struct __attribute__((packed)) {
-    uint8_t  type;             // FOTA_PKT_HDR_SIG
-    uint8_t  fota_prot_inf;     // FOTA_PROT_INF_V0 (zhodné s META; META je autoritatívne)
-    uint8_t  old_sha256[32];   // gating "patrí mne" (== META.old_sha256, pre-filter)
-    uint8_t  key_id;           // ktorý autor podpísal
-    uint8_t  signature[64];    // Ed25519 podpis nad 102 B META
-} FotaHdrSigPkt;                // = 99 B
+    uint8_t  type;             //en: FOTA_PKT_HDR_SIG
+    uint8_t  fota_prot_inf;     //en: FOTA_PROT_INF_V0 (same as META; META is authoritative)
+    uint8_t  old_sha256[32];   //en: "belongs to me" gating (== META.old_sha256, pre-filter)
+    uint8_t  key_id;           //en: which author signed it
+    uint8_t  signature[64];    //en: Ed25519 signature over the 102 B META
+} FotaHdrSigPkt;                //en: = 99 B
 
-// FOTA_CHUNK — 13 + data_len B (max 13+144 = 157 B)
-// +8B oproti pôvodnému: old_fw_size + old_sha256_prefix pre session izoláciu
-// GRP_DATA data = 4B ts + 157B = 161B ≤ 165B ✅
+//en: FOTA_CHUNK — 13 + data_len B (max 13+144 = 157 B)
+//en: +8B vs. the original: old_fw_size + old_sha256_prefix for session isolation
+//en: GRP_DATA data = 4B ts + 157B = 161B ≤ 165B — fits
+//sk: FOTA_CHUNK — 13 + data_len B (max 13+144 = 157 B)
+//sk: +8B oproti pôvodnému: old_fw_size + old_sha256_prefix pre session izoláciu
+//sk: GRP_DATA data = 4B ts + 157B = 161B ≤ 165B ✅
 typedef struct __attribute__((packed)) {
-    uint8_t  type;                 // FOTA_PKT_CHUNK
-    uint16_t chunk_idx;            // LE, 0-based
-    uint16_t crc16;                // CRC16/CCITT len nad data[]
-    uint32_t old_fw_size;          // LE — veľkosť base FW pre validáciu
-    uint8_t  old_sha256_prefix[4]; // prvých 4B SHA256 base FW — rýchla kontrola
-    uint8_t  data[FOTA_CHUNK_DATA_MAX];  // reálna dĺžka z pktlen-13
+    uint8_t  type;                 //en: FOTA_PKT_CHUNK
+    uint16_t chunk_idx;            //en: LE, 0-based
+    uint16_t crc16;                //en: CRC16/CCITT over data[] only
+    uint32_t old_fw_size;          //en: LE — size of the base FW for validation
+    uint8_t  old_sha256_prefix[4]; //en: first 4B of the base FW SHA256 — quick check
+    uint8_t  data[FOTA_CHUNK_DATA_MAX];  //en: real length from pktlen-13
 } FotaChunkPkt;
 
-// FOTA_APPLY — 33 B
+//en: FOTA_APPLY — 33 B
 typedef struct __attribute__((packed)) {
-    uint8_t  type;          // FOTA_PKT_APPLY
-    uint8_t  sha256[32];    // potvrdenie — musí súhlasiť s prijatým
+    uint8_t  type;          //en: FOTA_PKT_APPLY
+    uint8_t  sha256[32];    //en: confirmation — must match the received one
 } FotaApplyPkt;
 
-// FOTA_STATUS — 6 B
+//en: FOTA_STATUS — 6 B
 typedef struct __attribute__((packed)) {
-    uint8_t  type;          // FOTA_PKT_STATUS
-    uint16_t recv_count;    // počet prijatých chunkov
-    uint16_t total_chunks;  // celkový počet
-    uint8_t  status;        // FOTA_ST_* flags (z FotaState.h)
+    uint8_t  type;          //en: FOTA_PKT_STATUS
+    uint16_t recv_count;    //en: number of received chunks
+    uint16_t total_chunks;  //en: total count
+    uint8_t  status;        //en: FOTA_ST_* flags (from FotaState.h)
 } FotaStatusPkt;
 
-// FOTA_NACK — 2 + count*2 B
+//en: FOTA_NACK — 2 + count*2 B
 typedef struct __attribute__((packed)) {
-    uint8_t  type;          // FOTA_PKT_NACK
-    uint8_t  count;         // počet záznamov v idx[]
-    uint16_t idx[FOTA_NACK_MAX_IDX];  // chýbajúce chunk_idx (len prvých count)
+    uint8_t  type;          //en: FOTA_PKT_NACK
+    uint8_t  count;         //en: number of entries in idx[]
+    uint16_t idx[FOTA_NACK_MAX_IDX];  //en: missing chunk_idx (only the first count)
 } FotaNackPkt;
 
 // =====================================================================
-// CRC16/CCITT-FALSE (poly 0x1021, init 0xFFFF) — zhodné s fota_sender.py
+//en: CRC16/CCITT-FALSE (poly 0x1021, init 0xFFFF) — matches fota_sender.py
 // =====================================================================
 static inline uint16_t fota_crc16(const uint8_t* data, uint16_t len) {
     uint16_t crc = 0xFFFF;

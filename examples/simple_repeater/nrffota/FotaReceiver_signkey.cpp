@@ -1,12 +1,14 @@
 // =====================================================================
-// FotaReceiver_signkey.cpp — Autorizačné kľúče pre Ed25519 overenie FOTA HEADER
+//en: FotaReceiver_signkey.cpp — authorization keys for Ed25519 verification of the FOTA HEADER
 //
 #ifdef WITH_LORA_FOTA
 #include "FotaState.h"
 
-// Autorizačné kľúče — extern → viditeľné pre linker z iných .cpp módulov
+//en: Authorization keys — extern → visible to the linker from other .cpp modules
+//sk: Autorizačné kľúče — extern → viditeľné pre linker z iných .cpp módulov
 extern const FotaAuthorEntry s_authors[] = {
-    // key_id=1 — test keypair (privkey v test_nrf-fota/test_key.der)
+    //en: key_id=1 — test keypair (privkey in test_nrf-fota/test_key.der)
+    //sk: key_id=1 — test keypair (privkey v test_nrf-fota/test_key.der)
     { 1, { 0xC2, 0x2F, 0x8A, 0xE0, 0x03, 0x51, 0xE7, 0x4A,
            0x81, 0x33, 0x8A, 0x93, 0xB8, 0x6C, 0x87, 0x45,
            0x8F, 0x05, 0xC4, 0xDD, 0x6A, 0xE9, 0xCE, 0xA5,

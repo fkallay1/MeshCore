@@ -174,7 +174,45 @@ kompilačná chyba `FOTA_DEBUG_PRINTLN(buf)` (makro lepí literál — fix `("%s
   Adafruit printf bez float supportu → prepnúť na celočíselný výpis).
 - Body §4/5 (build# lešenie) a §4/8 (pytest na miss formát) zostávajú otvorené.
 
-## 6. Dotknuté súbory (audit, časť 1)
+## 6. ČASŤ 3 (2026-07-03/04) — dvojjazyčné komentáre //en: + //sk:
+
+Celý FOTA kód (nrffota/, MyMesh FOTA hooky, FOTA env sekcie v platformio.ini) má
+komentáre v OBOCH jazykoch so značkami — angličtina kanonická (pôjde upstream),
+slovenčina pracovná:
+
+```cpp
+//en: Deferred processing: the recv hook only copies data; heavy flash I/O
+//en: runs later in loop(), after the dispatcher re-arms the radio into RX.
+//sk: Odložené spracovanie: recv hook len kopíruje dáta; ťažké flash I/O
+//sk: beží až v loop(), keď dispatcher re-armne rádio do RX.
+```
+
+**Pravidlá** (aj v AGENTS.md §Style notes): podstatné „prečo" komentáre = oba jazyky
+(en blok, potom sk blok); triviálne a trailing = len `//en:`; neoznačené = štrukturálne
+(`#endif // X`, `// ====`) a third-party (hpatchlite, puff/zlib) — nedotýkať; runtime
+stringy ostávajú slovenské. Ini `;en:`/`;sk:`, python `#en:`/`#sk:`.
+
+**Strip nástroj** `fkclaude/tools/strip_lang_comments.py`:
+```bash
+# PR vetva (čistá angličtina):
+python fkclaude/tools/strip_lang_comments.py --keep en examples/simple_repeater variants
+# čisto slovenská verzia:
+python fkclaude/tools/strip_lang_comments.py --keep sk <cesty>
+```
+`--keep en` zmaže `//sk:` riadky a z `//en:` spraví čisté `//` (aj trailing, aj ini/py).
+Výroba PR: `git checkout -b pr/... && strip --keep en && commit` — PR vetva sa vždy
+GENERUJE, nikdy neudržiava ručne. Pracovná vetva ostáva bilingválna.
+
+Pri tejto konverzii opravený aj posledný rename zvyšok: ProMicro ini sekcia FOTA envu
+mala ešte „LoRa-OTA / OTA flasher / OTA FS" nadpis.
+
+**Výnimky z konvencie:** `hpatchlite/` = third-party (nedotýkané; naša guard poznámka
+v hpatch_lite.c preložená na čistú EN bez značiek), pôvodné puff/zlib EN komentáre
+v puff_stream.c bez značiek, `flasher/flasher.ld` (GNU ld má len /* */ bloky — mimo
+konvencie, komentáre ostali ako sú), `flasher_code.h` (generovaný). Docstringy v .py
+bez značiek (konvencia pokrýva len riadkové komentáre).
+
+## 7. Dotknuté súbory (audit, časť 1)
 FW: `MyMesh.{h,cpp}`, `nrffota/{FotaReceiver.{h,cpp},FotaMesh.{h,cpp},FotaProtocol.h,`
 `FotaState.h,FotaFs.h,FotaPatcher.{h,cpp},FotaReceiver_signkey.cpp,flash_layout.h,`
 `puff_stream.c,flasher/flasher.ld,flasher_code.h,tools/build_flasher.py,README.md}`

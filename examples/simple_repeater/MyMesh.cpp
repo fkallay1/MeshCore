@@ -465,7 +465,7 @@ const char *MyMesh::getLogDateTime() {
 
 void MyMesh::logRxRaw(float snr, float rssi, const uint8_t raw[], int len) {
 #ifdef WITH_LORA_FOTA
-  fotaLogRxRaw(snr, rssi, raw, len);   // RAW diagnostika + FOTA značka (nrffota/FotaMyMesh.cpp)
+  fotaLogRxRaw(snr, rssi, raw, len);   //en: RAW diagnostics + FOTA tag (nrffota/FotaMyMesh.cpp)
 #endif
 #if MESH_PACKET_LOGGING
   Serial.print(getLogDateTime());
@@ -729,8 +729,8 @@ void MyMesh::onPeerDataRecv(mesh::Packet *packet, uint8_t type, int sender_idx, 
 #ifdef WITH_LORA_FOTA
       else if (fotaHandleLoRaCli(client, secret, command, reply,
                                  packet->getPathHashSize(), sender_timestamp)) {
-        // FOTA CLI z LoRa — odložené do loop(); reply naplnené vo fotaHandleLoRaCli
-        // (nrffota/FotaMyMesh.cpp).
+        //en: FOTA CLI from LoRa — deferred to loop(); reply filled by
+        //en: fotaHandleLoRaCli (nrffota/FotaMyMesh.cpp).
       }
 #endif
       else {
@@ -840,7 +840,7 @@ void MyMesh::onControlDataRecv(mesh::Packet* packet) {
   }
 }
 
-// (FOTA: searchChannelsByHash / onGroupDataRecv overrides sú v nrffota/FotaMyMesh.cpp)
+//en: (FOTA: searchChannelsByHash / onGroupDataRecv overrides live in nrffota/FotaMyMesh.cpp)
 
 void MyMesh::sendNodeDiscoverReq() {
   uint8_t data[10];
@@ -941,7 +941,7 @@ MyMesh::MyMesh(mesh::MainBoard &board, mesh::Radio &radio, mesh::MillisecondCloc
 
 void MyMesh::begin(FILESYSTEM *fs) {
 #ifdef WITH_LORA_FOTA
-  fotaEarlyInit();   // flasher debug marker čo najskôr po boote + reset FOTA stavu
+  fotaEarlyInit();   //en: read flasher debug marker ASAP after boot + reset FOTA state
 #endif
   mesh::Mesh::begin();
   _fs = fs;
@@ -995,7 +995,7 @@ void MyMesh::begin(FILESYSTEM *fs) {
 #endif
 
 #ifdef WITH_LORA_FOTA
-  fotaBegin();       // mount FOTA FS + kanál + boot banner (nrffota/FotaMyMesh.cpp)
+  fotaBegin();       //en: mount FOTA FS + channel + boot banner (nrffota/FotaMyMesh.cpp)
 #endif
 }
 
@@ -1280,7 +1280,7 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
     }
 #ifdef WITH_LORA_FOTA
   } else if (fotaHandleCliCommand(command, reply)) {
-    // FOTA CLI ('fota …' / legacy 'ota …') — nrffota/FotaMyMesh.cpp
+    //en: FOTA CLI ('fota …' / legacy 'ota …') — nrffota/FotaMyMesh.cpp
 #endif
   } else{
     _cli.handleCommand(sender_timestamp, command, reply);  // common CLI commands
@@ -1332,7 +1332,7 @@ void MyMesh::loop() {
   last_millis = now;
 
 #ifdef WITH_LORA_FOTA
-  fotaLoop();   // deferred FOTA paket/CLI/flash + heartbeat (nrffota/FotaMyMesh.cpp)
+  fotaLoop();   //en: deferred FOTA packet/CLI/flash + heartbeat (nrffota/FotaMyMesh.cpp)
 #endif
 }
 

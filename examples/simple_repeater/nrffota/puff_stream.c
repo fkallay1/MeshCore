@@ -2,9 +2,12 @@
  * Based on puff.c by Mark Adler (zlib/libpng license).
  * Adapted for embedded streaming: resumable via puff_stream_read().
  */
-// Aktívne len vo FOTA FW builde (-DWITH_LORA_FOTA) alebo standalone flasheri
-// (-DFOTA_FLASHER_BUILD). V stock buildoch (kde to zoberie rekurzívny
-// build_src_filter) ostáva prázdne a --gc-sections to odstráni.
+//en: Active only in the FOTA FW build (-DWITH_LORA_FOTA) or the standalone flasher
+//en: (-DFOTA_FLASHER_BUILD). In stock builds (where the recursive build_src_filter
+//en: picks this file up) it stays empty and --gc-sections removes it.
+//sk: Aktívne len vo FOTA FW builde (-DWITH_LORA_FOTA) alebo standalone flasheri
+//sk: (-DFOTA_FLASHER_BUILD). V stock buildoch (kde to zoberie rekurzívny
+//sk: build_src_filter) ostáva prázdne a --gc-sections to odstráni.
 #if defined(WITH_LORA_FOTA) || defined(FOTA_FLASHER_BUILD)
 
 #include "puff_stream.h"

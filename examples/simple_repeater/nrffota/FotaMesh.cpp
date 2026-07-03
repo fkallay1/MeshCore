@@ -1,5 +1,5 @@
 // =====================================================================
-// FotaMesh.cpp — glue medzi MeshCore a FOTA modulom.
+//en: FotaMesh.cpp — glue between MeshCore and the FOTA module.
 // =====================================================================
 #ifdef WITH_LORA_FOTA
 #include "FotaMesh.h"
@@ -11,21 +11,24 @@
 #include <string.h>
 
 void fota_build_channel(mesh::GroupChannel& ch) {
-    // MeshCore #-konvencia: secret = SHA256(FOTA_CHANNEL_NAME)[0:16] (meno VRÁTANE '#',
-    // zhodné s meshcore_py set_channel device.py:216). secret obsahuje 0x00 →
-    // NEhashovať ako string. AES kľúč = secret[:16], HMAC kľúč = secret[:32].
+    //en: MeshCore #-convention: secret = SHA256(FOTA_CHANNEL_NAME)[0:16] (name INCLUDING '#',
+    //en: matches meshcore_py set_channel device.py:216). secret contains 0x00 →
+    //en: do NOT hash it as a string. AES key = secret[:16], HMAC key = secret[:32].
+    //sk: MeshCore #-konvencia: secret = SHA256(FOTA_CHANNEL_NAME)[0:16] (meno VRÁTANE '#',
+    //sk: zhodné s meshcore_py set_channel device.py:216). secret obsahuje 0x00 →
+    //sk: NEhashovať ako string. AES kľúč = secret[:16], HMAC kľúč = secret[:32].
     const char* name = FOTA_CHANNEL_NAME;
     uint8_t full[32];
     mesh::Utils::sha256(full, sizeof(full), (const uint8_t*)name, (int)strlen(name));
     memset(ch.secret, 0, PUB_KEY_SIZE);
     memcpy(ch.secret, full, 16);
 
-    // channel hash = SHA256(secret)[0..PATH_HASH_SIZE] (zhodné s companion addChannel)
+    //en: channel hash = SHA256(secret)[0..PATH_HASH_SIZE] (matches companion addChannel)
     uint8_t h[32];
     mesh::Utils::sha256(h, sizeof(h), ch.secret, 16);
     memcpy(ch.hash, h, PATH_HASH_SIZE);
 
-    FOTA_DEBUG_PRINTLN("[FOTA] kanál %s hash=0x%02X", name, (unsigned)ch.hash[0]);   // očakávané 0xA4 pre #fkotanrf
+    FOTA_DEBUG_PRINTLN("[FOTA] kanál %s hash=0x%02X", name, (unsigned)ch.hash[0]);   //en: expected 0xA4 for #fkotanrf
 }
 
 void fota_handle_command(const char* args, char* reply) {
@@ -45,9 +48,13 @@ void fota_handle_command(const char* args, char* reply) {
         if (reason[0]) sprintf(reply, "FOTA dry-run %s: %s", tag, reason);
         else           sprintf(reply, "FOTA dry-run %s", tag);
     } else if (strcmp(args, "flash") == 0 || strcmp(args, "apply") == 0) {
-        // NEFLASHUJ tu: fota_apply() sa pri úspechu NEVRÁTI (skok na flasher + reboot),
-        // takže by sa ACK nikdy neodvysielal. Najprv pošli „accepted", flash spustí
-        // loop() AŽ keď ACK reálne odíde z outbound queue (fota_apply_pending()).
+        //en: Do NOT flash here: on success fota_apply() DOES NOT RETURN (jump to flasher
+        //en: + reboot), so the ACK would never be transmitted. Send "accepted" first;
+        //en: loop() starts the flash ONLY after the ACK actually leaves the outbound
+        //en: queue (fota_apply_pending()).
+        //sk: NEFLASHUJ tu: fota_apply() sa pri úspechu NEVRÁTI (skok na flasher + reboot),
+        //sk: takže by sa ACK nikdy neodvysielal. Najprv pošli „accepted", flash spustí
+        //sk: loop() AŽ keď ACK reálne odíde z outbound queue (fota_apply_pending()).
         if (fota_get_state()->status & FOTA_ST_VERIFIED) {
             fota_request_apply();
             strcpy(reply, "FOTA flash accepted");
@@ -64,16 +71,22 @@ void fota_handle_command(const char* args, char* reply) {
         fota_send_nack();
         strcpy(reply, "FOTA nack -> serial");
     } else if (strcmp(args, "miss") == 0 || strcmp(args, "missall") == 0) {
-        // Chýbajúce: na začiatku H (META) a S (SIG) ak chýbajú, potom chunky (od 0)
-        // ako rozsahy — súvislý beh "od-do" (napr. "4-11"), jednotlivý ako "5".
-        // miss = strop FOTA_MISS_OUTTOKENS tokenov (číslo = 1, rozsah = 2; H/S sa NErátajú a vypíšu sa vždy);
-        // missall = všetky (capnuté len na dĺžku LoRa paketu). Zvyšné chunky ako "+N".
-        // Oba ukážu CELKOVÝ počet. "Zero info yet" len ak neprišlo vôbec nič.
-        bool show_all = (args[4] == 'a');               // "missall" má 'a' na args[4]
+        //en: Missing items: H (META) and S (SIG) first if missing, then chunks (from 0)
+        //en: as ranges — a contiguous run as "from-to" (e.g. "4-11"), a single one as "5".
+        //en: miss = cap of FOTA_MISS_OUTTOKENS tokens (number = 1, range = 2; H/S are NOT
+        //en: counted and always printed); missall = all (capped only by the LoRa packet
+        //en: length). Remaining chunks as "+N". Both show the TOTAL count.
+        //en: "Zero info yet" only if nothing at all has arrived.
+        //sk: Chýbajúce: na začiatku H (META) a S (SIG) ak chýbajú, potom chunky (od 0)
+        //sk: ako rozsahy — súvislý beh "od-do" (napr. "4-11"), jednotlivý ako "5".
+        //sk: miss = strop FOTA_MISS_OUTTOKENS tokenov (číslo = 1, rozsah = 2; H/S sa NErátajú a vypíšu sa vždy);
+        //sk: missall = všetky (capnuté len na dĺžku LoRa paketu). Zvyšné chunky ako "+N".
+        //sk: Oba ukážu CELKOVÝ počet. "Zero info yet" len ak neprišlo vôbec nič.
+        bool show_all = (args[4] == 'a');               //en: "missall" has 'a' at args[4]
         const FotaState* st = fota_get_state();
         bool miss_h = !st->meta_recv;
         bool miss_s = !st->sig_recv;
-        int chunk_missing = fota_calc_missing(NULL, 0, NULL);   // len celkový počet
+        int chunk_missing = fota_calc_missing(NULL, 0, NULL);   //en: total count only
 
         bool any_info = st->meta_recv || st->sig_recv || st->recv_count > 0 || st->total_chunks > 0;
         if (!any_info) {
@@ -83,9 +96,9 @@ void fota_handle_command(const char* args, char* reply) {
             int chunk_total = (chunk_missing < 0) ? 0 : chunk_missing;
             int hs = (miss_h ? 1 : 0) + (miss_s ? 1 : 0);
             int total = hs + chunk_total;
-            int tok_lim = show_all ? 0 : FOTA_MISS_OUTTOKENS;   // 0 = všetky; inak tokenový strop (H/S mimo)
+            int tok_lim = show_all ? 0 : FOTA_MISS_OUTTOKENS;   //en: 0 = all; otherwise token cap (H/S excluded)
 
-            // Serial: plný detail (H/S vždy + chunky ako rozsahy)
+            //en: Serial: full detail (H/S always + chunks as ranges)
             FOTA_DEBUG_PRINT("[FOTA] miss %d", total);
             if (st->total_chunks > 0) { FOTA_DEBUG_PRINT("/%u", (unsigned)st->total_chunks); }
             else                        FOTA_DEBUG_PRINT(" (pred HEADER)");
@@ -95,7 +108,7 @@ void fota_handle_command(const char* args, char* reply) {
             fota_print_missing(tok_lim);
             FOTA_DEBUG_PRINTLN("");
 
-            // Reply (LoRa aj Serial CLI): počet + H/S + zoznam rozsahov, capnutý na dĺžku paketu
+            //en: Reply (LoRa and Serial CLI): count + H/S + range list, capped to packet length
             char* p = reply;
             p += sprintf(p, "FOTA miss=%d", total);
             if (st->total_chunks > 0) p += sprintf(p, "/%u", (unsigned)st->total_chunks);
@@ -103,7 +116,7 @@ void fota_handle_command(const char* args, char* reply) {
             if (total > 0) *p++ = ':';
             if (miss_h) p += sprintf(p, " H");
             if (miss_s) p += sprintf(p, " S");
-            int avail = 158 - (int)(p - reply);          // strop pre LoRa (~160 B)
+            int avail = 158 - (int)(p - reply);          //en: cap for LoRa (~160 B)
             if (avail > 8) p += fota_format_missing(p, avail, tok_lim);
             *p = 0;
         }
@@ -111,7 +124,7 @@ void fota_handle_command(const char* args, char* reply) {
         fota_print_flasher_debug();
         strcpy(reply, "FOTA dbg -> serial");
     } else if (strcmp(args, "id") == 0 || strcmp(args, "fwid") == 0) {
-        fota_print_fw_id(reply);   // build#, image_size, plný running sha256 -> serial
+        fota_print_fw_id(reply);   //en: build#, image_size, full running sha256 -> serial
     } else {
         strcpy(reply, "FOTA: status|verify|flash|clear|decompress|nack|miss|missall|dbg|id");
     }
