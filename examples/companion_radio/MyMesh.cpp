@@ -62,6 +62,9 @@
 #define CMD_SET_DEFAULT_FLOOD_SCOPE   63
 #define CMD_GET_DEFAULT_FLOOD_SCOPE   64
 #define CMD_SEND_RAW_PACKET           65
+//en: FK fork-only (nrf-fota): push a return path to a contact (PATH packet) so it replies sendDirect.
+//sk: Len FK fork (nrf-fota): vloz kontaktu spatnu cestu (PATH paket), aby odpovedal sendDirect.
+#define CMD_SEND_RETURN_PATH          0x70   // 112
 
 // Stats sub-types for CMD_GET_STATS
 #define STATS_TYPE_CORE               0
@@ -1990,6 +1993,37 @@ void MyMesh::handleCmdFrame(size_t len) {
       }
     } else {
       writeErrFrame(ERR_CODE_TABLE_FULL);
+    }
+  } else if (cmd_frame[0] == CMD_SEND_RETURN_PATH && len >= 2 + PUB_KEY_SIZE) {
+    //en: FK fork-only (nrf-fota): [0x70][pub_key 32B][path_len][path] — build a PATH packet
+    //en: (createPathReturn, pairwise secret) carrying the recipient->us route, so the recipient
+    //en: (e.g. a simple_repeater ACL client entry) stores it as out_path and replies sendDirect
+    //en: instead of flood. Path bytes are 1B hop hashes in recipient->us order.
+    //sk: Len FK fork (nrf-fota): [0x70][pub_key 32B][path_len][path] — postavi PATH paket
+    //sk: (createPathReturn, parovy secret) so spatnou cestou prijemca->my; prijemca (napr.
+    //sk: ACL zaznam v simple_repeater) si ju ulozi ako out_path a odpoveda sendDirect
+    //sk: namiesto floodu. Path bajty su 1B hop hashe v poradi prijemca->my.
+    uint8_t path_len = cmd_frame[1 + PUB_KEY_SIZE];
+    if (path_len > MAX_PATH_SIZE || len < 2 + PUB_KEY_SIZE + path_len) {
+      writeErrFrame(ERR_CODE_ILLEGAL_ARG);
+    } else {
+      ContactInfo *recipient = lookupContactByPubKey(&cmd_frame[1], PUB_KEY_SIZE);
+      if (recipient) {
+        auto pkt = createPathReturn(recipient->id, recipient->getSharedSecret(self_id),
+                                    &cmd_frame[2 + PUB_KEY_SIZE], path_len, 0, NULL, 0);
+        if (pkt) {
+          if (recipient->out_path_len == OUT_PATH_UNKNOWN) {
+            sendFlood(pkt);
+          } else {
+            sendDirect(pkt, recipient->out_path, recipient->out_path_len);
+          }
+          writeOKFrame();
+        } else {
+          writeErrFrame(ERR_CODE_TABLE_FULL);
+        }
+      } else {
+        writeErrFrame(ERR_CODE_NOT_FOUND);
+      }
     }
   } else {
     writeErrFrame(ERR_CODE_UNSUPPORTED_CMD);
