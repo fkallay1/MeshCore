@@ -62,9 +62,13 @@
 #define CMD_SET_DEFAULT_FLOOD_SCOPE   63
 #define CMD_GET_DEFAULT_FLOOD_SCOPE   64
 #define CMD_SEND_RAW_PACKET           65
+#ifdef WITH_LORA_FOTA
 //en: FK fork-only (nrf-fota): push a return path to a contact (PATH packet) so it replies sendDirect.
+//en: Gated behind WITH_LORA_FOTA — standard companion builds stay byte-identical to upstream behavior.
 //sk: Len FK fork (nrf-fota): vloz kontaktu spatnu cestu (PATH paket), aby odpovedal sendDirect.
+//sk: Gated za WITH_LORA_FOTA — standardne companion buildy ostavaju spravanim zhodne s upstreamom.
 #define CMD_SEND_RETURN_PATH          0x70   // 112
+#endif
 
 // Stats sub-types for CMD_GET_STATS
 #define STATS_TYPE_CORE               0
@@ -1994,6 +1998,7 @@ void MyMesh::handleCmdFrame(size_t len) {
     } else {
       writeErrFrame(ERR_CODE_TABLE_FULL);
     }
+#ifdef WITH_LORA_FOTA
   } else if (cmd_frame[0] == CMD_SEND_RETURN_PATH && len >= 2 + PUB_KEY_SIZE) {
     //en: FK fork-only (nrf-fota): [0x70][pub_key 32B][path_len][path] — build a PATH packet
     //en: (createPathReturn, pairwise secret) carrying the recipient->us route, so the recipient
@@ -2025,6 +2030,7 @@ void MyMesh::handleCmdFrame(size_t len) {
         writeErrFrame(ERR_CODE_NOT_FOUND);
       }
     }
+#endif  // WITH_LORA_FOTA
   } else {
     writeErrFrame(ERR_CODE_UNSUPPORTED_CMD);
     MESH_DEBUG_PRINTLN("ERROR: unknown command: %02X", cmd_frame[0]);

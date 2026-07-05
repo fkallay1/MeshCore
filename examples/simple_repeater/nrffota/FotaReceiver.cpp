@@ -610,21 +610,42 @@ void fota_send_nack() {
     FOTA_DEBUG_PRINTLN("");
 }
 
+//en: Total chunk count for DIAGNOSTICS: the promoted (signature-verified) total when
+//en: available, otherwise the UNVERIFIED estimate derived from the received META
+//en: (ceil(patch_size/FOTA_CHUNK_DATA_MAX)), 0 = no info. The estimate must NEVER be
+//en: used for completion/flash gating (that stays behind try_verify_header) — the worst
+//en: a forged META can do here is inflate a diagnostic listing.
+//sk: Celkový počet chunkov pre DIAGNOSTIKU: promotnutý (podpisom overený) total ak je,
+//sk: inak NEOVERENÝ odhad z prijatej META (ceil(patch_size/FOTA_CHUNK_DATA_MAX)),
+//sk: 0 = žiadna info. Odhad sa NIKDY nesmie použiť na completion/flash gating (to
+//sk: ostáva za try_verify_header) — podvrhnutá META tu nanajvýš nafúkne diagnostický výpis.
+uint16_t fota_total_est(void) {
+    if (fota.total_chunks > 0) return fota.total_chunks;
+    if (fota.meta_recv && fota.patch_size > 0) {
+        uint32_t tc = (fota.patch_size + FOTA_CHUNK_DATA_MAX - 1u) / FOTA_CHUNK_DATA_MAX;
+        if (tc >= 1 && tc <= FOTA_MAX_CHUNKS) return (uint16_t)tc;
+    }
+    return 0;
+}
+
 //en: Range for counting missing chunks [*lo .. *hi].
-//en:  - HEADER known (total_chunks>0): [0 .. total_chunks-1].
-//en:  - HEADER unknown (total_chunks==0): window [lowest .. highest received] from the bitmap
-//en:    (chunks below the lowest received cannot be reliably claimed without the HEADER).
-//en: Returns false = "zero info yet" (no chunk and no HEADER).
+//en:  - total known/estimated (fota_total_est>0): [0 .. est-1] — with a received META the
+//en:    range covers TRAILING chunks too (miss report is complete already before the SIG).
+//en:  - no META: window [0 .. highest received] from the bitmap (trailing chunks above the
+//en:    highest received cannot be claimed without any META info).
+//en: Returns false = "zero info yet" (no chunk and no META).
 //sk: Rozsah na počítanie chýbajúcich chunkov [*lo .. *hi].
-//sk:  - HEADER známy (total_chunks>0): [0 .. total_chunks-1].
-//sk:  - HEADER neznámy (total_chunks==0): okno [najnižší .. najvyšší prijatý] z bitmapy
-//sk:    (chunky pod najnižším prijatým nevieme bez HEADER-a spoľahlivo nárokovať).
-//sk: Vracia false = "zero info yet" (žiaden chunk a žiaden HEADER).
+//sk:  - total známy/odhadnutý (fota_total_est>0): [0 .. est-1] — s prijatou META pokrýva
+//sk:    rozsah aj CHVOSTOVÉ chunky (miss report je kompletný už pred SIG-om).
+//sk:  - bez META: okno [0 .. najvyšší prijatý] z bitmapy (chvost nad najvyšším prijatým
+//sk:    sa bez META nárokovať nedá).
+//sk: Vracia false = "zero info yet" (žiaden chunk a žiadna META).
 static bool fota_missing_range(uint16_t* lo, uint16_t* hi) {
-    if (fota.total_chunks > 0) { *lo = 0; *hi = (uint16_t)(fota.total_chunks - 1u); return true; }
-    //en: HEADER unknown — count holes from chunk 0 up to the HIGHEST received (chunks below
+    uint16_t est = fota_total_est();
+    if (est > 0) { *lo = 0; *hi = (uint16_t)(est - 1u); return true; }
+    //en: No META — count holes from chunk 0 up to the HIGHEST received (chunks below
     //en: the lowest received really exist and are missing, hence we count from 0).
-    //sk: HEADER neznámy — počítaj diery od chunku 0 po NAJVYŠŠÍ prijatý (chunky pod
+    //sk: Bez META — počítaj diery od chunku 0 po NAJVYŠŠÍ prijatý (chunky pod
     //sk: najnižším prijatým reálne existujú a chýbajú, preto počítame od 0).
     int fhi = -1;
     for (uint16_t i = 0; i < FOTA_MAX_CHUNKS; i++)
@@ -665,9 +686,15 @@ int fota_calc_missing(uint16_t* out, int max_out, int* out_n) {
 //sk: 'limit' = strop v TOKENOCH (jednotlivé číslo = 1 token, rozsah "od-do" = 2); <=0 = bez stropu.
 //sk: Beh sa NEoreže — vypíše sa celý; po vyčerpaní tokenov sa zvyšok zhrnie do "+N" (počet
 //sk: zvyšných chýbajúcich CHUNKOV). Nič netlačí ak niet rozsahu.
-void fota_print_missing(int limit) {
+void fota_print_missing(int limit, const char* lead) {
     uint16_t lo, hi;
-    if (!fota_missing_range(&lo, &hi)) return;
+    const char* sep = lead;   //en: separator before the NEXT token ("," after the first one)
+    if (!fota_missing_range(&lo, &hi)) {
+        //en: No chunk received and no META → the whole file is the unknown tail.
+        //sk: Žiaden prijatý chunk a žiadna META → celý súbor je neznámy chvost.
+        if (fota_total_est() == 0) FOTA_DEBUG_PRINT("%s0-??", sep);
+        return;
+    }
     int total = 0, shown = 0, tokens = 0;
     bool in_run = false; uint16_t rs = 0, re = 0;
     for (uint16_t i = lo; ; i++) {
@@ -678,15 +705,29 @@ void fota_print_missing(int limit) {
         }
         if (in_run && (!missing || i == hi)) {     //en: end of run: print it whole (if budget allows)
             if (limit <= 0 || tokens < limit) {
-                if (re != rs) { FOTA_DEBUG_PRINT("%u-%u ", (unsigned)rs, (unsigned)re); tokens += 2; }
-                else          { FOTA_DEBUG_PRINT("%u ", (unsigned)rs); tokens += 1; }
+                //en: pair "a,b" (reads better than "a-b"); longer runs as ranges
+                //sk: dvojica "a,b" (čitateľnejšie než "a-b"); dlhšie behy ako rozsahy
+                if (re == rs)          { FOTA_DEBUG_PRINT("%s%u", sep, (unsigned)rs); tokens += 1; }
+                else if (re == rs + 1) { FOTA_DEBUG_PRINT("%s%u,%u", sep, (unsigned)rs, (unsigned)re); tokens += 2; }
+                else                   { FOTA_DEBUG_PRINT("%s%u-%u", sep, (unsigned)rs, (unsigned)re); tokens += 2; }
+                sep = ",";
                 shown += (int)(re - rs + 1);
             }
             in_run = false;
         }
         if (i == hi) break;
     }
-    if (limit > 0 && total > shown) { FOTA_DEBUG_PRINT("+%d", total - shown); }
+    if (limit > 0 && total > shown) { FOTA_DEBUG_PRINT("%s+%d", sep, total - shown); sep = ","; }
+    //en: No META → chunks above the highest received are invisible; mark the tail "N-??"
+    //en: (N = highest received + 1). N carries the exact tail start for the app — a bare
+    //en: "??" would make it guess from the highest MISSING, re-sending whole received
+    //en: islands above it. N may not exist (total unknown) — the app drops the marker
+    //en: when N is beyond the package total.
+    //sk: Bez META sú chunky nad najvyšším prijatým neviditeľné; chvost označ "N-??"
+    //sk: (N = najvyšší prijatý + 1). N nesie appke presný začiatok chvosta — holé "??"
+    //sk: by hádala od najvyššieho CHÝBAJÚCEHO a preposlala celé prijaté ostrovy nad ním.
+    //sk: N nemusí existovať (total nepoznáme) — appka marker zahodí, ak je N za totalom balíka.
+    if (fota_total_est() == 0) FOTA_DEBUG_PRINT("%s%u-??", sep, (unsigned)(hi + 1u));
 }
 
 //en: Formats the missing CHUNKS into 'out' as ranges with a leading space (" 5", " 4-11").
@@ -697,13 +738,19 @@ void fota_print_missing(int limit) {
 //sk: 'limit' = strop v TOKENOCH (číslo = 1, rozsah = 2); <=0 = bez stropu. Beh sa NEoreže.
 //sk: Po vyčerpaní tokenov ALEBO pri zaplnení out sa zvyšok zhrnie do " +N" (počet chunkov).
 //sk: Vracia počet znakov. Bez veľkého stack-bufferu — píše priamo do 'out' (LoRa reply ~160 B).
-int fota_format_missing(char* out, int out_sz, int limit) {
+int fota_format_missing(char* out, int out_sz, int limit, const char* lead) {
     if (out_sz <= 0) return 0;
     out[0] = 0;
     uint16_t lo, hi;
-    if (!fota_missing_range(&lo, &hi)) return 0;
     char* p = out;
-    char* cap = out + out_sz - 12;                 //en: reserve for " +NNNNN"
+    const char* sep = lead;   //en: separator before the NEXT token ("," after the first one)
+    if (!fota_missing_range(&lo, &hi)) {
+        //en: No chunk received and no META → the whole file is the unknown tail.
+        //sk: Žiaden prijatý chunk a žiadna META → celý súbor je neznámy chvost.
+        if (fota_total_est() == 0) p += snprintf(p, out_sz, "%s0-??", sep);
+        return (int)(p - out);
+    }
+    char* cap = out + out_sz - 22;                 //en: reserve for ",+NNNNN" + ",NNNNN-??"
     int total = 0, shown = 0, tokens = 0;
     bool full = false;                             //en: buffer full (rest goes into "+N")
     bool in_run = false; uint16_t rs = 0, re = 0;
@@ -715,16 +762,32 @@ int fota_format_missing(char* out, int out_sz, int limit) {
         }
         if (in_run && (!missing || i == hi)) {
             if (!full && (limit <= 0 || tokens < limit)) {
-                int w = (re == rs) ? snprintf(p, cap - p, " %u", (unsigned)rs)
-                                   : snprintf(p, cap - p, " %u-%u", (unsigned)rs, (unsigned)re);
+                //en: pair "a,b" (reads better than "a-b"); longer runs as ranges
+                //sk: dvojica "a,b" (čitateľnejšie než "a-b"); dlhšie behy ako rozsahy
+                int w;
+                if (re == rs)          w = snprintf(p, cap - p, "%s%u", sep, (unsigned)rs);
+                else if (re == rs + 1) w = snprintf(p, cap - p, "%s%u,%u", sep, (unsigned)rs, (unsigned)re);
+                else                   w = snprintf(p, cap - p, "%s%u-%u", sep, (unsigned)rs, (unsigned)re);
                 if (w < 0 || p + w >= cap) full = true;     //en: does not fit → rest goes into "+N"
-                else { p += w; tokens += (re == rs) ? 1 : 2; shown += (int)(re - rs + 1); }
+                else { p += w; tokens += (re == rs) ? 1 : 2; sep = ","; shown += (int)(re - rs + 1); }
             }
             in_run = false;
         }
         if (i == hi) break;
     }
-    if (total > shown) p += snprintf(p, out + out_sz - p, " +%d", total - shown);
+    if (total > shown) { p += snprintf(p, out + out_sz - p, "%s+%d", sep, total - shown); sep = ","; }
+    //en: No META → chunks above the highest received are invisible; mark the tail "N-??"
+    //en: (N = highest received + 1). N carries the exact tail start for the app — a bare
+    //en: "??" would make it guess from the highest MISSING, re-sending whole received
+    //en: islands above it (e.g. recv 1,3,7-15 → missing "0,2,4-6" → guess would re-send
+    //en: 7-15 too). N may not exist (total unknown) — the app drops the marker when N is
+    //en: beyond the package total.
+    //sk: Bez META sú chunky nad najvyšším prijatým neviditeľné; chvost označ "N-??"
+    //sk: (N = najvyšší prijatý + 1). N nesie appke presný začiatok chvosta — holé "??"
+    //sk: by hádala od najvyššieho CHÝBAJÚCEHO a preposlala celé prijaté ostrovy nad ním
+    //sk: (napr. recv 1,3,7-15 → missing "0,2,4-6" → hádanie by preposlalo aj 7-15).
+    //sk: N nemusí existovať (total nepoznáme) — appka marker zahodí, ak je N za totalom balíka.
+    if (fota_total_est() == 0) p += snprintf(p, out + out_sz - p, "%s%u-??", sep, (unsigned)(hi + 1u));
     return (int)(p - out);
 }
 

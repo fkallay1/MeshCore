@@ -107,13 +107,29 @@ pio run -e ProMicro_repeater_fota
 
 ## 4. Ovládanie (Serial alebo LoRa admin CLI)
 
-`fota status | verify | flash | clear | decompress | nack | miss | missall | dbg | agc | id`
+`fota status | verify | flash | clear | decompress | nack | miss | missall [cesta] | getpath | setpath | getacl | dbg | agc | id`
 (legacy prefix `ota` stále funguje — alias pre Flutter appku, `FOTA-CLI-ALIAS` vo FotaMyMesh.cpp)
 
 - `fota verify` = dry-run (aplikuje patch → SHA256, **nič nezapíše**)
 - `fota flash`  = **OSTRÝ** flash + reboot (nevráti sa pri úspechu)
-- `fota miss`   = zoznam chýbajúcich chunkov ako rozsahy „od-do" (strop 20 tokenov, H/S vždy)
-- `fota missall`= všetky chýbajúce (bez tokenového stropu, len limit LoRa paketu)
+- `fota miss`   = chýbajúce chunky, čiarkami oddelené (`H,S,0-4,6,8,9`; dvojica ako `a,b`,
+  dlhší beh `a-b`; strop 20 tokenov, H/S vždy). Total: `/T` overený; `/~T(noS)` = odhad
+  z META pred SIG-om (od 2026-07-06 report kompletný hneď po META); `(noH)`/`(noHS)` = bez
+  META, vtedy chvost končí markerom `N-??` (N = najvyšší prijatý + 1; appka si ho rozvinie
+  z totalu balíka, prípadne zahodí, ak N presahuje total)
+- `fota missall [cesta]` = všetky chýbajúce (bez tokenového stropu, len limit LoRa paketu).
+  Voliteľná `cesta` (`nn,nn` / `nnnn,…` / `nnnnnn,…` — šírka tokenu = 1/2/3 B hop hash,
+  poradie repeater→klient) sa najprv uloží do ACL `out_path` → odpoveď aj všetky ďalšie
+  CLI odpovede idú `sendDirect` namiesto floodu
+- `fota getpath` / `fota setpath <cesta>` (len LoRa — viažu sa na ACL záznam volajúceho) =
+  vypíš / ulož spätnú cestu klienta. Rieši [[fota_reverse_path_never_established]] („repeater
+  floodí odpovede, reverzná cesta sa nezaloží"). POZOR: flood login ACL cestu MAŽE — treba ju
+  poslať znova (Flutter appka ju pridáva do missall automaticky, ťupka „Poslať cestu v dopyte")
+- Serial debug varianty (gated `#if FOTA_DEBUG`): `fota getacl` (výpis ACL s cestami),
+  `fota getpath <pubkey-prefix-hex>`, `fota setpath <pubkey-prefix-hex> <cesta>`
+- LoRa CLI spracúva voliteľný companion tag `NN|` pred príkazom a zrkadlí ho v odpovedi
+  (Flutter appka podľa neho páruje odpovede; bez toho tagované príkazy padali do inline
+  CommonCLI cesty a obchádzali defer)
 
 Cez Serial píš priamo (`fota status`). Cez LoRa idú ako admin CLI príkazy (existujúca
 MeshCore cesta). Flasher sa púšťa **manuálne** (`fota flash`) — auto-APPLY cez LoRa je tiež

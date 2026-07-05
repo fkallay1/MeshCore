@@ -10,12 +10,22 @@
 > Všetky odkazy sú `súbor:riadok` v repo `MeshCore` (branch `features/nrf-fota`,
 > stav k 2026-07-04).
 
-> **STAV (2026-07-04): IMPLEMENTOVANÉ — Možnosť A.** Companion má nový fork-only
-> `CMD_SEND_RETURN_PATH = 0x70` (`examples/companion_radio/MyMesh.cpp`, wire
-> `[0x70][pub_key 32B][path_len][path]`, handler = `createPathReturn` + direct/flood send).
-> Appka (`fkallay1/meshcore-open`, commit `fbdf1cc`): checkbox „Najprv poslať cestu (PATH)"
-> pri „Get missing Chunks" — pošle PATH (forward cesta **reverznutá**, 1B hashe) + 1,5 s
-> pauzu pred `fota missall`. Companion treba preflashovať; smer cesty over per §6.
+> **STAV (2026-07-05/06, FINÁLNE): repeater-only riešenie — Možnosť A' (cesta v CLI texte).**
+> Per feedback („do companiona nezasahovať — veľa zariadení; repeatre sú malá spravovaná
+> flotila") bola Možnosť A nahradená: cesta ide v payloade autentifikovaného CLI príkazu
+> (vzor anon `clock`/`regions` reply-path, §MyMesh.cpp:147-163):
+> - **Repeater** (`nrffota/FotaMyMesh.cpp`, LoRa CLI): `fota setpath <cesta>`, `fota getpath`,
+>   `fota missall <cesta>` — cesta (2/4/6-hex tokeny = 1/2/3B hop hashe, poradie
+>   repeater→klient) sa uloží do ACL `out_path` → odpovede `sendDirect`. Serial debug
+>   varianty s pubkey prefixom + `fota getacl` (gated FOTA_DEBUG).
+> - **Appka**: ťupka „Poslať cestu v dopyte" → `fota missall <otočená forward cesta>` cez
+>   bežný CMD_SEND_TXT_MSG — **companion netreba meniť ani flashovať** (stock stačí).
+> - Companion `CMD_SEND_RETURN_PATH = 0x70` (commit `bd5e722e`) PONECHANÝ v zdrojáku, ale
+>   obalený `#ifdef WITH_LORA_FOTA` → štandardné companion buildy = upstream správanie.
+> - HW overené (2026-07-05): smer cesty potvrdený — hopy v poradí, v akom ich repeater
+>   vysiela (forward cesta klienta REVERZNUTÁ); direct routing cestu spredu konzumuje.
+> - POZOR pasce: flood login ACL cestu MAŽE (`is_flood → OUT_PATH_UNKNOWN`); LoRa CLI tag
+>   `NN|` od appky treba stripnúť a zrkadliť (fix vo fotaHandleLoRaCli, buildy #248+).
 
 ---
 

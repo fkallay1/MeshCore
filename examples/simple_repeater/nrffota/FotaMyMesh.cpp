@@ -97,6 +97,7 @@ struct FotaCliDefer {
   uint8_t  out_path_len;               //en: OUT_PATH_UNKNOWN → flood reply
   uint8_t  path_hash_size;             //en: for flood reply
   char     fargs[48];                  //en: arguments (" verify", " agc", …)
+  char     tag[4];                     //en: "NN|" companion-CLI tag to reflect in the reply ("" = none)
 };
 
 // ── FK_DEBUG_STACKTRACE ──────────────────────────────────────────────────────
@@ -122,22 +123,24 @@ static uint32_t loop_stack_used_now() {
 #endif
 
 // =====================================================================
-//en: RAW log — every raw (CRC-OK) frame, BEFORE any decoding/decryption.
-//en: Answers the question "do any packets reach the repeater at all?" — if rawrx
-//en: grows but GRP_DATA/onGroupDataRecv does not, the fault is in decoding, not RF.
-//en: Called from MyMesh::logRxRaw (hook).
-//sk: RAW log — každý surový (CRC-OK) rámec, EŠTE PRED dekódovaním/dešifrovaním.
-//sk: Odpoveď na otázku "prichádzajú na repeater hocijaké pakety?" — ak rawrx
-//sk: rastie ale GRP_DATA/onGroupDataRecv nie, chyba je v dekódovaní, nie v RF.
-//sk: Volané z MyMesh::logRxRaw (hook).
+//en: RAW log — every raw (CRC-OK) frame, on RX BEFORE any decoding/decryption and
+//en: on TX right after it is handed to the radio. Answers "do packets reach the
+//en: repeater / does it actually send?" — if rawrx grows but GRP_DATA/onGroupDataRecv
+//en: does not, the fault is in decoding, not RF; rawtx shows what we put on air.
+//en: Shared body for both directions; called from MyMesh::logRxRaw / logTxRaw (hooks).
+//sk: RAW log — každý surový (CRC-OK) rámec, na RX EŠTE PRED dekódovaním/dešifrovaním a
+//sk: na TX hneď po odovzdaní rádiu. Odpoveď na "prichádzajú pakety na repeater / naozaj
+//sk: odosiela?" — ak rawrx rastie ale GRP_DATA/onGroupDataRecv nie, chyba je v dekódovaní,
+//sk: nie v RF; rawtx ukazuje, čo sme dali do éteru.
+//sk: Zdieľané telo pre oba smery; volané z MyMesh::logRxRaw / logTxRaw (hooky).
 // =====================================================================
-void MyMesh::fotaLogRxRaw(float snr, float rssi, const uint8_t raw[], int len) {
-  _fota_raw_rx++;
-  _fota_raw_last_len  = (uint32_t)len;
-  _fota_raw_last_rssi = rssi;
-  _fota_raw_last_snr  = snr;
-  FOTA_DEBUG_PRINT("[FOTA] RAW #%lu len=%d rssi=%d snr=%.1f",
-                   (unsigned long)_fota_raw_rx, len, (int)rssi, snr);
+//en: fota_channel_hash0 = our FOTA channel_hash[0], or -1 when FOTA not ready.
+//en: have_sig=true → print rssi/snr (RX only); TX has no receive metrics.
+//sk: fota_channel_hash0 = channel_hash[0] nášho FOTA kanála, alebo -1 keď FOTA nie je ready.
+//sk: have_sig=true → vypíš rssi/snr (len RX); TX nemá prijímacie metriky.
+static void fota_log_raw_line(const char* dir, unsigned long seq, bool have_sig,
+                              float rssi, float snr, int fota_channel_hash0,
+                              const uint8_t raw[], int len) {
   if (len > 0) {
     //en: PAYLOAD_TYPE = (hdr >> 2) & 0x0F (NOT the low 4 bits — those are route+part of type);
     //en: route = hdr & 0x03.  (4=ADVERT, 7=ANON_REQ, 2=TXT, 1=RESPONSE, 5=GRP_TXT, 6=GRP_DATA)
@@ -159,16 +162,52 @@ void MyMesh::fotaLogRxRaw(float snr, float rssi, const uint8_t raw[], int len) {
       path_byte_len = path_count * hsize;
       payload_off   = path_off + path_byte_len;
     }
+
+    //en: FK - only packets with path < 4 - not to mess debug outpuy wit many data
+    if (path_count > 4) return;
+
+
+    if (have_sig)
+      FOTA_DEBUG_PRINT("[FOTA] %s RAW #%lu len=%d rssi=%d snr=%.1f",
+                       dir, seq, len, (int)rssi, snr);
+    else
+      FOTA_DEBUG_PRINT("[FOTA] %s RAW #%lu len=%d", dir, seq, len);
+
     //en: Our FOTA? GRP_DATA on our FOTA channel — channel_hash is the 1st payload byte
     //en: (Mesh.cpp: channel_hash = payload[0]); readable already here, before decryption.
     //sk: Naša FOTA? GRP_DATA na našom FOTA kanáli — channel_hash je 1. bajt payloadu
     //sk: (Mesh.cpp: channel_hash = payload[0]); čitateľné už tu, pred dešifrovaním.
-    bool is_fota = (pt == PAYLOAD_TYPE_GRP_DATA && _fota_ready
+    bool is_fota = (pt == PAYLOAD_TYPE_GRP_DATA && fota_channel_hash0 >= 0
                     && payload_off >= 0 && payload_off < len
-                    && raw[payload_off] == _fota_channel.hash[0]);
-    FOTA_DEBUG_PRINT(" type=%u(%s%s) route=%u hdr=0x%X",
-                     (unsigned)pt, payload_type_name(pt), is_fota ? "/FOTA" : "",
-                     (unsigned)route, (unsigned)raw[0]);
+                    && raw[payload_off] == (uint8_t)fota_channel_hash0);
+    FOTA_DEBUG_PRINT(" type=%u(%s%s)",
+                     (unsigned)pt, payload_type_name(pt), is_fota ? "/FOTA" : "");
+    //en: 1B hashes readable without decryption, by payload type (Mesh.cpp layouts):
+    //en:  PATH/REQ/RESPONSE/TXT_MSG: [dest_hash][src_hash][MAC+cipher] → dsth+srch
+    //en:  ANON_REQ: [dest_hash][sender pub_key 32B][…] → dsth + srch=pub_key[0]
+    //en:  ADVERT:   [pub_key 32B][…]                   → srch=pub_key[0]
+    //en:  GRP_TXT/GRP_DATA: [channel_hash][MAC+cipher] → chah
+    //en:  ACK/ostatné: nič.
+    //sk: 1B hashe čitateľné bez dešifrovania, podľa typu payloadu (layouty z Mesh.cpp):
+    //sk:  PATH/REQ/RESPONSE/TXT_MSG: [dest_hash][src_hash][MAC+šifra] → dsth+srch
+    //sk:  ANON_REQ: [dest_hash][sender pub_key 32B][…] → dsth + srch=pub_key[0]
+    //sk:  ADVERT:   [pub_key 32B][…]                   → srch=pub_key[0]
+    //sk:  GRP_TXT/GRP_DATA: [channel_hash][MAC+šifra] → chah
+    //sk:  ACK/ostatné: nič.
+    if (payload_off >= 0) {
+      if ((pt == PAYLOAD_TYPE_PATH || pt == PAYLOAD_TYPE_REQ ||
+           pt == PAYLOAD_TYPE_RESPONSE || pt == PAYLOAD_TYPE_TXT_MSG ||
+           pt == PAYLOAD_TYPE_ANON_REQ) && payload_off + 1 < len) {
+        FOTA_DEBUG_PRINT(" srch=%02X dsth=%02X",
+                         (unsigned)raw[payload_off + 1], (unsigned)raw[payload_off]);
+      } else if (pt == PAYLOAD_TYPE_ADVERT && payload_off < len) {
+        FOTA_DEBUG_PRINT(" srch=%02X", (unsigned)raw[payload_off]);
+      } else if ((pt == PAYLOAD_TYPE_GRP_TXT || pt == PAYLOAD_TYPE_GRP_DATA)
+                 && payload_off < len) {
+        FOTA_DEBUG_PRINT(" chah=%02X", (unsigned)raw[payload_off]);
+      }
+    }
+    FOTA_DEBUG_PRINT(" route=%u hdr=0x%X", (unsigned)route, (unsigned)raw[0]);
     //en: Path: hop count + hash bytes.  path[0] = zero-hop or a fresh flood from the
     //en: source; every forwarding repeater appends its own hash → path[N] gets longer.
     //sk: Cesta: počet hopov + hash bajty.  path[0] = zero-hop alebo čerstvý flood od
@@ -185,6 +224,27 @@ void MyMesh::fotaLogRxRaw(float snr, float rssi, const uint8_t raw[], int len) {
   int n8 = len < 8 ? len : 8;
   for (int k = 0; k < n8; k++) FOTA_DEBUG_PRINT("%02X", (unsigned)raw[k]);
   FOTA_DEBUG_PRINTLN("");
+}
+
+//en: RX RAW — heard frames (before decode). Called from MyMesh::logRxRaw.
+//sk: RX RAW — počuté rámce (pred dekódovaním). Volané z MyMesh::logRxRaw.
+void MyMesh::fotaLogRxRaw(float snr, float rssi, const uint8_t raw[], int len) {
+  _fota_raw_rx++;
+  _fota_raw_last_len  = (uint32_t)len;
+  _fota_raw_last_rssi = rssi;
+  _fota_raw_last_snr  = snr;
+  fota_log_raw_line("RX", (unsigned long)_fota_raw_rx, true, rssi, snr,
+                    _fota_ready ? (int)_fota_channel.hash[0] : -1, raw, len);
+}
+
+//en: TX RAW — frames the repeater sent (own adverts/ACKs + forwarded floods/direct).
+//en: Called from MyMesh::logTxRaw right after the frame is handed to the radio.
+//sk: TX RAW — rámce, ktoré repeater odoslal (vlastné adverty/ACK + preposlané flood/direct).
+//sk: Volané z MyMesh::logTxRaw hneď po odovzdaní rámca rádiu.
+void MyMesh::fotaLogTxRaw(const uint8_t raw[], int len) {
+  _fota_raw_tx++;
+  fota_log_raw_line("TX", (unsigned long)_fota_raw_tx, false, 0.0f, 0.0f,
+                    _fota_ready ? (int)_fota_channel.hash[0] : -1, raw, len);
 }
 
 // =====================================================================
@@ -266,6 +326,7 @@ void MyMesh::fotaEarlyInit() {
   _fota_cli_buf = nullptr;
   _fota_apply_deadline = 0;
   _fota_raw_rx = 0;
+  _fota_raw_tx = 0;
   _fota_raw_last_len = 0;
   _fota_raw_last_rssi = _fota_raw_last_snr = 0;
 }
@@ -293,7 +354,55 @@ void MyMesh::fotaBegin() {
 bool MyMesh::fotaHandleCliCommand(const char* command, char* reply) {
   const char* fargs = fota_args_of(command);
   if (!fargs) return false;
+#if FOTA_DEBUG
+  //en: Serial-only debug path commands (getacl / getpath|setpath <pub_key prefix>).
+  //sk: Serial-only debug path príkazy (getacl / getpath|setpath <pub_key prefix>).
+  if (fotaHandleSerialPathCli(fargs, reply)) return true;
+#endif
   runFotaCli(fargs, reply);
+  return true;
+}
+
+//en: Parse a comma hop list ("a1,3f" / "11aa,22bb" / "112233,..."): token width
+//en: (2/4/6 hex chars) selects the hash size (1/2/3 B per hop). Hops are in the
+//en: order the REPEATER transmits them (repeater -> client). On success fills
+//en: out[] and the ENCODED path_len ((hash_size-1)<<6 | hop_count); on failure
+//en: writes a short reason into err (>= 48 B).
+//sk: Parsuje čiarkový zoznam hopov ("a1,3f" / "11aa,22bb" / "112233,..."): šírka
+//sk: tokenu (2/4/6 hex znakov) určuje hash size (1/2/3 B na hop). Hopy sú v poradí,
+//sk: v akom ich REPEATER vysiela (repeater -> klient). Pri úspechu naplní out[]
+//sk: a ENCODED path_len ((hash_size-1)<<6 | hop_count); pri chybe krátky dôvod do err (>= 48 B).
+static bool fota_parse_path_arg(const char* s, uint8_t out[MAX_PATH_SIZE],
+                                uint8_t* encoded_len, char* err) {
+  while (*s == ' ') s++;
+  if (*s == 0) { strcpy(err, "prazdna cesta"); return false; }
+  int tok_w = -1, count = 0, nbytes = 0;
+  const char* p = s;
+  while (*p) {
+    uint8_t tokbytes[3];
+    int w = 0;
+    while (*p && *p != ',' && *p != ' ') {
+      char c = *p;
+      int v = (c >= '0' && c <= '9') ? c - '0'
+            : (c >= 'a' && c <= 'f') ? c - 'a' + 10
+            : (c >= 'A' && c <= 'F') ? c - 'A' + 10 : -1;
+      if (v < 0) { sprintf(err, "zly hex znak '%c'", c); return false; }
+      if (w >= 6) { strcpy(err, "hop > 3B"); return false; }
+      if ((w & 1) == 0) tokbytes[w / 2] = (uint8_t)(v << 4);
+      else              tokbytes[w / 2] |= (uint8_t)v;
+      w++; p++;
+    }
+    if (w != 2 && w != 4 && w != 6) { strcpy(err, "hop musi mat 2/4/6 hex znakov"); return false; }
+    if (tok_w < 0) tok_w = w;
+    else if (w != tok_w) { strcpy(err, "hopy maju roznu dlzku"); return false; }
+    if (count >= 63 || nbytes + w / 2 > MAX_PATH_SIZE) { strcpy(err, "cesta pridlha"); return false; }
+    memcpy(&out[nbytes], tokbytes, w / 2);
+    nbytes += w / 2;
+    count++;
+    while (*p == ' ') p++;
+    if (*p == ',') { p++; while (*p == ' ') p++; }
+  }
+  *encoded_len = (uint8_t)(((tok_w / 2 - 1) << 6) | count);
   return true;
 }
 
@@ -301,11 +410,15 @@ bool MyMesh::fotaHandleCliCommand(const char* command, char* reply) {
 //en: command. Does NOT process inline — we are deep in the RX callstack (verify would
 //en: overflow the 4 kB loop-task stack and SILENTLY overwrite adjacent heap = radio
 //en: state). Snapshot the client → shared FotaBuffer; loop() (fotaLoop) processes it and replies.
+//en: EXCEPTION: getpath/setpath/missall-path-prefix are handled inline right here — they are
+//en: cheap (no LFS I/O) and need the live ACL client entry, which the deferred path lacks.
 //sk: LoRa cesta (hook z MyMesh::onPeerDataRecv). Vracia false ak to nie je FOTA
 //sk: príkaz. NEspracúva inline — sme hlboko v RX callstacku (verify by pretiekol
 //sk: 4 kB loop-task stack a TICHO prepísal susedný heap = stav rádia). Snapshot
 //sk: klienta → zdieľaný FotaBuffer, spracuje a odpovie loop() (fotaLoop).
-bool MyMesh::fotaHandleLoRaCli(const ClientInfo* client, const uint8_t* secret,
+//sk: VÝNIMKA: getpath/setpath/missall-s-cestou sa riešia inline priamo tu — sú lacné
+//sk: (žiadne LFS I/O) a potrebujú živý ACL záznam klienta, ktorý deferred cesta nemá.
+bool MyMesh::fotaHandleLoRaCli(ClientInfo* client, const uint8_t* secret,
                                const char* command, char* reply,
                                uint8_t path_hash_size, uint32_t sender_timestamp) {
   //en: Echo the command received over the LoRa admin CLI (diagnostics — the operator at
@@ -315,11 +428,93 @@ bool MyMesh::fotaHandleLoRaCli(const ClientInfo* client, const uint8_t* secret,
   //sk: vidí, čo bolo zadané vzdialene; retry duplikáty filtruje volajúci).
   //sk: Párové značky: [LoRa->CLI] = prišlo z LoRa, [CLI->LoRa] = posielaná odpoveď.
   FOTA_DEBUG_PRINTLN("[LoRa->CLI] %s", command);
+  //en: Optional "NN|" companion-CLI tag (the app's RepeaterCommandService frames every
+  //en: command as "NN|cmd" and matches the response by the reflected tag) — mirror of
+  //en: MyMesh::handleCommand:1239. Without this, tagged 'fota …' commands fell through
+  //en: to the inline CommonCLI hook: missall-with-path was never parsed AND heavy FOTA
+  //en: commands ran on the deep RX callstack instead of being deferred.
+  //sk: Voliteľný "NN|" companion-CLI tag (appkin RepeaterCommandService balí každý
+  //sk: príkaz ako "NN|cmd" a odpoveď páruje podľa zrkadleného tagu) — zrkadlo
+  //sk: MyMesh::handleCommand:1239. Bez tohto tagované 'fota …' príkazy prepadli do
+  //sk: inline CommonCLI hooku: missall-s-cestou sa neparsoval A ťažké FOTA príkazy
+  //sk: bežali na hlbokom RX callstacku namiesto deferu.
+  while (*command == ' ') command++;
+  const char* tag = NULL;
+  if (strlen(command) > 4 && command[2] == '|') { tag = command; command += 3; }
   const char* fargs = fota_args_of(command);
   if (!fargs) return false;
+  char* reply_all = reply;             //en: full buffer incl. tag (defer branch blanks it)
+  if (tag) { memcpy(reply, tag, 3); reply += 3; }   //en: reflect tag into inline replies
+  *reply = 0;
+
+  //en: Inline return-path commands (reply is sent by the caller via client->out_path,
+  //en: so a fresh setpath already answers DIRECT down the new route).
+  //sk: Inline príkazy spätnej cesty (odpoveď posiela volajúci cez client->out_path,
+  //sk: takže čerstvý setpath už odpovedá DIRECT po novej ceste).
+  {
+    const char* a = fargs;
+    while (*a == ' ') a++;
+
+    if (strcmp(a, "getpath") == 0) {
+      //en: Report the ACL out_path for THIS client (what the repeater replies along).
+      //sk: Vypíš ACL out_path pre TOHTO klienta (kadiaľ mu repeater odpovedá).
+      if (client->out_path_len == OUT_PATH_UNKNOWN) {
+        strcpy(reply, "FOTA path: unknown (reply=flood)");
+      } else {
+        uint8_t hs  = (uint8_t)((client->out_path_len >> 6) + 1);
+        uint8_t cnt = (uint8_t)(client->out_path_len & 63);
+        char* p = reply + sprintf(reply, "FOTA path (%uB,%u):", (unsigned)hs, (unsigned)cnt);
+        for (uint8_t i = 0; i < cnt; i++) {
+          if (p - reply > 150) { *p++ = '+'; break; }   //en: LoRa reply cap  //sk: strop LoRa odpovede
+          *p++ = (i == 0) ? ' ' : ',';
+          for (uint8_t b = 0; b < hs; b++) p += sprintf(p, "%02x", client->out_path[i * hs + b]);
+        }
+        *p = 0;
+      }
+      return true;
+    }
+
+    if (strncmp(a, "setpath", 7) == 0 && (a[7] == ' ' || a[7] == 0)) {
+      uint8_t path[MAX_PATH_SIZE]; uint8_t enc; char err[48];
+      const char* arg = a + 7;
+      while (*arg == ' ') arg++;
+      if (*arg == 0) {
+        strcpy(reply, "FOTA setpath: zadaj hopy nn,nn / nnnn,... / nnnnnn,... (1-3B)");
+      } else if (!fota_parse_path_arg(arg, path, &enc, err)) {
+        sprintf(reply, "FOTA setpath ERR: %s", err);
+      } else {
+        uint8_t hs = (uint8_t)((enc >> 6) + 1), cnt = (uint8_t)(enc & 63);
+        memcpy(client->out_path, path, (size_t)cnt * hs);
+        client->out_path_len = enc;
+        FOTA_DEBUG_PRINTLN("[FOTA] setpath: %u hopov (hs=%u) ulozene do ACL", (unsigned)cnt, (unsigned)hs);
+        sprintf(reply, "FOTA setpath OK: %u %s (%uB)", (unsigned)cnt, cnt == 1 ? "hop" : "hopy", (unsigned)hs);
+      }
+      return true;
+    }
+
+    if (strncmp(a, "missall ", 8) == 0) {
+      //en: missall with a return path: store the path into the ACL first, then defer a
+      //en: plain "missall" — the defer snapshot below copies the FRESH out_path, so the
+      //en: (potentially long) missing list already goes back DIRECT.
+      //sk: missall so spätnou cestou: cestu najprv ulož do ACL a defer-ni holé
+      //sk: "missall" — defer snapshot nižšie skopíruje ČERSTVÝ out_path, takže
+      //sk: (potenciálne dlhý) zoznam chýbajúcich ide späť už DIRECT.
+      uint8_t path[MAX_PATH_SIZE]; uint8_t enc; char err[48];
+      if (!fota_parse_path_arg(a + 8, path, &enc, err)) {
+        sprintf(reply, "FOTA missall ERR cesta: %s", err);
+        return true;
+      }
+      uint8_t hs = (uint8_t)((enc >> 6) + 1), cnt = (uint8_t)(enc & 63);
+      memcpy(client->out_path, path, (size_t)cnt * hs);
+      client->out_path_len = enc;
+      FOTA_DEBUG_PRINTLN("[FOTA] missall: cesta %u hopov (hs=%u) ulozena do ACL", (unsigned)cnt, (unsigned)hs);
+      fargs = " missall";
+    }
+  }
+
   if (_fota_cli_pending) {
     strcpy(reply, "FOTA: zaneprázdnené, skús neskôr");
-  } else if (deferFotaCli(client, secret, fargs, path_hash_size, sender_timestamp)) {
+  } else if (deferFotaCli(client, secret, fargs, path_hash_size, sender_timestamp, tag)) {
 #ifdef FOTA_INFO_MSG
     //en: Optional intermediate "processing" packet. DEFAULT OFF: through a repeater two
     //en: packets (this one + the result from loop()) go out back-to-back and the second
@@ -329,13 +524,128 @@ bool MyMesh::fotaHandleLoRaCli(const ClientInfo* client, const uint8_t* secret,
     //sk: — sa môže stratiť. Bez flagu pošleme len jeden paket: finálny výsledok.
     strcpy(reply, "FOTA: spracúvam, výsledok o chvíľu...");
 #else
-    *reply = 0;   //en: no intermediate packet; the reply is sent only once, from loop()
+    reply_all[0] = 0;   //en: no intermediate packet (not even a bare tag); the reply is sent only once, from loop()
 #endif
   } else {
     strcpy(reply, "FOTA: defer zlyhal (buffer)");
   }
   return true;
 }
+
+#if FOTA_DEBUG
+// =====================================================================
+//en: Serial-only debug CLI for return paths (gated by FOTA_DEBUG). The serial
+//en: console has no ACL client context, so these take an explicit pub_key hex
+//en: prefix: "fota getpath <pfx>", "fota setpath <pfx> <cesta>", "fota getacl".
+//en: The LoRa admin CLI has the client-context variants inline in fotaHandleLoRaCli.
+//sk: Serial-only debug CLI pre spätné cesty (gated FOTA_DEBUG). Serial konzola
+//sk: nemá ACL kontext klienta, preto tieto berú explicitný hex prefix pub_key:
+//sk: "fota getpath <pfx>", "fota setpath <pfx> <cesta>", "fota getacl".
+//sk: LoRa admin CLI má klientské varianty inline vo fotaHandleLoRaCli.
+// =====================================================================
+
+//en: Format a client's out_path as "(1B,2): a1,3f" (or "unknown") into buf.
+//sk: Naformátuj out_path klienta ako "(1B,2): a1,3f" (alebo "unknown") do buf.
+static const char* fota_client_path_str(const ClientInfo* c, char* buf, int cap) {
+  if (c->out_path_len == OUT_PATH_UNKNOWN) {
+    strncpy(buf, "unknown", cap); buf[cap - 1] = 0; return buf;
+  }
+  uint8_t hs  = (uint8_t)((c->out_path_len >> 6) + 1);
+  uint8_t cnt = (uint8_t)(c->out_path_len & 63);
+  char* p = buf + sprintf(buf, "(%uB,%u):", (unsigned)hs, (unsigned)cnt);
+  for (uint8_t i = 0; i < cnt; i++) {
+    if ((int)(p - buf) + hs * 2 + 3 >= cap) { *p++ = '+'; break; }
+    *p++ = (i == 0) ? ' ' : ',';
+    for (uint8_t b = 0; b < hs; b++) p += sprintf(p, "%02x", c->out_path[i * hs + b]);
+  }
+  *p = 0;
+  return buf;
+}
+
+//en: Find an ACL client by a pub_key hex prefix (2-12 hex chars, even count).
+//sk: Nájdi ACL klienta podľa hex prefixu pub_key (2-12 hex znakov, párny počet).
+static ClientInfo* fota_client_by_prefix(ClientACL& acl, const char* pfx, int pfx_len, char* err) {
+  uint8_t key[6];
+  if (pfx_len < 2 || pfx_len > 12 || (pfx_len & 1)) { strcpy(err, "prefix = 2-12 hex znakov"); return NULL; }
+  for (int i = 0; i < pfx_len; i++) {
+    char c = pfx[i];
+    int v = (c >= '0' && c <= '9') ? c - '0'
+          : (c >= 'a' && c <= 'f') ? c - 'a' + 10
+          : (c >= 'A' && c <= 'F') ? c - 'A' + 10 : -1;
+    if (v < 0) { strcpy(err, "prefix nie je hex"); return NULL; }
+    if (i & 1) key[i / 2] |= (uint8_t)v;
+    else       key[i / 2]  = (uint8_t)(v << 4);
+  }
+  ClientInfo* c = acl.getClient(key, pfx_len / 2);
+  if (!c) strcpy(err, "klient nenajdeny v ACL");
+  return c;
+}
+
+bool MyMesh::fotaHandleSerialPathCli(const char* fargs, char* reply) {
+  const char* a = fargs;
+  while (*a == ' ') a++;
+
+  if (strcmp(a, "getacl") == 0) {
+    int n = acl.getNumClients();
+    FOTA_DEBUG_PRINTLN("[FOTA] ACL: %d klientov", n);
+    for (int i = 0; i < n; i++) {
+      ClientInfo* c = acl.getClientByIdx(i);
+      char pb[96];
+      const uint8_t* k = c->id.pub_key;
+      FOTA_DEBUG_PRINTLN("[FOTA] acl[%d] %02x%02x%02x%02x%02x%02x perm=0x%02X%s path %s",
+                         i, k[0], k[1], k[2], k[3], k[4], k[5], (unsigned)c->permissions,
+                         c->isAdmin() ? " admin" : "", fota_client_path_str(c, pb, sizeof(pb)));
+    }
+    sprintf(reply, "FOTA getacl: %d klientov -> serial", n);
+    return true;
+  }
+
+  if (strncmp(a, "getpath", 7) == 0 && (a[7] == ' ' || a[7] == 0)) {
+    const char* arg = a + 7;
+    while (*arg == ' ') arg++;
+    if (*arg == 0) { strcpy(reply, "FOTA getpath <pubkey-prefix-hex>"); return true; }
+    int len = 0;
+    while (arg[len] && arg[len] != ' ') len++;
+    char err[48];
+    ClientInfo* c = fota_client_by_prefix(acl, arg, len, err);
+    if (!c) { sprintf(reply, "FOTA getpath ERR: %s", err); return true; }
+    char pb[96];
+    sprintf(reply, "FOTA path[%.*s] %s", len, arg, fota_client_path_str(c, pb, sizeof(pb)));
+    return true;
+  }
+
+  if (strncmp(a, "setpath", 7) == 0 && (a[7] == ' ' || a[7] == 0)) {
+    const char* arg = a + 7;
+    while (*arg == ' ') arg++;
+    int plen = 0;
+    while (arg[plen] && arg[plen] != ' ') plen++;
+    const char* rest = arg + plen;
+    while (*rest == ' ') rest++;
+    if (*arg == 0 || *rest == 0) {
+      strcpy(reply, "FOTA setpath <pubkey-prefix-hex> <cesta nn,nn|nnnn,...|nnnnnn,...>");
+      return true;
+    }
+    char err[48];
+    ClientInfo* c = fota_client_by_prefix(acl, arg, plen, err);
+    if (!c) { sprintf(reply, "FOTA setpath ERR: %s", err); return true; }
+    uint8_t path[MAX_PATH_SIZE]; uint8_t enc;
+    if (!fota_parse_path_arg(rest, path, &enc, err)) {
+      sprintf(reply, "FOTA setpath ERR: %s", err);
+      return true;
+    }
+    uint8_t hs = (uint8_t)((enc >> 6) + 1), cnt = (uint8_t)(enc & 63);
+    memcpy(c->out_path, path, (size_t)cnt * hs);
+    c->out_path_len = enc;
+    FOTA_DEBUG_PRINTLN("[FOTA] setpath[%.*s]: %u hopov (hs=%u) ulozene do ACL",
+                       plen, arg, (unsigned)cnt, (unsigned)hs);
+    sprintf(reply, "FOTA setpath[%.*s] OK: %u %s (%uB)",
+            plen, arg, (unsigned)cnt, cnt == 1 ? "hop" : "hopy", (unsigned)hs);
+    return true;
+  }
+
+  return false;
+}
+#endif  // FOTA_DEBUG
 
 //en: Body of the FOTA CLI (agc diagnostics + fota_handle_command). Called from handleCommand
 //en: (Serial, inline) and from loop() (deferred LoRa path) — ALWAYS on a shallow stack.
@@ -385,17 +695,32 @@ void MyMesh::runFotaCli(const char* fargs, char* reply) {
 //sk: neprečíta a neuvoľní (potom ho fota_patch_to_file môže požičať na hpatch cache).
 bool MyMesh::deferFotaCli(const ClientInfo* client, const uint8_t* secret,
                           const char* fargs, uint8_t path_hash_size,
-                          uint32_t sender_timestamp) {
+                          uint32_t sender_timestamp, const char* tag) {
   uint8_t* buf = fota_get_buffer(sizeof(FotaCliDefer));
   if (!buf) return false;
   FotaCliDefer* s = (FotaCliDefer*)buf;
   memcpy(s->dest_pub, client->id.pub_key, PUB_KEY_SIZE);
   memcpy(s->secret, secret, PUB_KEY_SIZE);
   s->sender_timestamp = sender_timestamp;
+  if (tag) { memcpy(s->tag, tag, 3); s->tag[3] = 0; }
+  else     { s->tag[0] = 0; }
   s->out_path_len   = client->out_path_len;
   s->path_hash_size = path_hash_size;
-  if (client->out_path_len != OUT_PATH_UNKNOWN && client->out_path_len <= MAX_PATH_SIZE) {
-    memcpy(s->out_path, client->out_path, client->out_path_len);
+  //en: out_path_len is the ENCODED path_len (hop count in low 6 bits, hash_size-1 in top 2),
+  //en: NOT a byte count. The old guard "out_path_len <= MAX_PATH_SIZE" compared the encoded
+  //en: value against a byte limit, so ANY path with >=2-byte hashes (encoded >= 0x40|count = 65+)
+  //en: was silently skipped: out_path stayed as FotaBuffer garbage yet out_path_len was set, so
+  //en: sendDeferredCliReply() did sendDirect() down a garbage path => reply lost. Decode to the
+  //en: real byte length and guard THAT.
+  //sk: out_path_len je ENCODED path_len (počet hopov v spodných 6 bitoch, hash_size-1 v horných 2),
+  //sk: NIE počet bajtov. Starý guard "out_path_len <= MAX_PATH_SIZE" porovnával encoded hodnotu
+  //sk: s bajtovým limitom, takže KAŽDÁ cesta s >=2-bajtovými hashmi (encoded >= 0x40|count = 65+)
+  //sk: sa ticho preskočila: out_path ostal smetím z FotaBuffer, no out_path_len bol nastavený, tak
+  //sk: sendDeferredCliReply() poslal sendDirect() po smetnej ceste => odpoveď stratená. Dekóduj na
+  //sk: skutočnú bajtovú dĺžku a strážiž TÚ.
+  if (client->out_path_len != OUT_PATH_UNKNOWN) {
+    uint8_t nbytes = (client->out_path_len & 63) * ((client->out_path_len >> 6) + 1);
+    if (nbytes <= MAX_PATH_SIZE) memcpy(s->out_path, client->out_path, nbytes);
   }
   strncpy(s->fargs, fargs, sizeof(s->fargs) - 1);
   s->fargs[sizeof(s->fargs) - 1] = 0;
@@ -482,11 +807,19 @@ void MyMesh::fotaLoop() {
     _fota_cli_pending = false;
 
     char reply[166];
-    reply[0] = 0;
-    runFotaCli(snap.fargs, reply);   //en: heavy work (verify=hpatch+SHA) on a shallow stack
-    sendDeferredCliReply(snap.dest_pub, snap.secret, snap.out_path,
-                         snap.out_path_len, snap.path_hash_size, reply,
-                         snap.sender_timestamp);
+    //en: Reflect the "NN|" tag (if the command carried one) so the app's
+    //en: RepeaterCommandService can match the deferred reply to its request.
+    //sk: Zrkadli "NN|" tag (ak ho príkaz niesol), aby appkin RepeaterCommandService
+    //sk: vedel odloženú odpoveď spárovať s requestom.
+    char* rp = reply;
+    if (snap.tag[0]) { memcpy(rp, snap.tag, 3); rp += 3; }
+    rp[0] = 0;
+    runFotaCli(snap.fargs, rp);   //en: heavy work (verify=hpatch+SHA) on a shallow stack
+    if (rp[0]) {
+      sendDeferredCliReply(snap.dest_pub, snap.secret, snap.out_path,
+                           snap.out_path_len, snap.path_hash_size, reply,
+                           snap.sender_timestamp);
+    }
   }
 
   //en: Deferred flash: 'fota flash' sets fota_apply_pending() and sends an "accepted" ACK.
@@ -514,10 +847,10 @@ void MyMesh::fotaLoop() {
   //en: TEMPORARY: heartbeat with build# (to detect the version during FOTA tests over Serial)
   static unsigned long s_next_build_print = 0;
   if (s_next_build_print == 0 || millisHasNowPassed(s_next_build_print)) {
-    s_next_build_print = futureMillis(5000);
-    FOTA_DEBUG_PRINT("[FOTA] AALIVE build #%lu  freq=%.3f sf=%u rawrx=%lu rxpkts=%lu rxerr=%lu",
+    s_next_build_print = futureMillis(25000);
+    FOTA_DEBUG_PRINT("[FOTA] AALIVE build #%lu  freq=%.3f sf=%u rawrx=%lu rawtx=%lu rxpkts=%lu rxerr=%lu",
                      (unsigned long)FW_BUILD_NUMBER, _prefs.freq, (unsigned)_prefs.sf,
-                     (unsigned long)_fota_raw_rx,
+                     (unsigned long)_fota_raw_rx, (unsigned long)_fota_raw_tx,
                      (unsigned long)radio_driver.getPacketsRecv(),
                      (unsigned long)radio_driver.getPacketsRecvErrors());
 #ifdef FK_DEBUG_STACKTRACE

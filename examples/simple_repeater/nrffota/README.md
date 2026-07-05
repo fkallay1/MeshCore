@@ -69,17 +69,23 @@ nekompilujú — CLI odpovede (`reply`) fungujú vždy.
 | `fota verify`     | dry-run: aplikuj patch → SHA256, **nič nezapisuje**        |
 | `fota flash`      | **OSTRÝ** flash + reboot (nevráti sa pri úspechu)          |
 | `fota clear`      | vymaž FOTA session z FS                                    |
-| `fota miss`       | chýbajúce chunky ako rozsahy „od-do" (strop 20 tokenov)    |
-| `fota missall`    | všetky chýbajúce (bez tokenového stropu)                   |
+| `fota miss`       | chýbajúce chunky, čiarkami (`H,S,0-4,6,8,9`; dvojica `a,b`; strop 20 tokenov) |
+| `fota missall [cesta]` | všetky chýbajúce (bez stropu); voliteľná cesta (repeater→klient hopy, 2/4/6-hex tokeny) sa uloží do ACL → odpovede idú direct |
+| `fota getpath`    | LoRa: vypíš ACL spätnú cestu volajúceho klienta            |
+| `fota setpath <cesta>` | LoRa: ulož spätnú cestu klienta do ACL (odpoveď už ide ňou) |
+| `fota getacl`     | Serial+FOTA_DEBUG: výpis ACL s cestami (`getpath`/`setpath <pubkey-prefix> …` majú serial varianty tiež) |
 | `fota nack`       | vypíš chýbajúce chunky (NACK formát)                       |
 | `fota decompress` | debug: dekomprimuj patch.bin cez puff_stream, vypíš FNV    |
 | `fota dbg`        | vypíš flasher debug marker (GPREGRET2/RESETREAS + trace)   |
 | `fota id`         | FW identita (build#, veľkosť, running SHA256)              |
 | `fota agc`        | read-only diagnostika rádia (RxGain, RSSI, noise floor)    |
 
-Legacy prefix `ota …` stále funguje (alias, viď `FOTA-CLI-ALIAS` vo FotaMyMesh.cpp).
-Na Serial sa píšu priamo (`fota status`). Cez LoRa idú ako admin CLI príkazy
-(rovnaká cesta ako ostatné MeshCore CLI cez `onPeerDataRecv` TXT).
+Miss total v odpovedi: `/T` overený; `/~T(noS)` odhad z META pred SIG; `(noH)`/`(noHS)`
+bez META — vtedy zoznam končí `N-??` (N = najvyšší prijatý + 1; appka rozvinie z totalu
+balíka). Legacy prefix `ota …` stále funguje (alias, viď `FOTA-CLI-ALIAS` vo FotaMyMesh.cpp).
+Na Serial sa píšu priamo (`fota status`). Cez LoRa idú ako admin CLI príkazy (rovnaká cesta
+ako ostatné MeshCore CLI cez `onPeerDataRecv` TXT); voliteľný companion tag `NN|` pred
+príkazom sa strippe a zrkadlí v odpovedi.
 
 ## Posielanie patchu z PC
 

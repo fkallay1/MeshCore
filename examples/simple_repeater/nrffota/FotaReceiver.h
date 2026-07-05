@@ -43,15 +43,28 @@ void fota_send_nack();
 //en: fills out[] with the first max_out indices (*out_n; both may be NULL = count only).
 //en: fota_print_missing prints to Serial, fota_format_missing writes into a buffer (LoRa reply)
 //en: — both as "from-to" ranges; 'limit' = cap in TOKENS (number=1, range=2), <=0 = all.
-//en: Range: HEADER known → [0..total-1]; otherwise the window of received ones.
+//en: Range: total known OR estimated from META → [0..est-1]; otherwise the window of received ones.
 //sk: Chýbajúce chunky. fota_calc_missing vráti celkový počet (-1 = zero info yet) a
 //sk: naplní out[] prvými max_out indexmi (*out_n; oba môžu byť NULL = len počet).
 //sk: fota_print_missing vypíše na Serial, fota_format_missing zapíše do bufferu (LoRa reply)
 //sk: — obe ako rozsahy "od-do"; 'limit' = strop v TOKENOCH (číslo=1, rozsah=2), <=0 = všetky.
-//sk: Rozsah: HEADER známy → [0..total-1]; inak okno prijatých.
+//sk: Rozsah: total známy ALEBO odhadnutý z META → [0..est-1]; inak okno prijatých.
+//en: Output: comma-separated tokens ("0-4,6,8,9"; a pair as "a,b"); 'lead' is emitted
+//en: before the FIRST token (caller-supplied "," or " " glue). With no META the unknown
+//en: tail is marked "N-??" (N = highest received + 1 — the exact tail start for the app;
+//en: N itself may not exist, the app drops the marker when N is beyond the package total).
+//sk: Výstup: tokeny oddelené čiarkou ("0-4,6,8,9"; dvojica ako "a,b"); 'lead' sa emitne
+//sk: pred PRVÝM tokenom (lepidlo od volajúceho: "," alebo " "). Bez META sa neznámy chvost
+//sk: označí "N-??" (N = najvyšší prijatý + 1 — presný začiatok chvosta pre appku; N nemusí
+//sk: existovať, appka marker zahodí, ak je N za totalom balíka).
 int  fota_calc_missing(uint16_t* out, int max_out, int* out_n);
-void fota_print_missing(int limit);
-int  fota_format_missing(char* out, int out_sz, int limit);
+void fota_print_missing(int limit, const char* lead);
+int  fota_format_missing(char* out, int out_sz, int limit, const char* lead);
+//en: Diagnostic total: promoted total_chunks, else UNVERIFIED ceil(patch_size/144) from a
+//en: received META, else 0. Never gates completion/flash.
+//sk: Diagnostický total: promotnutý total_chunks, inak NEOVERENÝ ceil(patch_size/144)
+//sk: z prijatej META, inak 0. Nikdy negatuje completion/flash.
+uint16_t fota_total_est(void);
 
 //en: Deferred flash: 'fota flash' first sends an "accepted" ACK; the flash (fota_apply)
 //en: starts from loop() only AFTER the ACK actually went out (otherwise reboot happens

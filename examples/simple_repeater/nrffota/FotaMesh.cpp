@@ -97,27 +97,37 @@ void fota_handle_command(const char* args, char* reply) {
             int hs = (miss_h ? 1 : 0) + (miss_s ? 1 : 0);
             int total = hs + chunk_total;
             int tok_lim = show_all ? 0 : FOTA_MISS_OUTTOKENS;   //en: 0 = all; otherwise token cap (H/S excluded)
+            //en: Total marker: verified total "/T"; META-only estimate "/~T" (unverified,
+            //en: covers trailing chunks too); no META → "(noH)"/"(noHS)" says WHICH header
+            //en: part is missing (glued to the miss= token so the app parser skips it).
+            //sk: Marker totalu: overený total "/T"; odhad len z META "/~T" (neoverený,
+            //sk: pokrýva aj chvostové chunky); bez META → "(noH)"/"(noHS)" hovorí, KTORÁ
+            //sk: časť hlavičky chýba (prilepené k miss= tokenu, aby to parser appky preskočil).
+            uint16_t est = fota_total_est();
 
-            //en: Serial: full detail (H/S always + chunks as ranges)
+            //en: Serial: full detail (H/S always + chunks, comma-separated)
             FOTA_DEBUG_PRINT("[FOTA] miss %d", total);
             if (st->total_chunks > 0) { FOTA_DEBUG_PRINT("/%u", (unsigned)st->total_chunks); }
-            else                        FOTA_DEBUG_PRINT(" (pred HEADER)");
+            else if (est > 0)         { FOTA_DEBUG_PRINT("/~%u (no S)", (unsigned)est); }
+            else                        FOTA_DEBUG_PRINT(" (no H%s)", miss_s ? " S" : "");
             FOTA_DEBUG_PRINT(": ");
-            if (miss_h) FOTA_DEBUG_PRINT("H ");
-            if (miss_s) FOTA_DEBUG_PRINT("S ");
-            fota_print_missing(tok_lim);
+            if (miss_h) FOTA_DEBUG_PRINT("H");
+            if (miss_s) FOTA_DEBUG_PRINT(miss_h ? ",S" : "S");
+            fota_print_missing(tok_lim, (miss_h || miss_s) ? "," : "");
             FOTA_DEBUG_PRINTLN("");
 
             //en: Reply (LoRa and Serial CLI): count + H/S + range list, capped to packet length
             char* p = reply;
             p += sprintf(p, "FOTA miss=%d", total);
             if (st->total_chunks > 0) p += sprintf(p, "/%u", (unsigned)st->total_chunks);
-            else                       p += sprintf(p, "(no hdr)");
+            else if (est > 0)         p += sprintf(p, "/~%u(noS)", (unsigned)est);
+            else                       p += sprintf(p, "(no%s%s)", miss_h ? "H" : "", miss_s ? "S" : "");
             if (total > 0) *p++ = ':';
             if (miss_h) p += sprintf(p, " H");
-            if (miss_s) p += sprintf(p, " S");
+            if (miss_s) p += sprintf(p, miss_h ? ",S" : " S");
             int avail = 158 - (int)(p - reply);          //en: cap for LoRa (~160 B)
-            if (avail > 8) p += fota_format_missing(p, avail, tok_lim);
+            if (avail > 8) p += fota_format_missing(p, avail, tok_lim,
+                                                    (miss_h || miss_s) ? "," : " ");
             *p = 0;
         }
     } else if (strcmp(args, "dbg") == 0) {
@@ -126,7 +136,11 @@ void fota_handle_command(const char* args, char* reply) {
     } else if (strcmp(args, "id") == 0 || strcmp(args, "fwid") == 0) {
         fota_print_fw_id(reply);   //en: build#, image_size, full running sha256 -> serial
     } else {
-        strcpy(reply, "FOTA: status|verify|flash|clear|decompress|nack|miss|missall|dbg|id");
+        //en: getpath/setpath/missall <cesta> are LoRa-only (need the ACL client; handled
+        //en: inline in fotaHandleLoRaCli) — listed here so the usage reply advertises them.
+        //sk: getpath/setpath/missall <cesta> sú len LoRa (potrebujú ACL klienta; riešené
+        //sk: inline vo fotaHandleLoRaCli) — tu ich uvádzame, aby ich usage odpoveď ponúkla.
+        strcpy(reply, "FOTA: status|verify|flash|clear|decompress|nack|miss|missall [cesta]|getpath|setpath|getacl|dbg|id");
     }
 }
 

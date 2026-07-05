@@ -30,7 +30,8 @@
   uint8_t _fota_pending[MAX_PACKET_PAYLOAD];  //en: deferred FOTA packet for loop()
   int     _fota_pending_len;                  //en: 0 = nothing pending
   float   _fota_pending_rssi, _fota_pending_snr;
-  volatile uint32_t _fota_raw_rx;             //en: RAW frames (before decode/decrypt)
+  volatile uint32_t _fota_raw_rx;             //en: RAW frames received (before decode/decrypt)
+  volatile uint32_t _fota_raw_tx;             //en: RAW frames sent (handed to the radio)
   uint32_t          _fota_raw_last_len;
   float             _fota_raw_last_rssi, _fota_raw_last_snr;
   bool     _fota_cli_pending;                 //en: deferred LoRa CLI command
@@ -39,17 +40,25 @@
   int  searchChannelsByHash(const uint8_t* hash, mesh::GroupChannel channels[], int max_matches) override;
   void onGroupDataRecv(mesh::Packet* packet, uint8_t type, const mesh::GroupChannel& channel, uint8_t* data, size_t len) override;
   void fotaLogRxRaw(float snr, float rssi, const uint8_t raw[], int len);
+  void fotaLogTxRaw(const uint8_t raw[], int len);
   void fotaEarlyInit();
   void fotaBegin();
   void fotaLoop();
   bool fotaHandleCliCommand(const char* command, char* reply);
-  bool fotaHandleLoRaCli(const ClientInfo* client, const uint8_t* secret,
+#if FOTA_DEBUG
+  //en: Serial-only debug CLI (getacl / getpath|setpath by pub_key prefix)
+  //sk: Serial-only debug CLI (getacl / getpath|setpath cez pub_key prefix)
+  bool fotaHandleSerialPathCli(const char* fargs, char* reply);
+#endif
+  //en: non-const client — getpath/setpath/missall-with-path write ACL out_path
+  //sk: non-const client — getpath/setpath/missall-s-cestou zapisujú ACL out_path
+  bool fotaHandleLoRaCli(ClientInfo* client, const uint8_t* secret,
                          const char* command, char* reply,
                          uint8_t path_hash_size, uint32_t sender_timestamp);
   void runFotaCli(const char* fargs, char* reply);
   bool deferFotaCli(const ClientInfo* client, const uint8_t* secret,
                     const char* fargs, uint8_t path_hash_size,
-                    uint32_t sender_timestamp);
+                    uint32_t sender_timestamp, const char* tag);
   void sendDeferredCliReply(const uint8_t* dest_pub, const uint8_t* secret,
                             const uint8_t* out_path, uint8_t out_path_len,
                             uint8_t path_hash_size, const char* text,
