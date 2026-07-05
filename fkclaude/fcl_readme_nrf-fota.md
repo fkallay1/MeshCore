@@ -13,7 +13,7 @@ z projektu **FK_lora-sniffer**. Toto je **iné** ako vstavané MeshCore „FOTA"
 |--------|--------|-------|
 | FOTA modul | [examples/simple_repeater/nrffota/](../examples/simple_repeater/nrffota/) | celý FOTA kód (príjem + patchovanie + integrácia `FotaMyMesh.cpp`), MeshCore jadro nezmenené |
 | Integrácia | [MyMesh.h](../examples/simple_repeater/MyMesh.h) / [MyMesh.cpp](../examples/simple_repeater/MyMesh.cpp) | 6 tenkých `#ifdef WITH_LORA_FOTA` hookov (~30 riadkov); telá v `nrffota/FotaMyMesh.cpp` |
-| Build env | [variants/promicro/platformio.ini](../variants/promicro/platformio.ini), [variants/sensecap_solar/platformio.ini](../variants/sensecap_solar/platformio.ini) | `ProMicro_repeater_fota`, `SenseCap_Solar_repeater_fota` (extrafs.ld + `WITH_LORA_FOTA` + `FOTA_DEBUG`) |
+| Build env | [variants/promicro/platformio.ini](../variants/promicro/platformio.ini), [variants/sensecap_solar/platformio.ini](../variants/sensecap_solar/platformio.ini), [variants/xiao_nrf52/platformio.ini](../variants/xiao_nrf52/platformio.ini) | `ProMicro_repeater_fota` (v6), `SenseCap_Solar_repeater_fota` (v7), `Xiao_nrf52_repeater_fota` (v7) — extrafs.ld + `WITH_LORA_FOTA` + `FOTA_DEBUG` |
 | Test | [test_nrf-fota/](../test_nrf-fota/) | end-to-end LoRa test + nástroje z FK_lora |
 
 Detailný popis FOTA modulu samotného: [examples/simple_repeater/nrffota/README.md](examples/simple_repeater/nrffota/README.md).
@@ -175,8 +175,10 @@ AGC-vs-flash interakcia — **nechať `agc_reset=0`**) je detailne rozobraná v
 plný chronologický záznam: [docs/conv_claude_20260615.md](docs/conv_claude_20260615.md).
 
 **Diagnostika (gated `WITH_LORA_FOTA` + `FOTA_DEBUG`):**
-- `fotaLogRxRaw()` → `rawrx` v `[FOTA] AALIVE` heartbeate = surové CRC-OK rámce PRED dekódom
-  (odlíši „rádio nepočuje nič" od „počuje, dekód zlyhá").
+- `fotaLogRxRaw()` → `[FOTA] RX RAW` + `rawrx` v `[FOTA] AALIVE` heartbeate = surové CRC-OK
+  rámce PRED dekódom (odlíši „rádio nepočuje nič" od „počuje, dekód zlyhá").
+- `fotaLogTxRaw()` → `[FOTA] TX RAW` + `rawtx` = každý ODOSLANÝ rámec (vlastné adverty/ACK aj
+  preposlané); rovnaký formát ako RX (type/route/path), bez rssi/snr. Core hook `logTxRaw`.
 - `fota agc` (serial/CLI) → SX1262 RxGain register (0x08AC: 0x96 boosted / 0x94 power-save),
   okamžité RSSI, noise floor, `agc_reset_interval`. **Read-only — nemení config rádia.**
 - `onGroupDataRecv()` len buffruje, ťažké CustomLFS I/O sa robí vo `fotaLoop()` po re-arme rádia.

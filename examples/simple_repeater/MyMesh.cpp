@@ -475,6 +475,13 @@ void MyMesh::logRxRaw(float snr, float rssi, const uint8_t raw[], int len) {
 #endif
 }
 
+void MyMesh::logTxRaw(const uint8_t raw[], int len) {
+#ifdef WITH_LORA_FOTA
+  fotaLogTxRaw(raw, len);   //en: TX RAW diagnostics + FOTA tag (nrffota/FotaMyMesh.cpp)
+#endif
+  //en: MESH_PACKET_LOGGING already prints TX in Dispatcher::checkSend() — no dup here.
+}
+
 void MyMesh::logRx(mesh::Packet *pkt, int len, float score) {
 #ifdef WITH_BRIDGE
   if (_prefs.bridge_pkt_src == 1) {

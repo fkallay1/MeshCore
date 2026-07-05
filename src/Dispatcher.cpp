@@ -337,6 +337,7 @@ void Dispatcher::checkSend() {
         return;
       }
       outbound_expiry = futureMillis(max_airtime);
+      logTxRaw(raw, len);   // custom hook: the raw frame just handed to the radio (mirror of logRxRaw)
 
     #if MESH_PACKET_LOGGING
       Serial.print(getLogDateTime());

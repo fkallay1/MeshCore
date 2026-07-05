@@ -70,12 +70,16 @@ Integrácia do jadra repeatera (od 2026-07-03 minimalizovaná — telá presunut
 `nrffota/FotaMyMesh.cpp`, ten sa kompiluje ako súčasť `examples/simple_repeater`):
 - `examples/simple_repeater/MyMesh.h` — jeden súvislý `#ifdef WITH_LORA_FOTA` blok
   (stav `_fota_*` + deklarácie metód/overridov).
-- `examples/simple_repeater/MyMesh.cpp` — **6 tenkých hookov** (~30 riadkov diff vs upstream):
-  `fotaLogRxRaw()` v `logRxRaw`, `fotaHandleLoRaCli()` v `onPeerDataRecv`,
+- `examples/simple_repeater/MyMesh.cpp` — **tenké hooky** (~30 riadkov diff vs upstream):
+  `fotaLogRxRaw()` v `logRxRaw`, `fotaLogTxRaw()` v `logTxRaw`, `fotaHandleLoRaCli()` v `onPeerDataRecv`,
   `fotaEarlyInit()`+`fotaBegin()` v `begin`, `fotaHandleCliCommand()` v `handleCommand`,
   `fotaLoop()` v `loop`.
-- `variants/promicro/platformio.ini`, `variants/sensecap_solar/platformio.ini` — envy
-  `ProMicro_repeater_fota` / `SenseCap_Solar_repeater_fota` (`WITH_LORA_FOTA`, `FOTA_DEBUG`).
+  - **`logTxRaw` je nový core hook** v `src/Dispatcher.{h,cpp}` (prázdny default; volaný v
+    `checkSend()` hneď po `startSendRaw`, zrkadlo `logRxRaw`) — viď RAW log §7.
+- `variants/promicro/platformio.ini`, `variants/sensecap_solar/platformio.ini`,
+  `variants/xiao_nrf52/platformio.ini` — envy `ProMicro_repeater_fota` (v6) /
+  `SenseCap_Solar_repeater_fota` (v7) / `Xiao_nrf52_repeater_fota` (v7) — všetky
+  `WITH_LORA_FOTA`+`FOTA_DEBUG`, `extra_scripts` s `create-uf2.py` + 3× `gen_` (jednotné).
 
 Testovacia infraštruktúra v `test_nrf-fota/`:
 - `fota_sender.py` — generuje patch (hdiffi+zlib), vysiela cez bridge (mode `meshcore`/`direct`).
@@ -146,7 +150,8 @@ bootloader @ 0xF4000.
 - Flasher na **0xEB000** (nie 0xF2000 ako pôvodný FK_lora sniffer) — aby sa vyhol MeshCore
   InternalFS na 0xED000.
 - Strop patchu ~40 kB (recv.log + patch.bin musia byť súčasne v 92 kB FS).
-- Env `ProMicro_repeater_fota` používa `boards/nrf52840_s140_v6_extrafs.ld`.
+- Env `ProMicro_repeater_fota` používa `boards/nrf52840_s140_v6_extrafs.ld` (712704 B);
+  `SenseCap_Solar_repeater_fota` a `Xiao_nrf52_repeater_fota` používajú `..._v7_extrafs.ld` (708608 B).
 - Pre XIAO / s140 v7 (app base 0x27000): nič netreba — board-agnostické (base z linker symbolu, runtime do flashera). Jeden `flasher_code.h`.
 
 ---
@@ -239,6 +244,12 @@ Symptóm: repeater po čase **prestal prijímať čokoľvek** (`rawrx=0`), dlhod
 **Postup diagnostiky:**
 1. Pridaný `logRxRaw()` override → počítadlo `rawrx` (surové CRC-OK rámce **PRED** dekódom)
    v `[FOTA] AALIVE` heartbeate. Odlíši "rádio nepočuje nič" (RF/PHY) od "počuje, dekód zlyhá".
+   - **2026-07-04:** pribudol symetrický **TX** log. Výpis `[FOTA] RAW` premenovaný na
+     **`[FOTA] RX RAW`**; nový **`[FOTA] TX RAW`** loguje každý ODOSLANÝ rámec (vlastné
+     adverty/ACK aj preposlané) cez nový core hook `logTxRaw` (Dispatcher `checkSend` →
+     `fotaLogTxRaw`). Zdieľané telo `fota_log_raw_line(dir,…)` (rovnaký formát type/route/path,
+     TX bez rssi/snr). Nové počítadlo `rawtx` v heartbeate (`rawrx=… rawtx=…`). Filter
+     `path_count>4` platí pre oba smery. Vše za `FOTA_DEBUG`.
 2. `nf=-120` v hluchom stave = **clampnutá dolná hranica** noise floor
    ([RadioLibWrappers.cpp:97](src/helpers/radiolib/RadioLibWrappers.cpp#L97)) → rádio JE v RX a
    vzorkuje, kanál tichý.
