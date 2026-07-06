@@ -73,6 +73,18 @@ Keď chceš iný pár než „posledné dva" (napr. base build NIE je posledný 
 Výstup: `fotapkg_json/<old>-<new>.<device>.fotapkg.json` (upgrade) + `.rev.` (rollback).
 Používaj **penv python** (`gen_fotapkg.py` importuje `fota_export_pkg`/`fota_sender` — potrebuje ich deps).
 
+> **GOTCHA — rast FW medzi buildmi vs extraSafeSize** (plný rozbor:
+> [fcl_readme_fota_extrasafe.md](fcl_readme_fota_extrasafe.md)). In-place patch znesie
+> posun obsahu (≈ rast FW) len do extraSafeSize; nad ním degeneruje na ~celý FW (~300 KB).
+> Od buildu > 265 je limit flashera 32 KB (`FOTA_MAX_EXTRA_SAFE`, flash_layout.h) a gen
+> robí dvoch kandidátov: preferuje `-inplace-4096` (kompatibilný so VŠETKÝMI flashermi),
+> pri degeneráte eskaluje na `-inplace-32768` + `[POZOR]` — taký balík odmietnu STARÉ
+> flashery (build ≤ 265, err 0xE5; `ota verify` nového FW to povie vopred).
+> (Rollback maličký a upgrade veľký = tento jav, nie chyba dát.)
+> **Pre zariadenia na starom builde:** prvý hop musí mať extra_safe ≤ 4096 — pri
+> degenerovanom páre použi reťaz hopov cez `builds/` archív s rastom ≤ ~4 KB na hop
+> (napr. 232→238→246→265; balíky sa aplikujú postupne).
+
 ---
 
 ## 3. Push do telefónu

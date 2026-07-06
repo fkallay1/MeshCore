@@ -244,6 +244,24 @@ bool fota_patch_to_file(char* err, size_t err_sz) {
         }
         FOTA_DEBUG_PRINTLN("[PATCH] hpatchi: new_size=%lu B  extra_safe=%lu B", (unsigned long)new_size, (unsigned long)extra_safe);
 
+        //en: Pre-check vs the flasher limit (shared FOTA_MAX_EXTRA_SAFE from flash_layout.h).
+        //en: The SHA dry-run itself does NOT need extra_safe (plain hpatch_lite_patch reads
+        //en: the intact old FW from flash) — so verify would happily pass a patch that the
+        //en: flasher later rejects with 0xE5 and a reset. Fail HERE with a clear reason
+        //en: instead, so the CLI user learns about the problem BEFORE attempting the flash.
+        //sk: Predkontrola voči limitu flashera (zdieľané FOTA_MAX_EXTRA_SAFE z flash_layout.h).
+        //sk: Samotný SHA dry-run extra_safe NEPOTREBUJE (obyčajný hpatch_lite_patch číta
+        //sk: nedotknutý starý FW z flashe) — verify by teda ochotne pustil patch, ktorý
+        //sk: flasher neskôr odmietne s 0xE5 a resetom. Radšej zlyhaj TU s jasným dôvodom,
+        //sk: nech sa to používateľ CLI dozvie PRED pokusom o flash.
+        if (extra_safe > FOTA_MAX_EXTRA_SAFE) {
+            FOTA_DEBUG_PRINTLN("[PATCH] extra_safe %lu > max %lu — flasher by patch ODMIETOL (0xE5)!", (unsigned long)extra_safe, (unsigned long)FOTA_MAX_EXTRA_SAFE);
+            free(ps); free(patch_buf);
+            char b[48]; snprintf(b, sizeof(b), "extraSafe %lu > max %lu, flash zlyha", (unsigned long)extra_safe, (unsigned long)FOTA_MAX_EXTRA_SAFE);
+            set_err(err, err_sz, b);
+            return false;
+        }
+
         ShaListener sl;
         sl.written = 0;
         sl.base.diff_data = ps;
@@ -316,6 +334,18 @@ bool fota_patch_to_file(char* err, size_t err_sz) {
     }
 
     FOTA_DEBUG_PRINTLN("[PATCH] new=%lu B  patch=%lu B  extraSafe=%lu B", (unsigned long)new_size, (unsigned long)patch_size, (unsigned long)extra_safe);
+
+    //en: Same pre-check as in the ZLIB branch — see the comment there (verify itself
+    //en: doesn't need extra_safe, but the flasher would reject the patch with 0xE5).
+    //sk: Rovnaká predkontrola ako v ZLIB vetve — viď komentár tam (verify samotné
+    //sk: extra_safe nepotrebuje, ale flasher by patch odmietol s 0xE5).
+    if (extra_safe > FOTA_MAX_EXTRA_SAFE) {
+        FOTA_DEBUG_PRINTLN("[PATCH] extra_safe %lu > max %lu — flasher by patch ODMIETOL (0xE5)!", (unsigned long)extra_safe, (unsigned long)FOTA_MAX_EXTRA_SAFE);
+        free(patch_buf);
+        char b[48]; snprintf(b, sizeof(b), "extraSafe %lu > max %lu, flash zlyha", (unsigned long)extra_safe, (unsigned long)FOTA_MAX_EXTRA_SAFE);
+        set_err(err, err_sz, b);
+        return false;
+    }
 
     ShaListener sl;
     sl.written = 0;
@@ -396,6 +426,31 @@ bool fota_flash_via_flasher() {
             memcpy(&uncomp_sz, patch_buf + 4, 4);
             memcpy(&new_fw_size, patch_buf + 8, 4);
             FOTA_DEBUG_PRINTLN("[FLASHER] Komprimovany format: staged=%lu B  raw=%lu B  new_fw=%lu B", (unsigned long)patch_size, (unsigned long)uncomp_sz, (unsigned long)new_fw_size);
+
+            //en: Peek the hpatchi header (through puff) for extra_safe and abort HERE if it
+            //en: exceeds FOTA_MAX_EXTRA_SAFE — the flasher would reject it anyway (0xE5),
+            //en: but only AFTER FS unmount + sd_disable + reset, which costs a reboot and
+            //en: leaves just a trace code. Failing here keeps the app running with a clear
+            //en: log. Any OTHER open failure is left to the flasher (it has its own checks).
+            //sk: Nakukni do hpatchi hlavičky (cez puff) po extra_safe a skonči TU, ak
+            //sk: presahuje FOTA_MAX_EXTRA_SAFE — flasher by ho aj tak odmietol (0xE5),
+            //sk: ale až PO FS unmount + sd_disable + resete, čo stojí reboot a ostane len
+            //sk: trace kód. Zlyhanie tu nechá appku bežať s jasným logom. AKÉKOĽVEK iné
+            //sk: zlyhanie open nechávame na flasher (má vlastné kontroly).
+            puff_stream_t* ps = (puff_stream_t*)malloc(sizeof(puff_stream_t));
+            if (ps) {
+                puff_stream_init(ps, patch_buf + 12, patch_size - 12);
+                hpi_compressType ct = hpi_compressType_no;
+                hpi_pos_t ns = 0, us = 0;
+                hpi_size_t es = 0;
+                bool hdr_ok = (bool)hpatchi_inplace_open(ps, patch_zlib_read, &ct, &ns, &us, &es);
+                free(ps);
+                if (hdr_ok && es > FOTA_MAX_EXTRA_SAFE) {
+                    free(patch_buf);
+                    FOTA_DEBUG_PRINTLN("[FLASHER] PRERUŠENÉ — extra_safe %lu > max %lu (flasher by odmietol, 0xE5)", (unsigned long)es, (unsigned long)FOTA_MAX_EXTRA_SAFE);
+                    return false;
+                }
+            }
         } else {
             MemStream ms = { patch_buf, patch_size, 0 };
             hpi_compressType compress_type = hpi_compressType_no;
@@ -415,6 +470,13 @@ bool fota_flash_via_flasher() {
             }
             new_fw_size = (uint32_t)new_fw_size64;
             FOTA_DEBUG_PRINTLN("[FLASHER] Nekomprimovany format: new_fw=%lu B  patch=%lu B", (unsigned long)new_fw_size, (unsigned long)patch_size);
+            //en: Same pre-check as in the ZLIB branch — abort before FS unmount/sd_disable.
+            //sk: Rovnaká predkontrola ako v ZLIB vetve — skonči pred FS unmount/sd_disable.
+            if (extra_safe > FOTA_MAX_EXTRA_SAFE) {
+                free(patch_buf);
+                FOTA_DEBUG_PRINTLN("[FLASHER] PRERUŠENÉ — extra_safe %lu > max %lu (flasher by odmietol, 0xE5)", (unsigned long)extra_safe, (unsigned long)FOTA_MAX_EXTRA_SAFE);
+                return false;
+            }
         }
     }
     FOTA_DEBUG_PRINTLN("[FLASHER] Patch v RAM (%lu B)", (unsigned long)patch_size);

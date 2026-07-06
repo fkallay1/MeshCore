@@ -81,3 +81,21 @@
 #define FLASHER_CODE_ADDR      0xEB000u                //en: 4kB ARM Thumb2 flasher code
 #define FLASHER_META_ADDR      0xEC000u                //en: 4kB metadata + trace log
 #define FLASH_TRACE_ADDR       FLASHER_META_ADDR
+
+//en: Max extraSafeSize accepted from the hpatchi patch header — SINGLE SOURCE for
+//en: the flasher (hard reject 0xE5 + temp_cache sizing) AND the app-side verify/apply
+//en: pre-checks in FotaPatcher.cpp. extraSafeSize grows with how far the FW image
+//en: content SHIFTS between old and new (≈ how much the FW grew); a patch needing
+//en: more than this limit degenerated to ~full-image before, or got rejected.
+//en: RAM cost: flasher .bss temp_cache = FOTA_MAX_EXTRA_SAFE + read cache — lives in
+//en: the flasher-only RAM region (128kB @ 0x20020000, whole RAM is free during flash),
+//en: so it costs the running app NOTHING. See fkclaude/fcl_readme_fota_extrasafe.md.
+//sk: Max extraSafeSize akceptovaný z hpatchi hlavičky patchu — JEDINÝ ZDROJ pre
+//sk: flasher (tvrdý reject 0xE5 + veľkosť temp_cache) AJ pre app-side verify/apply
+//sk: predkontroly vo FotaPatcher.cpp. extraSafeSize rastie s tým, o koľko sa obsah
+//sk: FW obrazu POSUNIE medzi starým a novým (≈ o koľko FW narástol); patch nad limit
+//sk: predtým degeneroval na ~celý obraz, alebo bol odmietnutý.
+//sk: RAM cena: flasher .bss temp_cache = FOTA_MAX_EXTRA_SAFE + read cache — žije vo
+//sk: flasher-only RAM regióne (128kB @ 0x20020000, počas flashovania je voľná celá RAM),
+//sk: takže bežiacu appku nestojí NIČ. Viď fkclaude/fcl_readme_fota_extrasafe.md.
+#define FOTA_MAX_EXTRA_SAFE    32768u

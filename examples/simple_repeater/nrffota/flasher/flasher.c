@@ -74,11 +74,17 @@
 #include "flash_layout.h"  /* APP_FLASH_START, APP_FLASH_MAX, FLASH_TRACE_ADDR */
 #define PAGE_SIZE         FLASH_PAGE_SIZE
 
-//en: Maximum extraSafeSize from the patch header. For a small change in a large FW,
-//en: extra_safe is typically 0 (verified with hdiffi); 4096 is a generous margin.
-//sk: Maximálny extraSafeSize z patch hlavičky. Pre malú zmenu vo veľkom FW je
-//sk: extra_safe typicky 0 (overené hdiffi); 4096 je bohatá rezerva.
-#define MAX_EXTRA_SAFE    4096u
+//en: Maximum extraSafeSize from the patch header — shared constant from flash_layout.h
+//en: (32kB). extraSafeSize ≈ how far the image content shifted = how much the FW GREW
+//en: between builds; with the old 4096 limit a growth > 4kB degenerated the patch to
+//en: ~the whole image (see fkclaude/fcl_readme_fota_extrasafe.md). 32kB covers realistic
+//en: inter-build growth; the buffer lives in flasher-only RAM (free during flashing).
+//sk: Maximálny extraSafeSize z patch hlavičky — zdieľaná konštanta z flash_layout.h
+//sk: (32kB). extraSafeSize ≈ o koľko sa obsah obrazu posunul = o koľko FW NARÁSTOL
+//sk: medzi buildmi; so starým limitom 4096 rast > 4kB degeneroval patch na ~celý obraz
+//sk: (viď fkclaude/fcl_readme_fota_extrasafe.md). 32kB pokryje realistické medzi-buildové
+//sk: rasty; buffer žije vo flasher-only RAM (počas flashovania voľná).
+#define MAX_EXTRA_SAFE    FOTA_MAX_EXTRA_SAFE
 
 //en: Read cache for the hpatchi diff stream (besides extra_safe). Bigger = faster
 //en: patch. temp_cache = MAX_EXTRA_SAFE + READ_CACHE, allocated in .bss.
@@ -404,8 +410,10 @@ void flasher_main(uint32_t patch_addr, uint32_t patch_size,
         if (extra_safe > MAX_EXTRA_SAFE)          { fmark(FM_ERR_SAFE);    ftrace(FM_ERR_SAFE);     goto FAIL; }
         fmark(FM_OPEN_OK);
 
-        //en: FlashCtx + temp_cache in .bss (not on the stack) — page_buf 4kB + cache ~20kB
-        //sk: FlashCtx + temp_cache v .bss (nie na stack) — page_buf 4kB + cache ~20kB
+        //en: FlashCtx + temp_cache in .bss (not on the stack) — page_buf 4kB + cache 48kB
+        //en: (32kB extra_safe + 16kB read cache); fits the 128kB flasher RAM region easily
+        //sk: FlashCtx + temp_cache v .bss (nie na stack) — page_buf 4kB + cache 48kB
+        //sk: (32kB extra_safe + 16kB read cache); do 128kB flasher RAM regiónu sa zmestí ľahko
         static FlashCtx fc;
         static uint8_t  s_temp_cache[MAX_EXTRA_SAFE + READ_CACHE];
         memset(&fc, 0, sizeof(fc));
@@ -493,16 +501,16 @@ FAIL:
 //en: Naked function: the compiler generates no prologue/epilogue.
 //en: Parameters are in r0, r1, r2 per ARM AAPCS — preserved across bl flasher_main.
 //en:
-//en: Why an own SP: the FreeRTOS task stack is 2-4kB, the flasher needs ~20kB
-//en: (FlashCtx 4kB + temp_cache 8kB + puff huffman tables ~4kB + overhead).
+//en: Why an own SP: the FreeRTOS task stack is 2-4kB, the flasher needs ~60kB
+//en: (FlashCtx 4kB + temp_cache 48kB + puff huffman tables ~4kB + overhead).
 //en: After sd_softdevice_disable the entire 256kB of RAM is free.
 //sk: ── Entry point — nastaví vlastný SP pred volaním flasher_main ──
 //sk:
 //sk: Naked funkcia: kompilátor negeneruje žiadny prológ/epilóg.
 //sk: Parametre sú v r0, r1, r2 podľa ARM AAPCS — zachované pri bl flasher_main.
 //sk:
-//sk: Prečo vlastný SP: FreeRTOS task stack je 2-4kB, flasher potrebuje ~20kB
-//sk: (FlashCtx 4kB + temp_cache 8kB + puff huffman tabuľky ~4kB + overhead).
+//sk: Prečo vlastný SP: FreeRTOS task stack je 2-4kB, flasher potrebuje ~60kB
+//sk: (FlashCtx 4kB + temp_cache 48kB + puff huffman tabuľky ~4kB + overhead).
 //sk: Po sd_softdevice_disable je celých 256kB RAM voľných.
 __attribute__((naked))
 void flasher_entry(uint32_t patch_addr, uint32_t patch_size, uint32_t new_fw_size, uint32_t app_base)

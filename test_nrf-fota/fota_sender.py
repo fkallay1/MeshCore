@@ -209,6 +209,23 @@ def direct_fota_packet(fota_payload: bytes) -> bytes:
 # ─────────────────────────────────────────────────────────────────────
 # Generovanie patchu — hdiffpatch alebo bsdiff4
 # ─────────────────────────────────────────────────────────────────────
+def _hpatchi_extra_safe(raw: bytes):
+    """extraSafeSize z 'hI' hlavičky HPatchLite inplace patchu, alebo None.
+
+    Formát hlavičky (zrkadlí hpatchi_inplace_open v hpatch_lite.c):
+      [0..1]='hI'  [2]=compressType  [3]=(inplaceCode<<6)|(uncompBytes<<3)|(newSizeBytes)
+      [4]=extraSafeBytes  potom newSize, uncompSize, extraSafeSize (LE, dané počty bajtov).
+    """
+    if len(raw) < 5 or raw[0:2] != b'hI' or (raw[3] >> 6) != 2:
+        return None
+    lenn = raw[3] & 7
+    lenu = (raw[3] >> 3) & 7
+    lene = raw[4]
+    off = 5 + lenn + lenu
+    if len(raw) < off + lene:
+        return None
+    return int.from_bytes(raw[off:off + lene], 'little')
+
 def make_patch(old_path: Path, new_path: Path, patch_path: Path):
     """Vracia (patch_bytes, patch_sha256, new_sha256, old_sha256, old_fw_size)."""
     old_data = old_path.read_bytes()
@@ -245,41 +262,91 @@ def make_patch(old_path: Path, new_path: Path, patch_path: Path):
     print(f'[patch] hdiffi: {_hdiffi}')
 
     tmp = tempfile.mktemp(suffix='.hpatch')
-    # Novšie hdiffi: -inplaceB; staršie (v1.x): -inplace-N (N=extraSafeSize)
-    for flags in [['-inplaceB'], ['-inplace-4096'], ['-inplace']]:
+
+    def _run_hdiffi(flags):
+        """Spusti hdiffi s danými flagmi, vráti raw patch bytes alebo None."""
         try:
             ret = subprocess.run(
                 [_hdiffi, *flags, str(old_path), str(new_path), tmp],
                 capture_output=True
             )
-            if ret.returncode == 0:
-                raw_patch = Path(tmp).read_bytes()
-                if os.path.exists(tmp): os.unlink(tmp)
-                print(f"[patch] hdiffi {' '.join(flags)}: raw={len(raw_patch)}B")
-
-                # Komprimuj: raw DEFLATE, 512B okno (wbits=-9)
-                # Flasher dekompresoruje pomocou puff.c (tiez wbits=9)
-                comp_data = zlib.compress(raw_patch, level=9, wbits=-9)
-                ratio = len(comp_data) * 100 // len(raw_patch) if raw_patch else 100
-                print(f"[patch] puff kompresia: {len(raw_patch)}B -> {len(comp_data)}B ({ratio}%)")
-
-                # Staged format: [magic 4B 'ZLIB'][uncomp_size 4B LE][new_fw_size 4B LE][deflate...]
-                new_fw_size = len(new_data)
-                staged = (b'ZLIB'
-                          + struct.pack('<II', len(raw_patch), new_fw_size)
-                          + comp_data)
-                staged_sha = hashlib.sha256(staged).digest()
-                print(f"[patch] staged (LittleFS): {len(staged)}B  (header=12B)")
-                print(f"[patch] PATCH (staged) sha256={staged_sha.hex()}")
-
-                patch_path.write_bytes(staged)
-                return staged, staged_sha, new_sha256, old_sha256, len(old_data)
         except FileNotFoundError:
             print(f'[CHYBA] hdiffi sa nedal spustit: {_hdiffi}')
             sys.exit(1)
+        if ret.returncode != 0:
+            return None
+        raw = Path(tmp).read_bytes()
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        return raw
 
-    print(f"[CHYBA] hdiffi zlyhalo: {ret.stderr.decode(errors='replace').strip()}")
-    sys.exit(1)
+    # ── Výber extraSafeSize: dvojkandidátna stratégia ────────────────────
+    # -inplace-N: N = strop extraSafeSize pre hdiffi. extraSafeSize v hlavičke patchu
+    # rastie s tým, o koľko sa obsah FW medzi buildmi POSUNUL (≈ o koľko FW narástol);
+    # flasher patch s extra_safe > FOTA_MAX_EXTRA_SAFE (32768, flash_layout.h) odmietne
+    # s 0xE5. Detailný rozbor: fkclaude/fcl_readme_fota_extrasafe.md.
+    #
+    # PREČO dva kandidáti: hdiffi si pokojne zvolí extra_safe > 4096 aj pri malej zmene,
+    # keď mu to strop dovolí (napr. rast +144B → extra_safe 12kB) — a taký patch odmietnu
+    # STARÉ flashery (limit 4kB, sensecap build <= 265). Preto:
+    #   1. kandidát -inplace-4096  → kompatibilný so VŠETKÝMI flashermi (preferovaný),
+    #   2. kandidát -inplace-32768 → záchrana pre veľké rasty FW (starý limit degeneroval
+    #      patch na ~celý obraz, ~300kB — nezmestil by sa do FOTA FS ani RAM).
+    # Kandidát 1 vyhráva, ak jeho komprimovaná veľkosť <= 32kB (norma je jednotky kB);
+    # inak sa berie menší z dvojice a vypíše sa POZOR o nekompatibilite so starými flashermi.
+    raw4  = _run_hdiffi(['-inplace-4096'])
+    raw32 = _run_hdiffi(['-inplace-32768'])
+    raw_patch = None
+    if raw4 is not None or raw32 is not None:
+        comp_len = lambda r: len(zlib.compress(r, level=9, wbits=-9)) if r is not None else None
+        c4, c32 = comp_len(raw4), comp_len(raw32)
+        if c4 is not None:
+            print(f"[patch] kandidat -inplace-4096:  raw={len(raw4)}B comp={c4}B extraSafe={_hpatchi_extra_safe(raw4)}B")
+        if c32 is not None:
+            print(f"[patch] kandidat -inplace-32768: raw={len(raw32)}B comp={c32}B extraSafe={_hpatchi_extra_safe(raw32)}B")
+        if c4 is not None and (c32 is None or c4 <= 32768 or c4 <= c32):
+            raw_patch = raw4
+        else:
+            raw_patch = raw32
+    else:
+        # Fallback pre exotické verzie hdiffi CLI (-inplaceB = novšie, auto extraSafe)
+        for flags in [['-inplaceB'], ['-inplace']]:
+            raw_patch = _run_hdiffi(flags)
+            if raw_patch is not None:
+                print(f"[patch] hdiffi fallback {' '.join(flags)}: raw={len(raw_patch)}B")
+                break
+    if raw_patch is None:
+        print(f"[CHYBA] hdiffi zlyhalo (skúšané -inplace-4096/-inplace-32768/-inplaceB/-inplace)")
+        sys.exit(1)
+
+    # extraSafeSize z 'hI' hlavičky zvoleného patchu — info + tvrdá kontrola voči flasheru.
+    es = _hpatchi_extra_safe(raw_patch)
+    if es is not None:
+        print(f"[patch] extraSafeSize={es}B (limit flashera FOTA_MAX_EXTRA_SAFE=32768B)")
+        if es > 32768:
+            print(f"[CHYBA] extraSafeSize {es}B > 32768B — KAŽDÝ flasher tento patch odmietne (0xE5)!")
+            sys.exit(1)
+        if es > 4096:
+            print(f"[POZOR] extraSafeSize {es}B > 4096B — flashery zo starých buildov (limit 4kB, "
+                  f"sensecap <=265) tento patch odmietnu (0xE5). Cieľ musí bežať FW s 32kB flasherom.")
+
+    # Komprimuj: raw DEFLATE, 512B okno (wbits=-9)
+    # Flasher dekompresoruje pomocou puff.c (tiez wbits=9)
+    comp_data = zlib.compress(raw_patch, level=9, wbits=-9)
+    ratio = len(comp_data) * 100 // len(raw_patch) if raw_patch else 100
+    print(f"[patch] puff kompresia: {len(raw_patch)}B -> {len(comp_data)}B ({ratio}%)")
+
+    # Staged format: [magic 4B 'ZLIB'][uncomp_size 4B LE][new_fw_size 4B LE][deflate...]
+    new_fw_size = len(new_data)
+    staged = (b'ZLIB'
+              + struct.pack('<II', len(raw_patch), new_fw_size)
+              + comp_data)
+    staged_sha = hashlib.sha256(staged).digest()
+    print(f"[patch] staged (LittleFS): {len(staged)}B  (header=12B)")
+    print(f"[patch] PATCH (staged) sha256={staged_sha.hex()}")
+
+    patch_path.write_bytes(staged)
+    return staged, staged_sha, new_sha256, old_sha256, len(old_data)
 
 # ─────────────────────────────────────────────────────────────────────
 # Serial framing
