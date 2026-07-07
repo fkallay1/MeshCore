@@ -104,11 +104,23 @@ typedef struct {
 // =====================================================================
 //en: LittleFS paths  (shared by the receiver and the patcher)
 // =====================================================================
+#if defined(FOTA_ZEPHCORE_BUILD)
+//en: ZephCore: shared /lfs partition, FOTA subdirectory
+//sk: ZephCore: zdielana /lfs particia, FOTA podadresar
+#define FOTA_FS_DIR     "/lfs/fota"
+#define FOTA_FS_META    "/lfs/fota/meta.bin"
+#define FOTA_FS_BITMAP  "/lfs/fota/bitmap.bin"
+#define FOTA_FS_LOG     "/lfs/fota/recv.log"
+#define FOTA_FS_PATCH   "/lfs/fota/patch.bin"
+#else
+//en: MeshCore: dedicated CustomLFS @ 0xD4000
+//sk: MeshCore: dedikovany CustomLFS @ 0xD4000
 #define FOTA_FS_DIR     "/ota"
 #define FOTA_FS_META    "/ota/meta.bin"
 #define FOTA_FS_BITMAP  "/ota/bitmap.bin"
 #define FOTA_FS_LOG     "/ota/recv.log"
 #define FOTA_FS_PATCH   "/ota/patch.bin"
+#endif
 
 // =====================================================================
 //en: Authorization table for Ed25519 verification (defined in FotaReceiver_signkey.cpp)

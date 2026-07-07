@@ -17,8 +17,13 @@
 #include <Arduino.h>
 #include "FotaCrypto.h"      //en: SHA256 + Ed25519 platform shim (rweather / PSA+Monocypher)
 
+#if defined(FOTA_MESHCORE_BUILD)
 //en: Global FotaFS instance — CustomLFS at 0xD4000 (92kB)
 CustomLFS FotaFS(FOTA_FS_FLASH_ADDR, FOTA_FS_FLASH_SIZE, FOTA_FS_BLOCK_SIZE);
+#else
+//en: Global FotaFS instance — thin wrapper over the shared /lfs mount
+FotaFsClass FotaFS;
+#endif
 
 static bool verify_header_signature(const uint8_t* sig,
                                     const uint8_t* msg, size_t msg_len,
@@ -284,7 +289,7 @@ static bool save_meta() {
     mp.crc16 = fota_crc16((const uint8_t*)&mp, (uint16_t)(sizeof(mp) - 2u));
 
     FotaFS.remove(FOTA_FS_META);
-    File f(FotaFS);
+    FotaFile f(FotaFS);
     if (!f.open(FOTA_FS_META, FILE_O_WRITE)) {
         FOTA_DEBUG_PRINTLN("[FOTA] meta: zápis zlyhal"); return false;
     }
@@ -294,7 +299,7 @@ static bool save_meta() {
 }
 
 static bool load_meta(FotaMetaPersist* out) {
-    File f(FotaFS);
+    FotaFile f(FotaFS);
     if (!f.open(FOTA_FS_META, FILE_O_READ)) return false;
     bool ok = (f.read((uint8_t*)out, sizeof(*out)) == (int)sizeof(*out));
     f.close();
@@ -311,7 +316,7 @@ static void save_bitmap() {
     if (fota.total_chunks == 0) return;
     uint16_t nbytes = (fota.total_chunks + 7u) / 8u;
     FotaFS.remove(FOTA_FS_BITMAP);
-    File f(FotaFS);
+    FotaFile f(FotaFS);
     if (!f.open(FOTA_FS_BITMAP, FILE_O_WRITE)) return;
     f.write(fota.bitmap, nbytes);
     f.close();
@@ -321,7 +326,7 @@ static void save_bitmap() {
 static bool load_bitmap() {
     if (fota.total_chunks == 0) return false;
     uint16_t nbytes = (fota.total_chunks + 7u) / 8u;
-    File f(FotaFS);
+    FotaFile f(FotaFS);
     if (!f.open(FOTA_FS_BITMAP, FILE_O_READ)) return false;
     bool ok = (f.read(fota.bitmap, nbytes) == (int)nbytes);
     f.close();
@@ -334,7 +339,7 @@ static bool load_bitmap() {
 //sk: Každý záznam: [idx 2B LE][data_len 2B LE][data N]
 // =====================================================================
 static bool log_append(uint16_t idx, const uint8_t* data, uint16_t data_len) {
-    File f(FotaFS);
+    FotaFile f(FotaFS);
     if (!f.open(FOTA_FS_LOG, FILE_O_WRITE)) {
         FOTA_DEBUG_PRINTLN("[FOTA] log: zápis zlyhal"); return false;
     }
@@ -362,7 +367,7 @@ static uint16_t chunk_exp_len(uint16_t i) {
 
 //en: Pass 1: fill s_log_data_offset[] from recv.log (the last occurrence of an idx wins).
 //sk: Prechod 1: naplň s_log_data_offset[] z recv.log (posledný výskyt idx vyhrá).
-static void build_log_offsets(File& log_r) {
+static void build_log_offsets(FotaFile& log_r) {
     memset(s_log_data_offset, 0xFF, sizeof(s_log_data_offset));
     uint32_t log_pos = 0;
     uint8_t  hdr[4];
@@ -382,7 +387,7 @@ static void build_log_offsets(File& log_r) {
 //sk: Vráti zostavenú veľkosť (== fota.patch_size) alebo 0 pri chybe/chýbajúcom chunku.
 static uint32_t assemble_log_to_buf(uint8_t* buf, uint32_t cap) {
     if (fota.total_chunks == 0 || fota.patch_size == 0 || fota.patch_size > cap) return 0;
-    File log_r(FotaFS);
+    FotaFile log_r(FotaFS);
     if (!log_r.open(FOTA_FS_LOG, FILE_O_READ)) return 0;
     build_log_offsets(log_r);
     uint32_t out_pos = 0;
@@ -402,7 +407,7 @@ static uint32_t assemble_log_to_buf(uint8_t* buf, uint32_t cap) {
 //en: RAM mode: patch SHA256 streamed from recv.log (no patch.bin, no large buffer).
 //sk: RAM mód: SHA256 patchu streamovo z recv.log (bez patch.bin, bez veľkého buffra).
 static bool verify_log_sha() {
-    File log_r(FotaFS);
+    FotaFile log_r(FotaFS);
     if (!log_r.open(FOTA_FS_LOG, FILE_O_READ)) {
         FOTA_DEBUG_PRINTLN("[FOTA] log: čítanie zlyhal"); return false;
     }
@@ -448,14 +453,14 @@ static bool assemble_and_verify() {
     return true;
 #else
     FOTA_DEBUG_PRINTLN("[FOTA] Zostavujem patch.bin...");
-    File log_r(FotaFS);
+    FotaFile log_r(FotaFS);
     if (!log_r.open(FOTA_FS_LOG, FILE_O_READ)) {
         FOTA_DEBUG_PRINTLN("[FOTA] log: čítanie zlyhal"); return false;
     }
     build_log_offsets(log_r);
 
     FotaFS.remove(FOTA_FS_PATCH);
-    File out_f(FotaFS);
+    FotaFile out_f(FotaFS);
     if (!out_f.open(FOTA_FS_PATCH, FILE_O_WRITE)) { log_r.close(); return false; }
 
     FotaSha256 sha;
@@ -503,7 +508,7 @@ static bool assemble_and_verify() {
 // =====================================================================
 uint8_t* fota_acquire_patch_ram(uint32_t* out_size) {
 #ifdef USE_PATCHBIN_FILE
-    File f(FotaFS);
+    FotaFile f(FotaFS);
     if (!f.open(FOTA_FS_PATCH, FILE_O_READ)) { FOTA_DEBUG_PRINTLN("[FOTA] patch.bin chýba"); return nullptr; }
     uint32_t sz = (uint32_t)f.size();
     if (sz == 0 || sz > FOTA_FS_FLASH_SIZE) { f.close(); return nullptr; }

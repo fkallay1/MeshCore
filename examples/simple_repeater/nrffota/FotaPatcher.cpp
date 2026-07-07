@@ -134,7 +134,7 @@ __attribute__((unused))
 static hpi_BOOL patch_file_read(hpi_TInputStreamHandle h,
                                 hpi_byte* out, hpi_size_t* size) {
     if (*size == 0) return hpi_TRUE;
-    File* f = (File*)h;
+    FotaFile* f = (FotaFile*)h;
     int n = f->read(out, (uint32_t)*size);
     if (n <= 0) { *size = 0; return hpi_FALSE; }
     *size = (hpi_size_t)n;
@@ -647,7 +647,7 @@ void fota_debug_decompress() {
     for (int i = 0; i < 16; i++) { FOTA_DEBUG_PRINT("%02X ", (unsigned)app[i]); }
     FOTA_DEBUG_PRINTLN("");
 
-    File f(FotaFS);
+    FotaFile f(FotaFS);
     if (!f.open(FOTA_FS_PATCH, FILE_O_READ)) { FOTA_DEBUG_PRINTLN("[DBG] patch.bin chýba"); return; }
     uint32_t sz = (uint32_t)f.size();
     uint32_t magic = 0, uncomp = 0, newfw = 0;
