@@ -7,6 +7,11 @@ Umožňuje aktualizovať firmvér repeatera **cez LoRa** prenosom malého delta-
 > Toto je **iné** ako vstavané MeshCore OTA (`NRF52Board::startOTAUpdate`), ktoré
 > len reštartuje do Nordic DFU a FW sa nahráva cez BLE. Tu ide o patch cez LoRa.
 
+> **ZephCore port:** tieto zdroje sú zdieľané so ZephCore
+> (`ZephCore/zephcore/app/nrffota/`, byte-identické, duálne guardy
+> `FOTA_MESHCORE_BUILD`/`FOTA_ZEPHCORE_BUILD`; sync `zephcore/tools/fota_sync.py`).
+> Detaily: `fcl_readme_tech_nrf-fota.md` §12.
+
 ## Ako to funguje
 
 ```

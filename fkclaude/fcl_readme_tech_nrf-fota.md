@@ -383,3 +383,38 @@ zahodil ako duplikáty ešte pred dešifrovaním. `fota clear` čistí len FOTA 
 seen-table zámerne nie. **Fix vo Flutter appke**: unikátny `ts` (epoch sekundy) pre každý
 paket. Detail: GOTCHA blok v [fcl_readme_nrf-fota.md](fcl_readme_nrf-fota.md) §2 Transport.
 Firmware dedup je korektný a nemení sa.
+
+---
+
+## 12. ZephCore port (2026-07) — duálne guardy a sync
+
+FOTA je od 2026-07 naportované aj do ZephCore (`D:\FkDev\FkProj\VSC\ZephCore`,
+vetva `features/nrf-fota`). Kľúčové dohody:
+
+- **Zdieľané súbory sú byte-identické** medzi
+  `examples/simple_repeater/nrffota/` (tu) a `ZephCore/zephcore/app/nrffota/` +
+  `test_nrf-fota/` ↔ `ZephCore/test_nrf-fota/`. Kontrola/prenos:
+  `python zephcore/tools/fota_sync.py [--copy]` (v ZephCore repe; zdroj pravdy
+  je MeshCore).
+- **Platformové rozdiely = duálne guardy** `#if defined(FOTA_MESHCORE_BUILD)` /
+  `#elif defined(FOTA_ZEPHCORE_BUILD)` priamo v zdieľaných súboroch. Shim
+  hlavičky: `FotaFs.h` (CustomLFS File ↔ Zephyr fs_*), `FotaDebug.h`
+  (Serial.printf ↔ printk), `FotaCrypto.h` (rweather ↔ PSA+Monocypher),
+  `flash_layout.h` (mapy oboch platforiem). FOTA envy tu majú
+  `-D FOTA_MESHCORE_BUILD=1`.
+- **Per-projekt glue (nesyncuje sa):** `FotaMyMesh.{h,cpp}` (tu) ↔
+  `FotaRepeaterMesh.{h,cpp}` (ZephCore). `FotaMesh.{h,cpp}` je zdieľané.
+- **`flasher_code.h` je per-repo generovaný** — MeshCore default
+  (`build_flasher.py`, ORIGIN 0xEB000, blob bitovo NEZMENENÝ voči odladenému),
+  ZephCore `--origin 0x20020000 --platform zephcore` (flasher beží z RAM,
+  blob si patch presúva na PATCH_RAM_ADDR sám — `FLASHER_COPY_PATCH`;
+  8 kB CODE limit namiesto 4 kB).
+- **ZephCore mapa:** app 0x26000/0x27000–0xD0000, FOTA dáta v zdieľanom
+  `/lfs/fota/*` (0xD4000, 128 kB), flasher v RAM — flash mapa ZephCore sa
+  NEMENÍ. Cesta flash-rezidentného flashera (budúce power-loss recovery)
+  ostáva v kóde za `FOTA_FLASHER_IN_FLASH`, trace za `FOTA_FLASHER_TRACE`.
+- **`gen_fw_trailer.py` je dual-mode** (PIO post-action aj CLI `--hex/--bin/--uf2`)
+  a hex gap-fill je odteraz **0xFF** (zhoda s erased flashom a objcopy binom).
+- Pri úprave FOTA kódu TU: ak sa týka zdieľaného súboru, píš obe guard vetvy
+  a po commite spusti sync v ZephCore + tamojší build
+  (`west build -b promicro_sx1262 zephcore -- -DEXTRA_CONF_FILE="boards/common/repeater.conf;boards/common/fota.conf"`).
