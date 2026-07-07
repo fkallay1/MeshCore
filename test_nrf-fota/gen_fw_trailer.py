@@ -76,7 +76,9 @@ def read_ihex(path: Path):
             break
     if mn is None:
         raise SystemExit("[fwid] HEX neobsahuje dáta")
-    flat = bytearray(mx - mn + 1)
+    # gap fill 0xFF — erased flash aj zephyr.bin (objcopy --gap-fill) maju v
+    # dierach 0xFF; s 0x00 by SHA z hexu nesedela s binom ani s realnym flashom
+    flat = bytearray(b"\xff" * (mx - mn + 1))
     for a, by in mem.items():
         flat[a - mn] = by
     return mn, flat
