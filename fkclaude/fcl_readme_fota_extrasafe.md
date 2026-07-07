@@ -93,6 +93,73 @@ Idea (zatiaľ NEimplementované): balík by niesol informáciu, ktorým smerom f
 - So zdvihnutým limitom 32 KB je tlak na toto riešenie malý — má zmysel, až keby
   pravidelne vznikali rasty > 32 KB medzi susednými nasadzovanými buildmi.
 
+## 5b. Potenciálne budúce riešenie — resume po páde + fail-safe boot (nápad 2026-07-07)
+
+Pozorovanie: „posunutý zápis" (dekomprimuj dopredu do RAM, píš so sklzom, staré dáta
+ostávajú vo flashi) **už existuje** — je to presne extraSafe ring buffer v
+`hpatchi_inplaceB` (zápis oneskorený o extraSafeSize; pri malom extra_safe si knižnica
+sklz sama zväčší na polovicu voľnej cache, hpatch_lite.c:361). Samotný posun teda
+nezmenšuje patch; pridaná hodnota nápadu je **obnova po páde**.
+
+**Dnešné fail scenáre flashera:**
+| Kedy zlyhá | Čo sa stane |
+|------------|-------------|
+| pred prvým zápisom (hlavička/extra_safe/base SHA) | reset, stará appka nedotknutá ✓ |
+| po dopísaní, FNV readback nesedí | `GPREGRET=0x57` → DFU bootloader, USB obnova ✓ |
+| **uprostred zápisu** (power loss / fault) | **DIERA**: stránka 0 (vektory nového FW) je zapísaná ako prvá → bootloader skočí do roztrhaného obrazu → crash-loop; von len double-tap reset + USB |
+
+**Návrh (neimplementované): stránka 0 naposledy + resume stub**
+1. Pred patchovaním zapísať na app_base minimálny **stub** (reset vector → flasher@0xEB000);
+   skutočnú stránku 0 držať v RAM a zapísať až po úspešnej FNV verifikácii.
+2. Reset uprostred → bootloader → stub → flasher: CRC kontrolného bloku v RAM
+   (nRF52 RAM **prežije soft reset** — WDT/fault/SystemReset; komprimovaný patch
+   @0x20000000 tiež) → platný = **pokračuj od poslednej potvrdenej stránky**
+   (rozpísanú re-erase + dopíš z ringu); neplatný (power loss, RAM preč) =
+   `GPREGRET=0x57` → DFU — žiadny crash-loop, definovaný stav.
+3. Power loss počas zápisu samotného stubu → nevalidná stránka 0 → bootloader ostane
+   v DFU. Fail-safe v každom bode.
+**Doplnok — staging patchu do voľnej app flashe (nápad 2026-07-07 #2):** appka namiesto
+`memmove` do RAM zapíše staged patch cez NVMC **nad koniec FW** (app región v7 = 708 KB,
+FW ~475 KB → ~228 KB voľných; staged patch 13–92 KB sa zmestí; ak nie → RAM fallback =
+dnešná cesta). Flash je memory-mapped a `flasher_entry` už berie `patch_addr` ako
+parameter → **flasher sa pre samotný staging takmer nemení**. Patch tým prežije výpadok
+napájania — čo je chýbajúci diel pre plný resume. POZOR: samotný staging resume nedáva —
+ring (nezapísaný výstup `[w, p)`) bol v RAM a jeho re-produkcia replayom potrebuje čítať
+starý pás `[w−extraSafe, w)`, ktorý je už prepísaný — staré dáta `≥ w` vo flashi problém
+nie sú, chýba presne pás pod write-pointerom. (Pri SOFT resete ring + stav streamu v RAM
+prežijú → úroveň B „len pokračuj" funguje bez logu.) Ring sa pritom NESMIE preventívne
+flushovať — budúca produkcia legitímne číta až extraSafe pod aktuálny bod, sklz je
+korektnostná podmienka formátu, nie optimalizácia. Replay po výpadku potrebuje navyše:
+- **progress bitmap** (1 bit na potvrdenú stránku; NVMC bit-clear bez erase = lacné),
+- **rotujúci log starého okna** — pred prepísaním stránok odzálohovať ich STARÝ obsah
+  do tej istej voľnej oblasti. Replay potom: diff stream z flashe, staré dáta ≥ w
+  z flashe, zničené okno z logu, hlbšie garbage (výstup sa zahadzuje).
+  Cena: každá stránka zapísaná 2× (~+20 s).
+  **Hĺbka logu = `extra_safe` z hlavičky patchu, NIE fixných 32 KB** (formát garantuje
+  čítania ≥ q − extra_safe): pri es=0 (väčšina bežných patchov) log NETREBA vôbec
+  (resume = čistý replay, wear navyše 0); plný log traffic len pri veľkých rastoch.
+  **Wear čísla**: traffic ≈ starý FW (~475 KB ≈ 116 stránok) na OTA (keď es>0);
+  fixný 40 KB log = ~12 cyklov/OTA → ~800 OTA do 10k spec; log rozprestretý cez
+  ~160 KB voľnej plochy + rotácia štart offsetu per OTA (build#) = ~3 cykly/OTA
+  → tisíce OTA. Porovnanie: app stránky = 1 cyklus/OTA tak či tak.
+  **Formát**: log stránka = 1 stará stránka (4096 B); index stránka = pole slov
+  (slot→app stránka), zapisované postupne bez erase (1 slovo = 1 zápis, erase 1×/OTA);
+  progress rovnako 1 slovo = 1 potvrdená stránka (obíde limit opakovaných zápisov
+  do slova). Pri resume: index+progress → RAM tabuľka.
+
+**Úrovne ambície (každá stavia na predošlej):**
+| Úroveň | Čo pridá | Efekt pri výpadku |
+|--------|----------|-------------------|
+| A | flash staging + stub stránka 0 + bitmap | žiadny crash-loop: boot → stub → flasher → nedokončené → DFU (definovaný stav) |
+| B | + kontrolný blok v RAM s CRC | resume po soft resete (WDT/fault) — pokračuje kde skončil |
+| C | + old-window log | plný resume aj po výpadku napájania — dopatchuje sa sám |
+
+- Odhad: +1,5–3 KB kódu flashera (úroveň C horný okraj) → potrebuje 8 KB región.
+  Trace stránku pri tom radšej PRESUNÚŤ než zrušiť (pri fail scenároch je najcennejšia)
+  — napr. flasher 0xEB000–0xED000 (8 KB) a trace ukrojiť z FOTA FS (92→88 KB).
+- Najťažšia časť: testovanie power-fail scenárov (rezanie napájania v definovaných
+  fázach zápisu), nie kód.
+
 ## 6. Diagnostický ťahák
 
 | Prejav | Význam |
