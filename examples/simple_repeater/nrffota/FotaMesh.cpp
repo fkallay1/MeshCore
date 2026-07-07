@@ -6,8 +6,13 @@
 #include "FotaReceiver.h"
 #include "FotaPatcher.h"
 #include "FotaDebug.h"
-#include <Utils.h>
-#include <Arduino.h>
+#if defined(FOTA_MESHCORE_BUILD)
+  #include <Utils.h>
+  #include <Arduino.h>
+#elif defined(FOTA_ZEPHCORE_BUILD)
+  #include <mesh/Utils.h>
+  #include <stdio.h>       //en: sprintf (CLI replies)
+#endif
 #include <string.h>
 
 void fota_build_channel(mesh::GroupChannel& ch) {

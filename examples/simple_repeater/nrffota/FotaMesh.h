@@ -13,7 +13,13 @@
 //sk: dešifrovaný payload sem. Ovládanie cez "fota ..." príkazy (serial aj LoRa CLI;
 //sk: legacy alias "ota ..." — viď FOTA-CLI-ALIAS v MyMesh.cpp).
 // =====================================================================
-#include <Mesh.h>   //en: mesh::GroupChannel, PUB_KEY_SIZE, PATH_HASH_SIZE
+#if defined(FOTA_MESHCORE_BUILD)
+  #include <Mesh.h>        //en: mesh::GroupChannel, PUB_KEY_SIZE, PATH_HASH_SIZE
+#elif defined(FOTA_ZEPHCORE_BUILD)
+  #include <mesh/Mesh.h>   //en: mesh::GroupChannel, PUB_KEY_SIZE, PATH_HASH_SIZE
+#else
+  #error "FotaMesh.h: define FOTA_MESHCORE_BUILD or FOTA_ZEPHCORE_BUILD"
+#endif
 
 //en: Default FOTA channel — MeshCore #-convention (secret = SHA256(name)[0:16]).
 //en: Override via build_flags:  -D FOTA_CHANNEL_NAME='"#mojkanal"'
