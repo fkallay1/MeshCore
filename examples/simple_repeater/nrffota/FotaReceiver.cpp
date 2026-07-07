@@ -15,8 +15,7 @@
 #include "FwId.h"             //en: fw_id_trailer (build#, image_size, sha256)
 #include "FotaDebug.h"
 #include <Arduino.h>
-#include <SHA256.h>          //en: rweather/Crypto — same dep as mesh::Utils
-#include <Ed25519.h>         //en: rweather/Crypto —Ed25519::verify()
+#include "FotaCrypto.h"      //en: SHA256 + Ed25519 platform shim (rweather / PSA+Monocypher)
 
 //en: Global FotaFS instance — CustomLFS at 0xD4000 (92kB)
 CustomLFS FotaFS(FOTA_FS_FLASH_ADDR, FOTA_FS_FLASH_SIZE, FOTA_FS_BLOCK_SIZE);
@@ -26,7 +25,7 @@ static bool verify_header_signature(const uint8_t* sig,
                                     uint8_t key_id) {
     for (int i = 0; i < s_author_count; i++) {
         if (s_authors[i].id == key_id) {
-            return Ed25519::verify(sig, s_authors[i].pub_key, msg, msg_len);
+            return fota_ed25519_verify(sig, s_authors[i].pub_key, msg, msg_len);
         }
     }
     FOTA_DEBUG_PRINTLN("[FOTA] UNKNOWN key_id=0x%X", (unsigned)key_id);
@@ -146,7 +145,7 @@ void fota_print_fw_id(char* reply) {
 
     uint8_t h[32]; memset(h, 0, sizeof(h));
     if (timg && timg <= (APP_FLASH_END - base)) {
-        SHA256 sha;
+        FotaSha256 sha;
         sha.update((const void*)base, timg);
         sha.finalize(h, sizeof(h));
         FOTA_DEBUG_PRINT("[FOTA] running sha256     = "); print_sha_full(h);
@@ -190,7 +189,7 @@ static bool fota_base_fw_validated(uint32_t fw_size, const uint8_t* prefix) {
         FOTA_DEBUG_PRINTLN("[FOTA] base FW: fw_size %lu > app okno", (unsigned long)fw_size);
         return false;
     }
-    SHA256 sha;
+    FotaSha256 sha;
     sha.update((const void*)fw_flash_base(), fw_size);
     uint8_t h[32];
     sha.finalize(h, sizeof(h));
@@ -206,7 +205,7 @@ static bool fota_base_fw_validated(uint32_t fw_size, const uint8_t* prefix) {
 static bool fota_base_fw_check_full(uint32_t fw_size, const uint8_t* sha256_full) {
     if (!fota_fw_size_matches(fw_size)) return false;
     if (fw_size > (APP_FLASH_END - fw_flash_base())) return false;
-    SHA256 sha;
+    FotaSha256 sha;
     sha.update((const void*)fw_flash_base(), fw_size);
     uint8_t h[32];
     sha.finalize(h, sizeof(h));
@@ -408,7 +407,7 @@ static bool verify_log_sha() {
         FOTA_DEBUG_PRINTLN("[FOTA] log: čítanie zlyhal"); return false;
     }
     build_log_offsets(log_r);
-    SHA256 sha;
+    FotaSha256 sha;
     uint8_t buf[FOTA_CHUNK_DATA_MAX];
     for (uint16_t i = 0; i < fota.total_chunks; i++) {
         if (s_log_data_offset[i] == 0xFFFFFFFFu) {
@@ -459,7 +458,7 @@ static bool assemble_and_verify() {
     File out_f(FotaFS);
     if (!out_f.open(FOTA_FS_PATCH, FILE_O_WRITE)) { log_r.close(); return false; }
 
-    SHA256 sha;
+    FotaSha256 sha;
     bool   ok = true;
     uint8_t buf[FOTA_CHUNK_DATA_MAX];
     for (uint16_t i = 0; i < fota.total_chunks && ok; i++) {

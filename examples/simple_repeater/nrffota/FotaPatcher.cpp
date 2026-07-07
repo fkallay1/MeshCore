@@ -8,7 +8,7 @@
 #include "FotaBuffer.h"   //en: shared scratch (static .bss, not stack)
 #include "FotaDebug.h"
 #include <Arduino.h>
-#include <SHA256.h>          //en: rweather/Crypto
+#include "FotaCrypto.h"      //en: SHA256 platform shim (rweather / PSA)
 #include <nrf.h>             //en: NRF_NVMC, NVMC_CONFIG_WEN_*
 
 //en: HPatchLite — vendored in nrffota/hpatchlite/ (include path from build_flags)
@@ -65,7 +65,7 @@ static bool fota_verify_old_fw() {
         FOTA_DEBUG_PRINTLN("[OLD] CHYBA: old_fw_size %lu > app okno", (unsigned long)st->old_fw_size);
         return false;
     }
-    SHA256 sha; sha.reset();
+    FotaSha256 sha; sha.reset();
     sha.update((const void*)fota_running_fw_base(), st->old_fw_size);
     uint8_t h[32]; sha.finalize(h, sizeof(h));
     FOTA_DEBUG_PRINT("[OLD] base app flash SHA256="); print_sha16(h); FOTA_DEBUG_PRINTLN("...");
@@ -145,7 +145,7 @@ static hpi_BOOL patch_file_read(hpi_TInputStreamHandle h,
 //sk: SHA256-only listener pre test mód (hpatchi_listener_t musí byť prvý člen)
 typedef struct {
     hpatchi_listener_t base;   //en: MUST be first
-    SHA256   sha;
+    FotaSha256 sha;
     uint32_t written;
 } ShaListener;
 
