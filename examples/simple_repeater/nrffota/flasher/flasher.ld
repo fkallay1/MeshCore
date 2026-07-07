@@ -20,9 +20,12 @@ __flasher_origin = DEFINED(FLASHER_ORIGIN) ? FLASHER_ORIGIN : 0xEB000;
  * ZephCore RAM flasher ma KOD na 0x20020000 -> .bss sa posuva na 0x20021000
  * (build_flasher.py --platform zephcore prida --defsym FLASHER_RAM_ORIGIN). */
 __flasher_ram = DEFINED(FLASHER_RAM_ORIGIN) ? FLASHER_RAM_ORIGIN : 0x20020000;
+/* Velkost kodovej oblasti: flash flasher je viazany 4kB strankou (0xEB000);
+ * RAM flasher (ZephCore) limit nema -> 8kB (--defsym FLASHER_CODE_LEN). */
+__flasher_code_len = DEFINED(FLASHER_CODE_LEN) ? FLASHER_CODE_LEN : 4096;
 
 MEMORY {
-    CODE (rx)   : ORIGIN = __flasher_origin, LENGTH = 4096
+    CODE (rx)   : ORIGIN = __flasher_origin, LENGTH = __flasher_code_len
     RAM   (rwx) : ORIGIN = __flasher_ram, LENGTH = 0x1F000   /* .bss + stack, nad patchom */
 }
 
