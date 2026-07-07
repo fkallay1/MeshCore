@@ -83,6 +83,7 @@ static uint32_t s_log_data_offset[FOTA_MAX_CHUNKS];
 //sk: nie je konštantný výraz). Hodnoty sú link-time konštanty (relokácie) — pri
 //sk: kompilácii neznáme, ale to runtime aritmetike nevadí.
 // =====================================================================
+#if defined(FOTA_MESHCORE_BUILD)
 extern "C" {
     extern char __etext;
     extern char __data_start__;
@@ -96,6 +97,20 @@ static inline uint32_t fw_image_size(void) {
     uint32_t image_end = (uint32_t)(uintptr_t)&__etext + data_size;
     return image_end - (uint32_t)(uintptr_t)&__flash_arduino_start;
 }
+#elif defined(FOTA_ZEPHCORE_BUILD)
+//en: Zephyr: __rom_region_start = app base (code_partition, USE_DT_CODE_PARTITION),
+//en: __rom_region_end = end of all ROM content (text+rodata+data-load) = zephyr.bin end.
+//sk: Zephyr: __rom_region_start = app base (code_partition, USE_DT_CODE_PARTITION),
+//sk: __rom_region_end = koniec ROM obsahu (text+rodata+data-load) = koniec zephyr.bin.
+extern "C" {
+    extern char __rom_region_start[];
+    extern char __rom_region_end[];
+}
+
+static inline uint32_t fw_image_size(void) {
+    return (uint32_t)((uintptr_t)__rom_region_end - (uintptr_t)__rom_region_start);
+}
+#endif
 
 //en: Real app base from the linker symbol (= ORIGIN(FLASH) of the active ld script):
 //en: v6=0x26000, v7=0x27000. This is the source of truth for the device-side SHA — NOT
@@ -109,7 +124,11 @@ static inline uint32_t fw_image_size(void) {
 //sk: board bez FOTA_SOFTDEVICE_V7) nesprávne a hash by sa počítal z inej oblasti.
 //sk: (Flasher je standalone bez linker symbolov → tam makro ostáva, viď flash_layout.h.)
 static inline uint32_t fw_flash_base(void) {
+#if defined(FOTA_MESHCORE_BUILD)
     return (uint32_t)(uintptr_t)&__flash_arduino_start;
+#else
+    return (uint32_t)(uintptr_t)__rom_region_start;
+#endif
 }
 
 //en: Exported for FotaPatcher / FotaMesh — single source of truth for the app base and

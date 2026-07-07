@@ -69,6 +69,43 @@
   #define APP_FLASH_START      0x26000u
 #endif
 
+#if defined(FOTA_ZEPHCORE_BUILD)
+//en: ── ZephCore map ──────────────────────────────────────────────────────
+//en: app 0x26000/0x27000-0xD0000 (code_partition) · NVS 0xD0000 (16kB) ·
+//en: /lfs 0xD4000 (128kB, SHARED — FOTA files under /lfs/fota) · UF2 0xF4000.
+//en: No free flash → the flasher runs from RAM by default: the blob is copied
+//en: to FLASHER_RAM_ADDR right before the jump; its .bss+stack live above it
+//en: (see flasher/flasher.ld). Flash-resident flasher (future power-loss
+//en: recovery) needs FOTA_FLASHER_IN_FLASH + explicit addresses from a DTS
+//en: partition. Trace page likewise (FOTA_FLASHER_TRACE).
+//sk: ── ZephCore mapa ─────────────────────────────────────────────────────
+//sk: app 0x26000/0x27000-0xD0000 (code_partition) · NVS 0xD0000 (16kB) ·
+//sk: /lfs 0xD4000 (128kB, ZDIELANY — FOTA subory pod /lfs/fota) · UF2 0xF4000.
+//sk: Vo flashi nie je volne miesto → flasher bezi default z RAM: blob sa
+//sk: kopiruje na FLASHER_RAM_ADDR tesne pred skokom; jeho .bss+stack su nad
+//sk: nim (vid flasher/flasher.ld). Flash-rezidentny flasher (buduce power-loss
+//sk: recovery) vyzaduje FOTA_FLASHER_IN_FLASH + explicitne adresy z DTS
+//sk: particie. Trace stranka rovnako (FOTA_FLASHER_TRACE).
+#define APP_FLASH_END          0xD0000u
+#define APP_FLASH_MAX          (APP_FLASH_END - APP_FLASH_START)
+#define FLASH_PAGE_SIZE        4096u
+
+//en: sanity bound for patch sizes (shared /lfs partition size)
+//sk: horny limit velkosti patchu (velkost zdielanej /lfs particie)
+#define FOTA_FS_FLASH_SIZE      0x20000u
+
+//en: RAM flasher: 4kB code here, .bss+stack above (flasher.ld), patch below
+//sk: RAM flasher: 4kB kod tu, .bss+stack nad (flasher.ld), patch pod
+#define FLASHER_RAM_ADDR       0x20020000u
+
+#if defined(FOTA_FLASHER_IN_FLASH) && !defined(FLASHER_CODE_ADDR)
+  #error "FOTA_FLASHER_IN_FLASH: define FLASHER_CODE_ADDR (dedicated DTS partition)"
+#endif
+#if defined(FOTA_FLASHER_TRACE) && !defined(FLASH_TRACE_ADDR)
+  #error "FOTA_FLASHER_TRACE: define FLASH_TRACE_ADDR (dedicated flash page)"
+#endif
+
+#else /* FOTA_MESHCORE_BUILD alebo standalone flasher build (FOTA_FLASHER_BUILD) */
 //en: Common to all boards (the FS window does not depend on SoftDevice size)
 #define APP_FLASH_END          0xD4000u
 #define APP_FLASH_MAX          (APP_FLASH_END - APP_FLASH_START)
@@ -81,6 +118,7 @@
 #define FLASHER_CODE_ADDR      0xEB000u                //en: 4kB ARM Thumb2 flasher code
 #define FLASHER_META_ADDR      0xEC000u                //en: 4kB metadata + trace log
 #define FLASH_TRACE_ADDR       FLASHER_META_ADDR
+#endif /* FOTA_ZEPHCORE_BUILD */
 
 //en: Max extraSafeSize accepted from the hpatchi patch header — SINGLE SOURCE for
 //en: the flasher (hard reject 0xE5 + temp_cache sizing) AND the app-side verify/apply

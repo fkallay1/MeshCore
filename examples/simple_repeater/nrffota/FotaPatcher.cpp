@@ -7,7 +7,12 @@
 #include "FotaState.h"
 #include "FotaBuffer.h"   //en: shared scratch (static .bss, not stack)
 #include "FotaDebug.h"
+#if defined(FOTA_MESHCORE_BUILD)
 #include <Arduino.h>
+#elif defined(FOTA_ZEPHCORE_BUILD)
+#include <zephyr/kernel.h>
+#include <cmsis_core.h>      //en: __disable_irq / NVIC_SystemReset / __DSB/__ISB
+#endif
 #include "FotaCrypto.h"      //en: SHA256 platform shim (rweather / PSA)
 #include <nrf.h>             //en: NRF_NVMC, NVMC_CONFIG_WEN_*
 
@@ -80,6 +85,13 @@ static bool fota_verify_old_fw() {
 }
 
 #if FOTA_HAS_FLASHER
+//en: Flash-resident flasher path (MeshCore default; ZephCore only with
+//en: FOTA_FLASHER_IN_FLASH + a dedicated partition). The ZephCore default
+//en: copies the blob to RAM (FLASHER_RAM_ADDR) instead — no NVMC write.
+//sk: Cesta flash-rezidentneho flashera (MeshCore default; ZephCore len s
+//sk: FOTA_FLASHER_IN_FLASH + dedikovanou particiou). ZephCore default
+//sk: kopiruje blob do RAM (FLASHER_RAM_ADDR) — bez NVMC zapisu.
+#if defined(FOTA_MESHCORE_BUILD) || defined(FOTA_FLASHER_IN_FLASH)
 // ── NVMC (direct access after sd_softdevice_disable) ───────────────────
 static void nvmc_erase_page(uint32_t addr) {
     while (!NRF_NVMC->READY);
@@ -118,6 +130,7 @@ static bool ensure_flasher_written() {
     FOTA_DEBUG_PRINTLN("[FLASH] Flasher zapísaný OK");
     return true;
 }
+#endif  // FOTA_MESHCORE_BUILD || FOTA_FLASHER_IN_FLASH
 #endif
 
 // ================================================================
@@ -488,6 +501,23 @@ bool fota_flash_via_flasher() {
         return false;
     }
 
+#if defined(FOTA_ZEPHCORE_BUILD) && !defined(FOTA_FLASHER_IN_FLASH)
+    //en: RAM-flasher sanity: the patch buffer must lie entirely BELOW the flasher
+    //en: RAM region (code @ FLASHER_RAM_ADDR, .bss+stack above it). The flasher
+    //en: itself moves the patch to PATCH_RAM_ADDR (FLASHER_COPY_PATCH) — the app
+    //en: cannot memmove over the running kernel/stack.
+    //sk: RAM-flasher poistka: patch buffer musi lezat cely POD flasher RAM regionom
+    //sk: (kod @ FLASHER_RAM_ADDR, .bss+stack nad nim). Patch si na PATCH_RAM_ADDR
+    //sk: presunie sam flasher (FLASHER_COPY_PATCH) — app nemoze memmove-ovat cez
+    //sk: beziaci kernel/stack.
+    if ((uint32_t)(uintptr_t)patch_buf + patch_size > FLASHER_RAM_ADDR) {
+        FOTA_DEBUG_PRINTLN("[FLASHER] PRERUŠENÉ — patch buffer zasahuje do flasher RAM regionu (0x%X+%lu)",
+                           (unsigned)(uintptr_t)patch_buf, (unsigned long)patch_size);
+        free(patch_buf);
+        return false;
+    }
+#endif
+
     //en: ── 3: close CustomLFS (unmount only — FS data STAYS in flash) ──
     //sk: ── 3: zavrieť CustomLFS (len odmount — FS dáta vo flash ZOSTANÚ) ──
     FotaFS.end();
@@ -500,11 +530,22 @@ bool fota_flash_via_flasher() {
     //sk: 4. arg, takže je JEDEN board-agnostický blob (nie compile-time per-board).
     uint32_t app_base = fota_running_fw_base();
     typedef void(*flasher_fn_t)(uint32_t, uint32_t, uint32_t, uint32_t);
-    FOTA_DEBUG_PRINTLN("[FLASHER] → 0x%X [BYE] (streaming)", (unsigned)FLASHER_CODE_ADDR);
+#if defined(FOTA_MESHCORE_BUILD) || defined(FOTA_FLASHER_IN_FLASH)
+    const uint32_t flasher_jump = FLASHER_CODE_ADDR;
+#else
+    const uint32_t flasher_jump = FLASHER_RAM_ADDR;
+#endif
+    FOTA_DEBUG_PRINTLN("[FLASHER] → 0x%X [BYE] (streaming)", (unsigned)flasher_jump);
+#if defined(FOTA_MESHCORE_BUILD)
     Serial.flush();
 
     extern uint32_t sd_softdevice_disable(void);
     sd_softdevice_disable();
+#elif defined(FOTA_ZEPHCORE_BUILD)
+    //en: no SoftDevice on Zephyr; give the USB CDC console a moment to drain
+    //sk: na Zephyre nie je SoftDevice; nechaj USB CDC konzolu dobehnut
+    k_msleep(50);
+#endif
 
     //en: After sd_disable, DISABLE IRQs before the NVMC write + jump to the flasher.
     //en: Without this, a radio DIO1 / SysTick ISR can arrive during the NVMC window →
@@ -519,8 +560,9 @@ bool fota_flash_via_flasher() {
     //sk: (SVC sa dokončí); chránime kritické NVMC okno. Flasher si robí vlastný cpsid i.
     __disable_irq();
 
-    //en: ── 5: flasher code into 0xEB000 (nvmc, only after sd_disable) ──
-    //sk: ── 5: flasher kód do 0xEB000 (nvmc, až po sd_disable) ──
+#if defined(FOTA_MESHCORE_BUILD) || defined(FOTA_FLASHER_IN_FLASH)
+    //en: ── 5: flasher code into flash (nvmc, only after sd_disable) ──
+    //sk: ── 5: flasher kód do flash (nvmc, až po sd_disable) ──
     if (!ensure_flasher_written()) {
         NVIC_SystemReset();
     }
@@ -533,7 +575,23 @@ bool fota_flash_via_flasher() {
 
     //en: ── 7: jump to the flasher — DOES NOT RETURN. ──
     //sk: ── 7: skok na flasher — NEVRÁTI SA. ──
-    ((flasher_fn_t)(FLASHER_CODE_ADDR | 1u))(PATCH_RAM_ADDR, patch_size, new_fw_size, app_base);
+    ((flasher_fn_t)(flasher_jump | 1u))(PATCH_RAM_ADDR, patch_size, new_fw_size, app_base);
+#else
+    //en: ── 5: RAM flasher — copy the blob to FLASHER_RAM_ADDR and jump. The patch
+    //en:       stays at patch_buf (heap, below the flasher region — guarded above);
+    //en:       the flasher moves it to PATCH_RAM_ADDR itself (FLASHER_COPY_PATCH),
+    //en:       running from its own SP at the top of RAM. IRQs are already off.
+    //sk: ── 5: RAM flasher — skopiruj blob na FLASHER_RAM_ADDR a skoc. Patch ostava
+    //sk:       na patch_buf (heap, pod flasher regionom — poistka vyssie); na
+    //sk:       PATCH_RAM_ADDR si ho presunie sam flasher (FLASHER_COPY_PATCH),
+    //sk:       beziac s vlastnym SP na vrchu RAM. IRQ su uz vypnute.
+    memcpy((void*)FLASHER_RAM_ADDR, flasher_code, FLASHER_CODE_SIZE);
+    __DSB(); __ISB();
+
+    //en: ── 6: jump to the flasher — DOES NOT RETURN. ──
+    //sk: ── 6: skok na flasher — NEVRÁTI SA. ──
+    ((flasher_fn_t)(flasher_jump | 1u))((uint32_t)(uintptr_t)patch_buf, patch_size, new_fw_size, app_base);
+#endif
     while (1);
     return false;  //en: unreachable
 #endif  // FOTA_HAS_FLASHER
@@ -604,6 +662,11 @@ static void print_step(uint8_t step) {
 //sk: ── Flash trace log — flasher appenduje eventy do FLASH_TRACE_ADDR ──
 #define FLASH_TRACE_MAX  512u
 static void fota_print_flasher_trace() {
+#if !defined(FLASH_TRACE_ADDR)
+    //en: no trace region in this build (ZephCore default map has none)
+    //sk: v tomto builde nie je trace region (ZephCore default mapa ho nema)
+    FOTA_DEBUG_PRINTLN("[FLASHER-TRACE] (nedostupny — bez trace regionu)");
+#else
     const volatile uint32_t* t = (const volatile uint32_t*)FLASH_TRACE_ADDR;
     if (t[0] == 0xFFFFFFFFu) {
         FOTA_DEBUG_PRINTLN("[FLASHER-TRACE] (prázdny — flasher nezapísal trace)");
@@ -620,6 +683,7 @@ static void fota_print_flasher_trace() {
         FOTA_DEBUG_PRINT("  [%2lu] ", (unsigned long)i);
         print_step((uint8_t)(code & 0xFFu));
     }
+#endif  // FLASH_TRACE_ADDR
 }
 
 void fota_print_flasher_debug() {

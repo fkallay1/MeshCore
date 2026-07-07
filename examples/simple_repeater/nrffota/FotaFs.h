@@ -62,6 +62,7 @@ extern CustomLFS FotaFS;
 class FotaFsClass {
 public:
     bool begin() { fs_mkdir(FOTA_FS_DIR_MK); return true; }   //en: idempotent (-EEXIST ok)
+    void end() {}      //en: /lfs stays mounted (shared); the flasher never touches it
     void format() {}
     bool remove(const char* path) { return fs_unlink(path) == 0; }
 private:

@@ -17,7 +17,16 @@
 //sk: POZOR: CLI odpovede (sprintf do reply bufferu) sem NEpatria — to je
 //sk: funkčný výstup pre klienta, nie diagnostika.
 // =====================================================================
-#if FOTA_DEBUG && ARDUINO
+#if FOTA_DEBUG && defined(FOTA_ZEPHCORE_BUILD)
+  #include <zephyr/sys/printk.h>
+  //en: printk goes to the Zephyr console (USB CDC on nRF52 repeaters); CRLF
+  //en: endings for terminal parity with the Arduino output.
+  //sk: printk ide na Zephyr konzolu (USB CDC na nRF52 repeateroch); CRLF
+  //sk: konce riadkov kvoli parite s Arduino vystupom v terminali.
+  #define FOTA_DEBUG_PRINT(F, ...)   printk(F, ##__VA_ARGS__)
+  #define FOTA_DEBUG_PRINTLN(F, ...) printk(F "
+", ##__VA_ARGS__)
+#elif FOTA_DEBUG && ARDUINO
   #include <Arduino.h>
   //en: "\r\n" (CRLF) like Serial.println — a bare "\n" produces "staircase"
   //en: output in terminals (new line without carriage return). Do NOT put
