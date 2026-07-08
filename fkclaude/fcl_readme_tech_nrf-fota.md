@@ -418,3 +418,29 @@ vetva `features/nrf-fota`). Kľúčové dohody:
 - Pri úprave FOTA kódu TU: ak sa týka zdieľaného súboru, píš obe guard vetvy
   a po commite spusti sync v ZephCore + tamojší build
   (`west build -b promicro_sx1262 zephcore -- -DEXTRA_CONF_FILE="boards/common/repeater.conf;boards/common/fota.conf"`).
+
+### 12.1 HW e2e na ZephCore (2026-07-08, PASS) — čo si vynútil Zephyr
+
+Prvý HW beh odhalil tri ZephCore-špecifické prekážky (všetky opravené, detaily
+v commitoch `9c84dea1`/ZephCore `2808509`):
+
+1. **`__rom_region_end` ≠ koniec image** — linker span je len horný odhad
+   (368640 vs reálnych 220508 B); `fw_image_size()` v ZEPHCORE vetve preferuje
+   presnú veľkosť z FwId traileru (size-gate inak odmietal HEADER).
+2. **Kernel RAM + MPU vs RAM flasher** — Zephyr image siaha za 0x20020000
+   (`_image_ram_end` ≈ 0x20025000), kopírovanie blobu tam rozbíjalo kernel.
+   Flasher okno je preto na VRCHU RAM (0x2003E000–0x20040000), rezervované
+   DTS overlayom (`fota.overlay`: sram0 248 kB); stack flashera začína na code
+   origine (FLASHER_STACK_TOP defsym) a rastie dole do mŕtvej app RAM. Navyše
+   Zephyr ARM MPU: okno mimo sram0 = write fault a SRAM je execute-never →
+   pred kopiou/skokom `MPU->CTRL = 0`.
+3. **Breadcrumby bez GPREGRET2** — GPREGRET2 prepisuje Adafruit bootloader
+   (vždy 0x1) a vrchné kB RAM maže jeho startup stack (SP=0x20040000). RAM
+   marker preto na 0x20036000 (mŕtva zóna) + flash trace na 0xCF000 (posledná
+   stránka app okna, fakticky voľná — zephcore blob sa buildí s FLASHER_DEBUG=1
+   počas stabilizácie).
+
+Výsledok: 2 čisté cykly #289→#290 (DFU baseline) a #290→#291 (čisto FOTA),
+patch ~340 B, bežiaca SHA po flashi bit-presná. Companion (mcpy sender) občas
+po sende nič neodvysielal (session 0/0 / 1/0) — rieši opakovaný send/reboot
+companiona; DUT rádio bolo vždy OK (advert obojsmerne overený).
