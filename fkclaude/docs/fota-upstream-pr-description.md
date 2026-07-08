@@ -207,6 +207,12 @@ firmware**.
 - Build-number scaffolding under `test_nrf-fota/` is test tooling, not a release
   mechanism; happy to trim or relocate any of it per maintainer preference.
 
+## Development notes
+
+This feature was developed in collaboration with Claude (Anthropic's AI assistant),
+and the entire codebase was then reviewed, refined and hardware-validated end-to-end
+by the developer. 🤖 + 👨‍💻
+
 ---
 
 ¹ For fully automated regression tests we also drive a raw-LoRa serial bridge, but that
