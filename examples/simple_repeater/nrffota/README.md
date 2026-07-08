@@ -9,7 +9,7 @@ Umožňuje aktualizovať firmvér repeatera **cez LoRa** prenosom malého delta-
 
 > **ZephCore port:** tieto zdroje sú zdieľané so ZephCore
 > (`ZephCore/zephcore/app/nrffota/`, byte-identické, duálne guardy
-> `FOTA_MESHCORE_BUILD`/`FOTA_ZEPHCORE_BUILD`; sync `zephcore/tools/fota_sync.py`).
+> `FOTA_MESHCORE_BUILD`/`FOTA_ZEPHCORE_BUILD`; sync `test_nrf-fota/fota_mczc_scr_sync.py`).
 > Detaily: `fcl_readme_tech_nrf-fota.md` §12.
 
 ## Ako to funguje

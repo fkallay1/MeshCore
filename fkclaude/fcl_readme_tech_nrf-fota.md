@@ -394,8 +394,8 @@ vetva `features/nrf-fota`). Kľúčové dohody:
 - **Zdieľané súbory sú byte-identické** medzi
   `examples/simple_repeater/nrffota/` (tu) a `ZephCore/zephcore/app/nrffota/` +
   `test_nrf-fota/` ↔ `ZephCore/test_nrf-fota/`. Kontrola/prenos:
-  `python zephcore/tools/fota_sync.py [--copy]` (v ZephCore repe; zdroj pravdy
-  je MeshCore).
+  `python test_nrf-fota/fota_mczc_scr_sync.py [--copy]` (obojstranný — beží z
+  ktoréhokoľvek repa; zdroj pravdy je MeshCore, kopíruje sa vždy MC→ZC).
 - **Platformové rozdiely = duálne guardy** `#if defined(FOTA_MESHCORE_BUILD)` /
   `#elif defined(FOTA_ZEPHCORE_BUILD)` priamo v zdieľaných súboroch. Shim
   hlavičky: `FotaFs.h` (CustomLFS File ↔ Zephyr fs_*), `FotaDebug.h`
