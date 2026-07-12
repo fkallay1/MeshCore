@@ -43,6 +43,18 @@ extern RADIO_CLASS radio;   //en: raw RadioLib SX1262 (from target.cpp) — for 
   #define FW_BUILD_NUMBER 0
 #endif
 
+//en: RAW log path filter (fota_log_raw_line): print only frames with at most
+//en: FK_DEBUG_MAXPATH hops (TX allows +1 — a forwarded frame carries our appended
+//en: hash). Undefined -> 64, which is above the max 63 hops encodable in path_len,
+//en: i.e. no filtering. Override per env: -D FK_DEBUG_MAXPATH=4.
+//sk: Filter cesty v RAW logu (fota_log_raw_line): vypíš len rámce s najviac
+//sk: FK_DEBUG_MAXPATH hopmi (TX povoľuje +1 — preposlaný rámec nesie náš pripojený
+//sk: hash). Nedefinované -> 64, čo je nad max 63 hopov zakódovateľných v path_len,
+//sk: čiže bez filtra. Override per env: -D FK_DEBUG_MAXPATH=4.
+#ifndef FK_DEBUG_MAXPATH
+  #define FK_DEBUG_MAXPATH 64
+#endif
+
 //en: CLI reply delay — must match CLI_REPLY_DELAY_MILLIS in MyMesh.cpp
 //en: (the constant is private there; it can't be included without another hook).
 //sk: Oneskorenie CLI odpovede — musí sedieť s CLI_REPLY_DELAY_MILLIS v MyMesh.cpp
@@ -163,9 +175,11 @@ static void fota_log_raw_line(const char* dir, unsigned long seq, bool have_sig,
       payload_off   = path_off + path_byte_len;
     }
 
-    //en: FK - only packets with path < 4 - not to mess debug outpuy wit many data
-    if (path_count > 4) return;
-
+    //en: Path filter (see FK_DEBUG_MAXPATH above). TX limit is +1 so that the
+    //en: forward of a printed RX (path grows by our hash) is printed too.
+    //sk: Filter cesty (viď FK_DEBUG_MAXPATH vyššie). TX limit je +1, aby forward
+    //sk: vypísaného RX (path narastie o náš hash) bol vypísaný tiež.
+    if (path_count > FK_DEBUG_MAXPATH + (dir[0] == 'T' ? 1 : 0)) return;
 
     if (have_sig)
       FOTA_DEBUG_PRINT("[FOTA] %s RAW #%lu len=%d rssi=%d snr=%.1f",

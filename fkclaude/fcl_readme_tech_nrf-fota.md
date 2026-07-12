@@ -248,8 +248,13 @@ Symptóm: repeater po čase **prestal prijímať čokoľvek** (`rawrx=0`), dlhod
      **`[FOTA] RX RAW`**; nový **`[FOTA] TX RAW`** loguje každý ODOSLANÝ rámec (vlastné
      adverty/ACK aj preposlané) cez nový core hook `logTxRaw` (Dispatcher `checkSend` →
      `fotaLogTxRaw`). Zdieľané telo `fota_log_raw_line(dir,…)` (rovnaký formát type/route/path,
-     TX bez rssi/snr). Nové počítadlo `rawtx` v heartbeate (`rawrx=… rawtx=…`). Filter
-     `path_count>4` platí pre oba smery. Vše za `FOTA_DEBUG`.
+     TX bez rssi/snr). Nové počítadlo `rawtx` v heartbeate (`rawrx=… rawtx=…`). Vše za `FOTA_DEBUG`.
+   - **Filter cesty `FK_DEBUG_MAXPATH`** (2026-07-12, predtým napevno `path_count>4`):
+     vypíše sa len rámec s `path_count <= FK_DEBUG_MAXPATH`; **TX má limit +1**, aby forward
+     vypísaného RX (path narastie o náš hash) bol v logu tiež. Nedefinované → default 64
+     (nad max 63 hopov) = **bez filtra**. Zapnutie per env: `-D FK_DEBUG_MAXPATH=4`.
+     POZOR: počítadlá `rawrx`/`rawtx` (čísla `#N` v riadkoch) sa inkrementujú aj pre
+     odfiltrované rámce — diery v číslovaní = potlačené výpisy, nie strata paketov.
 2. `nf=-120` v hluchom stave = **clampnutá dolná hranica** noise floor
    ([RadioLibWrappers.cpp:97](src/helpers/radiolib/RadioLibWrappers.cpp#L97)) → rádio JE v RX a
    vzorkuje, kanál tichý.
