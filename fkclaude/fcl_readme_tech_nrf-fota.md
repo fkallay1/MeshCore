@@ -367,6 +367,12 @@ Ak by si chcel agresívnejšiu ochranu, `set cad on` je runtime (bez rebuildu) �
 - XIAO/SenseCap (v7) ako FOTA cieľ: nič špeciálne — jeden board-agnostický `flasher_code.h` (app base runtime z linker symbolu); HOTOVÉ 2026-06-25.
 - `build_number.txt` / `gen_build_info.py` sú **dočasné testovacie lešenie** (build# vo FW na
   detekciu verzie po flashi a na zaručenie OLD≠NEW).
+  - Git konvencia (2026-07-12): v repe je neutrálna hodnota **300** (rovnaká vo
+    `features/nrf-fota` aj `features/nrf-fota-dualguard`, aby checkout medzi vetvami
+    do súboru nesiahal); lokálne reálne číslo drží
+    `git update-index --skip-worktree test_nrf-fota/build_number.txt`. Po novom klone
+    flag nastaviť znova. Build bez skriptov je bezpečný: `__has_include("build_info.h")`
+    + fallback `FW_BUILD_NUMBER 0` (FotaMyMesh.cpp).
 
 ---
 

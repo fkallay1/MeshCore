@@ -18,7 +18,7 @@ Súvis: [fcl_readme_nrf-fota.md](fcl_readme_nrf-fota.md) (užívateľský popis 
 | adb (pre push do telefónu) | `D:\FkDev\00_Downloads\scrcpy-win64-v4.0\adb.exe` (fallback `adb` z PATH) |
 | Archív buildov (app image .bin + .uf2) | `test_nrf-fota/builds/` — názov `<device>.fw_<N>.bin` (gitignored) |
 | Vygenerované balíky | `test_nrf-fota/fotapkg_json/` — `<old>-<new>.<device>.fotapkg.json` (+ `.rev.` = rollback) |
-| Globálny build counter | `test_nrf-fota/build_number.txt` (bumpuje ho `pre:gen_build_info.py` pri každom builde) |
+| Globálny build counter | `test_nrf-fota/build_number.txt` (bumpuje ho `pre:gen_build_info.py` pri každom builde). **V repe je neutrálna hodnota 300** (obe FOTA vetvy); lokálne reálne číslo drží `git update-index --skip-worktree test_nrf-fota/build_number.txt` → git ho nehlási ani necommituje. Po novom klone flag nastaviť znova; ak checkout hlási „would be overwritten", dočasne `--no-skip-worktree`. |
 | FOTA env názvy | `ProMicro_repeater_fota`, `SenseCap_Solar_repeater_fota`, `Xiao_nrf52_repeater_fota` |
 
 **`device` v názvoch** = `PIOENV.split("_")[0].lower()` → `ProMicro_repeater_fota` → `promicro`,
