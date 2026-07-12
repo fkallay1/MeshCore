@@ -48,6 +48,7 @@ Poznámka z debug session (Claude Code + Fedor). Symptóm: hover na symbol ukazo
 Pozn.: ipch cache (`vscode-ipch`) ostáva takmer prázdna — cpptools ju zapisuje lenivo;
 pri zdravom stave (TU parse ~0,5 s) to nevadí.
 
-Bonus nález: v štartovacom bat-ku je west-install vetva rozbitá (`python -m curl` +
-zlá URL) — správne `curl -o "%DEV_ROOT%\python312\get-pip.py" https://bootstrap.pypa.io/get-pip.py`.
-Prejaví sa až na čerstvom stroji bez west.
+Bonus nález: v štartovacom bat-ku (`D:\FkDev\start_VSCode.bat`) bola west-install vetva
+rozbitá (`python -m curl` + zlá URL). **Opravené 2026-07-13**: `curl -o ...
+https://bootstrap.pypa.io/get-pip.py` + python volaný explicitne z `python312`
+(bare `python` by sa kvôli PATH poradiu chytil z PlatformIO penv).
