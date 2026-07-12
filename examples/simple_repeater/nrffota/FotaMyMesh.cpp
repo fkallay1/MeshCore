@@ -43,6 +43,18 @@ extern RADIO_CLASS radio;   //en: raw RadioLib SX1262 (from target.cpp) — for 
   #define FW_BUILD_NUMBER 0
 #endif
 
+//en: RAW log path filter (fota_log_raw_line): print only frames with at most
+//en: FK_DEBUG_MAXPATH hops (TX allows +1 — a forwarded frame carries our appended
+//en: hash). Undefined -> 64, which is above the max 63 hops encodable in path_len,
+//en: i.e. no filtering. Override per env: -D FK_DEBUG_MAXPATH=4.
+//sk: Filter cesty v RAW logu (fota_log_raw_line): vypíš len rámce s najviac
+//sk: FK_DEBUG_MAXPATH hopmi (TX povoľuje +1 — preposlaný rámec nesie náš pripojený
+//sk: hash). Nedefinované -> 64, čo je nad max 63 hopov zakódovateľných v path_len,
+//sk: čiže bez filtra. Override per env: -D FK_DEBUG_MAXPATH=4.
+#ifndef FK_DEBUG_MAXPATH
+  #define FK_DEBUG_MAXPATH 64
+#endif
+
 //en: CLI reply delay — must match CLI_REPLY_DELAY_MILLIS in MyMesh.cpp
 //en: (the constant is private there; it can't be included without another hook).
 //sk: Oneskorenie CLI odpovede — musí sedieť s CLI_REPLY_DELAY_MILLIS v MyMesh.cpp
@@ -163,15 +175,13 @@ static void fota_log_raw_line(const char* dir, unsigned long seq, bool have_sig,
       payload_off   = path_off + path_byte_len;
     }
 
-    //en: FK - only packets with path < 4 - not to mess debug outpuy wit many data
-    if (path_count > 4) return;
+    //en: Path filter (see FK_DEBUG_MAXPATH above). TX limit is +1 so that the
+    //en: forward of a printed RX (path grows by our hash) is printed too.
+    //sk: Filter cesty (viď FK_DEBUG_MAXPATH vyššie). TX limit je +1, aby forward
+    //sk: vypísaného RX (path narastie o náš hash) bol vypísaný tiež.
+    if (path_count > FK_DEBUG_MAXPATH + (dir[0] == 'T' ? 1 : 0)) return;
 
-
-    if (have_sig)
-      FOTA_DEBUG_PRINT("[FOTA] %s RAW #%lu len=%d rssi=%d snr=%.1f",
-                       dir, seq, len, (int)rssi, snr);
-    else
-      FOTA_DEBUG_PRINT("[FOTA] %s RAW #%lu len=%d", dir, seq, len);
+    FOTA_DEBUG_PRINT("[FOTA] %s RAW #%lu len=%d", dir, seq, len);
 
     //en: Our FOTA? GRP_DATA on our FOTA channel — channel_hash is the 1st payload byte
     //en: (Mesh.cpp: channel_hash = payload[0]); readable already here, before decryption.
@@ -223,6 +233,12 @@ static void fota_log_raw_line(const char* dir, unsigned long seq, bool have_sig,
   FOTA_DEBUG_PRINT(" first=");
   int n8 = len < 8 ? len : 8;
   for (int k = 0; k < n8; k++) FOTA_DEBUG_PRINT("%02X", (unsigned)raw[k]);
+
+  //en: RX metrics (rssi/snr) are only available on RX; TX has no receive metrics.
+  //sk: RX metriky (rssi/snr) sú len na RX; TX nemá prijímacie metriky.
+  if (have_sig)
+    FOTA_DEBUG_PRINT(" rssi=%d snr=%.1f", (int)rssi, snr);
+
   FOTA_DEBUG_PRINTLN("");
 }
 
@@ -848,7 +864,7 @@ void MyMesh::fotaLoop() {
   static unsigned long s_next_build_print = 0;
   if (s_next_build_print == 0 || millisHasNowPassed(s_next_build_print)) {
     s_next_build_print = futureMillis(25000);
-    FOTA_DEBUG_PRINT("[FOTA] AALIVE build #%lu  freq=%.3f sf=%u rawrx=%lu rawtx=%lu rxpkts=%lu rxerr=%lu",
+    FOTA_DEBUG_PRINT("[FOTA]   AALIVE build #%lu  freq=%.3f sf=%u rawrx=%lu rawtx=%lu rxpkts=%lu rxerr=%lu",
                      (unsigned long)FW_BUILD_NUMBER, _prefs.freq, (unsigned)_prefs.sf,
                      (unsigned long)_fota_raw_rx, (unsigned long)_fota_raw_tx,
                      (unsigned long)radio_driver.getPacketsRecv(),

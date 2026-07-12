@@ -248,8 +248,13 @@ Symptóm: repeater po čase **prestal prijímať čokoľvek** (`rawrx=0`), dlhod
      **`[FOTA] RX RAW`**; nový **`[FOTA] TX RAW`** loguje každý ODOSLANÝ rámec (vlastné
      adverty/ACK aj preposlané) cez nový core hook `logTxRaw` (Dispatcher `checkSend` →
      `fotaLogTxRaw`). Zdieľané telo `fota_log_raw_line(dir,…)` (rovnaký formát type/route/path,
-     TX bez rssi/snr). Nové počítadlo `rawtx` v heartbeate (`rawrx=… rawtx=…`). Filter
-     `path_count>4` platí pre oba smery. Vše za `FOTA_DEBUG`.
+     TX bez rssi/snr). Nové počítadlo `rawtx` v heartbeate (`rawrx=… rawtx=…`). Vše za `FOTA_DEBUG`.
+   - **Filter cesty `FK_DEBUG_MAXPATH`** (2026-07-12, predtým napevno `path_count>4`):
+     vypíše sa len rámec s `path_count <= FK_DEBUG_MAXPATH`; **TX má limit +1**, aby forward
+     vypísaného RX (path narastie o náš hash) bol v logu tiež. Nedefinované → default 64
+     (nad max 63 hopov) = **bez filtra**. Zapnutie per env: `-D FK_DEBUG_MAXPATH=4`.
+     POZOR: počítadlá `rawrx`/`rawtx` (čísla `#N` v riadkoch) sa inkrementujú aj pre
+     odfiltrované rámce — diery v číslovaní = potlačené výpisy, nie strata paketov.
 2. `nf=-120` v hluchom stave = **clampnutá dolná hranica** noise floor
    ([RadioLibWrappers.cpp:97](src/helpers/radiolib/RadioLibWrappers.cpp#L97)) → rádio JE v RX a
    vzorkuje, kanál tichý.
@@ -362,6 +367,12 @@ Ak by si chcel agresívnejšiu ochranu, `set cad on` je runtime (bez rebuildu) �
 - XIAO/SenseCap (v7) ako FOTA cieľ: nič špeciálne — jeden board-agnostický `flasher_code.h` (app base runtime z linker symbolu); HOTOVÉ 2026-06-25.
 - `build_number.txt` / `gen_build_info.py` sú **dočasné testovacie lešenie** (build# vo FW na
   detekciu verzie po flashi a na zaručenie OLD≠NEW).
+  - Git konvencia (2026-07-12): v repe je neutrálna hodnota **300** (rovnaká vo
+    `features/nrf-fota` aj `features/nrf-fota-dualguard`, aby checkout medzi vetvami
+    do súboru nesiahal); lokálne reálne číslo drží
+    `git update-index --skip-worktree test_nrf-fota/build_number.txt`. Po novom klone
+    flag nastaviť znova. Build bez skriptov je bezpečný: `__has_include("build_info.h")`
+    + fallback `FW_BUILD_NUMBER 0` (FotaMyMesh.cpp).
 
 ---
 
@@ -383,3 +394,64 @@ zahodil ako duplikáty ešte pred dešifrovaním. `fota clear` čistí len FOTA 
 seen-table zámerne nie. **Fix vo Flutter appke**: unikátny `ts` (epoch sekundy) pre každý
 paket. Detail: GOTCHA blok v [fcl_readme_nrf-fota.md](fcl_readme_nrf-fota.md) §2 Transport.
 Firmware dedup je korektný a nemení sa.
+
+---
+
+## 12. ZephCore port (2026-07) — duálne guardy a sync
+
+FOTA je od 2026-07 naportované aj do ZephCore (`D:\FkDev\FkProj\VSC\ZephCore`,
+vetva `features/nrf-fota`). Kľúčové dohody:
+
+- **Zdieľané súbory sú byte-identické** medzi
+  `examples/simple_repeater/nrffota/` (tu) a `ZephCore/zephcore/app/nrffota/` +
+  `test_nrf-fota/` ↔ `ZephCore/test_nrf-fota/`. Kontrola/prenos:
+  `python test_nrf-fota/fota_mczc_scr_sync.py [--copy]` (obojstranný — beží z
+  ktoréhokoľvek repa; zdroj pravdy je MeshCore, kopíruje sa vždy MC→ZC).
+- **Platformové rozdiely = duálne guardy** `#if defined(FOTA_MESHCORE_BUILD)` /
+  `#elif defined(FOTA_ZEPHCORE_BUILD)` priamo v zdieľaných súboroch. Shim
+  hlavičky: `FotaFs.h` (CustomLFS File ↔ Zephyr fs_*), `FotaDebug.h`
+  (Serial.printf ↔ printk), `FotaCrypto.h` (rweather ↔ PSA+Monocypher),
+  `flash_layout.h` (mapy oboch platforiem). FOTA envy tu majú
+  `-D FOTA_MESHCORE_BUILD=1`.
+- **Per-projekt glue (nesyncuje sa):** `FotaMyMesh.{h,cpp}` (tu) ↔
+  `FotaRepeaterMesh.{h,cpp}` (ZephCore). `FotaMesh.{h,cpp}` je zdieľané.
+- **`flasher_code.h` je per-repo generovaný** — MeshCore default
+  (`build_flasher.py`, ORIGIN 0xEB000, blob bitovo NEZMENENÝ voči odladenému),
+  ZephCore `--origin 0x20020000 --platform zephcore` (flasher beží z RAM,
+  blob si patch presúva na PATCH_RAM_ADDR sám — `FLASHER_COPY_PATCH`;
+  8 kB CODE limit namiesto 4 kB).
+- **ZephCore mapa:** app 0x26000/0x27000–0xD0000, FOTA dáta v zdieľanom
+  `/lfs/fota/*` (0xD4000, 128 kB), flasher v RAM — flash mapa ZephCore sa
+  NEMENÍ. Cesta flash-rezidentného flashera (budúce power-loss recovery)
+  ostáva v kóde za `FOTA_FLASHER_IN_FLASH`, trace za `FOTA_FLASHER_TRACE`.
+- **`gen_fw_trailer.py` je dual-mode** (PIO post-action aj CLI `--hex/--bin/--uf2`)
+  a hex gap-fill je odteraz **0xFF** (zhoda s erased flashom a objcopy binom).
+- Pri úprave FOTA kódu TU: ak sa týka zdieľaného súboru, píš obe guard vetvy
+  a po commite spusti sync v ZephCore + tamojší build
+  (`west build -b promicro_sx1262 zephcore -- -DEXTRA_CONF_FILE="boards/common/repeater.conf;boards/common/fota.conf"`).
+
+### 12.1 HW e2e na ZephCore (2026-07-08, PASS) — čo si vynútil Zephyr
+
+Prvý HW beh odhalil tri ZephCore-špecifické prekážky (všetky opravené, detaily
+v commitoch `9c84dea1`/ZephCore `2808509`):
+
+1. **`__rom_region_end` ≠ koniec image** — linker span je len horný odhad
+   (368640 vs reálnych 220508 B); `fw_image_size()` v ZEPHCORE vetve preferuje
+   presnú veľkosť z FwId traileru (size-gate inak odmietal HEADER).
+2. **Kernel RAM + MPU vs RAM flasher** — Zephyr image siaha za 0x20020000
+   (`_image_ram_end` ≈ 0x20025000), kopírovanie blobu tam rozbíjalo kernel.
+   Flasher okno je preto na VRCHU RAM (0x2003E000–0x20040000), rezervované
+   DTS overlayom (`fota.overlay`: sram0 248 kB); stack flashera začína na code
+   origine (FLASHER_STACK_TOP defsym) a rastie dole do mŕtvej app RAM. Navyše
+   Zephyr ARM MPU: okno mimo sram0 = write fault a SRAM je execute-never →
+   pred kopiou/skokom `MPU->CTRL = 0`.
+3. **Breadcrumby bez GPREGRET2** — GPREGRET2 prepisuje Adafruit bootloader
+   (vždy 0x1) a vrchné kB RAM maže jeho startup stack (SP=0x20040000). RAM
+   marker preto na 0x20036000 (mŕtva zóna) + flash trace na 0xCF000 (posledná
+   stránka app okna, fakticky voľná — zephcore blob sa buildí s FLASHER_DEBUG=1
+   počas stabilizácie).
+
+Výsledok: 2 čisté cykly #289→#290 (DFU baseline) a #290→#291 (čisto FOTA),
+patch ~340 B, bežiaca SHA po flashi bit-presná. Companion (mcpy sender) občas
+po sende nič neodvysielal (session 0/0 / 1/0) — rieši opakovaný send/reboot
+companiona; DUT rádio bolo vždy OK (advert obojsmerne overený).

@@ -132,7 +132,22 @@
 //sk: fmark() je teraz no-op — nahradené flash trace logom (ftrace), ktorý dáva
 //sk: kompletnú sekvenciu eventov, nie len posledný krok. Ponechané kvôli úspore
 //sk: miesta (flasher kód musí byť < 4kB) — všetky fmark() volania sa vyparia.
+#if defined(FLASHER_MARK_RAM)
+//en: RAM breadcrumb for the ZephCore RAM flasher: GPREGRET2 gets clobbered by
+//en: the Adafruit bootloader, a flash trace page is not available in the
+//en: ZephCore map -> write [0x464B4Dxx = 'FKM'|step] to a word INSIDE the
+//en: reserved flasher code region (top of RAM, outside app/kernel and outside
+//en: the flasher stack). The app reads it after reboot (fota dbg) — RAM
+//en: survives a soft reset.
+//sk: RAM breadcrumb pre ZephCore RAM flasher: GPREGRET2 prepisuje Adafruit
+//sk: bootloader, flash trace stranka v ZephCore mape nie je -> zapis
+//sk: [0x464B4Dxx = 'FKM'|step] do wordu VNUTRI rezervovaneho code regionu
+//sk: flashera (vrch RAM, mimo app/kernelu aj mimo flasher stacku). App ho
+//sk: precita po reboote (fota dbg) — RAM prezije soft reset.
+#define fmark(step) (*(volatile unsigned long*)(FLASHER_MARK_RAM) = (0x464B4D00ul | (unsigned char)(step)))
+#else
 #define fmark(step) ((void)0)
+#endif
 /* Step codes: */
 #define FM_STARTED          0xFFu  //en: flasher_main was called
 #define FM_ZLIB_DETECTED    0x01u
@@ -360,7 +375,27 @@ void flasher_main(uint32_t patch_addr, uint32_t patch_size,
     //sk: prerušenie (SysTick/RADIO/USB), CPU by skočilo cez VTOR do app handlera
     //sk: bez platného SD/RTOS stavu → crash/reset. Flasher je čisto sekvenčný.
     __asm volatile ("cpsid i" ::: "memory");
+    fmark(FM_STARTED);    //en: breadcrumb: flasher_main is alive (RAM marker mode)
     ftrace_init();        //en: erase the trace page 0xF3000
+
+#ifdef FLASHER_COPY_PATCH
+    //en: ZephCore RAM flasher: the app can NOT memmove the patch to PATCH_RAM_ADDR
+    //en: itself (it would overwrite the running kernel/thread stacks mid-copy), so
+    //en: WE move it — running from RAM code with our own SP at the top of RAM.
+    //en: dest (0x20000000) <= src (app heap, guarded < FLASHER_RAM_ADDR by the app),
+    //en: so a forward byte copy handles any overlap safely.
+    //sk: ZephCore RAM flasher: app si NEmoze patch presunut na PATCH_RAM_ADDR sam
+    //sk: (prepisal by si beziaci kernel/stack vlakna uprostred kopie), preto ho
+    //sk: presuvame MY — beziac z RAM kodu s vlastnym SP na vrchu RAM.
+    //sk: dest (0x20000000) <= src (app heap, app strazi < FLASHER_RAM_ADDR),
+    //sk: takze dopredna bajtova kopia bezpecne zvladne aj prekryv.
+    if (patch_addr != PATCH_RAM_ADDR) {
+        const uint8_t* cp_s = (const uint8_t*)patch_addr;
+        uint8_t*       cp_d = (uint8_t*)PATCH_RAM_ADDR;
+        for (uint32_t cp_i = 0; cp_i < patch_size; cp_i++) cp_d[cp_i] = cp_s[cp_i];
+        patch_addr = PATCH_RAM_ADDR;
+    }
+#endif
 
     //en: read_diff backend — depends on the patch format. For a raw patch a direct read
     //en: from RAM (PatchStream), for ZLIB streaming decompression (puff_stream).
@@ -522,7 +557,7 @@ void flasher_entry(uint32_t patch_addr, uint32_t patch_size, uint32_t new_fw_siz
     //sk: pre flasher_main. SP nastav cez r12 (scratch reg), NIE r3 — inak by sa
     //sk: 4. parameter (app_base) prepísal pred volaním flasher_main.
     __asm volatile (
-        "ldr r12, =0x20040000\n\t"  /* top of nRF52840 RAM */
+        "ldr r12, =__flasher_stack_top\n\t"  /* linker symbol (defsym); default 0x20040000 */
         "mov sp, r12\n\t"
         "bl  flasher_main\n\t"
         "1: b 1b\n\t"               /* never reached — flasher_main resets */

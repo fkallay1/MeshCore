@@ -14,19 +14,29 @@
 #include "FotaFs.h"
 #include "FwId.h"             //en: fw_id_trailer (build#, image_size, sha256)
 #include "FotaDebug.h"
+#if defined(FOTA_MESHCORE_BUILD)
 #include <Arduino.h>
-#include <SHA256.h>          //en: rweather/Crypto — same dep as mesh::Utils
-#include <Ed25519.h>         //en: rweather/Crypto —Ed25519::verify()
+#elif defined(FOTA_ZEPHCORE_BUILD)
+#include <stdio.h>       //en: sprintf (CLI replies)
+#include <stdlib.h>      //en: malloc/free (patch RAM assembly)
+#include <string.h>
+#endif
+#include "FotaCrypto.h"      //en: SHA256 + Ed25519 platform shim (rweather / PSA+Monocypher)
 
+#if defined(FOTA_MESHCORE_BUILD)
 //en: Global FotaFS instance — CustomLFS at 0xD4000 (92kB)
 CustomLFS FotaFS(FOTA_FS_FLASH_ADDR, FOTA_FS_FLASH_SIZE, FOTA_FS_BLOCK_SIZE);
+#else
+//en: Global FotaFS instance — thin wrapper over the shared /lfs mount
+FotaFsClass FotaFS;
+#endif
 
 static bool verify_header_signature(const uint8_t* sig,
                                     const uint8_t* msg, size_t msg_len,
                                     uint8_t key_id) {
     for (int i = 0; i < s_author_count; i++) {
         if (s_authors[i].id == key_id) {
-            return Ed25519::verify(sig, s_authors[i].pub_key, msg, msg_len);
+            return fota_ed25519_verify(sig, s_authors[i].pub_key, msg, msg_len);
         }
     }
     FOTA_DEBUG_PRINTLN("[FOTA] UNKNOWN key_id=0x%X", (unsigned)key_id);
@@ -79,6 +89,7 @@ static uint32_t s_log_data_offset[FOTA_MAX_CHUNKS];
 //sk: nie je konštantný výraz). Hodnoty sú link-time konštanty (relokácie) — pri
 //sk: kompilácii neznáme, ale to runtime aritmetike nevadí.
 // =====================================================================
+#if defined(FOTA_MESHCORE_BUILD)
 extern "C" {
     extern char __etext;
     extern char __data_start__;
@@ -92,6 +103,32 @@ static inline uint32_t fw_image_size(void) {
     uint32_t image_end = (uint32_t)(uintptr_t)&__etext + data_size;
     return image_end - (uint32_t)(uintptr_t)&__flash_arduino_start;
 }
+#elif defined(FOTA_ZEPHCORE_BUILD)
+//en: Zephyr: __rom_region_start = app base (code_partition, USE_DT_CODE_PARTITION),
+//en: __rom_region_end = end of all ROM content (text+rodata+data-load) = zephyr.bin end.
+//sk: Zephyr: __rom_region_start = app base (code_partition, USE_DT_CODE_PARTITION),
+//sk: __rom_region_end = koniec ROM obsahu (text+rodata+data-load) = koniec zephyr.bin.
+extern "C" {
+    extern char __rom_region_start[];
+    extern char __rom_region_end[];
+}
+
+static inline uint32_t fw_image_size(void) {
+    //en: __rom_region_end spans PAST the flashed image on Zephyr (region padding/
+    //en: alignment — measured 368640 vs real 220492 on promicro), so the linker
+    //en: span is only an upper bound. The post-build trailer carries the EXACT
+    //en: zephyr.bin size (gen_fw_trailer.py) — prefer it; fall back to the span
+    //en: for images without a filled trailer.
+    //sk: __rom_region_end siaha ZA koniec flashovaneho image na Zephyre (padding/
+    //sk: zarovnanie regionu — namerane 368640 vs realnych 220492 na promicro),
+    //sk: takze linker span je len horny odhad. Post-build trailer nesie PRESNU
+    //sk: velkost zephyr.bin (gen_fw_trailer.py) — preferuj ho; fallback na span
+    //sk: pre image bez vyplneneho traileru.
+    uint32_t span = (uint32_t)((uintptr_t)__rom_region_end - (uintptr_t)__rom_region_start);
+    uint32_t t = fw_id_trailer.image_size;
+    return (t != 0 && t <= span) ? t : span;
+}
+#endif
 
 //en: Real app base from the linker symbol (= ORIGIN(FLASH) of the active ld script):
 //en: v6=0x26000, v7=0x27000. This is the source of truth for the device-side SHA — NOT
@@ -105,7 +142,11 @@ static inline uint32_t fw_image_size(void) {
 //sk: board bez FOTA_SOFTDEVICE_V7) nesprávne a hash by sa počítal z inej oblasti.
 //sk: (Flasher je standalone bez linker symbolov → tam makro ostáva, viď flash_layout.h.)
 static inline uint32_t fw_flash_base(void) {
+#if defined(FOTA_MESHCORE_BUILD)
     return (uint32_t)(uintptr_t)&__flash_arduino_start;
+#else
+    return (uint32_t)(uintptr_t)__rom_region_start;
+#endif
 }
 
 //en: Exported for FotaPatcher / FotaMesh — single source of truth for the app base and
@@ -146,7 +187,7 @@ void fota_print_fw_id(char* reply) {
 
     uint8_t h[32]; memset(h, 0, sizeof(h));
     if (timg && timg <= (APP_FLASH_END - base)) {
-        SHA256 sha;
+        FotaSha256 sha;
         sha.update((const void*)base, timg);
         sha.finalize(h, sizeof(h));
         FOTA_DEBUG_PRINT("[FOTA] running sha256     = "); print_sha_full(h);
@@ -190,7 +231,7 @@ static bool fota_base_fw_validated(uint32_t fw_size, const uint8_t* prefix) {
         FOTA_DEBUG_PRINTLN("[FOTA] base FW: fw_size %lu > app okno", (unsigned long)fw_size);
         return false;
     }
-    SHA256 sha;
+    FotaSha256 sha;
     sha.update((const void*)fw_flash_base(), fw_size);
     uint8_t h[32];
     sha.finalize(h, sizeof(h));
@@ -206,7 +247,7 @@ static bool fota_base_fw_validated(uint32_t fw_size, const uint8_t* prefix) {
 static bool fota_base_fw_check_full(uint32_t fw_size, const uint8_t* sha256_full) {
     if (!fota_fw_size_matches(fw_size)) return false;
     if (fw_size > (APP_FLASH_END - fw_flash_base())) return false;
-    SHA256 sha;
+    FotaSha256 sha;
     sha.update((const void*)fw_flash_base(), fw_size);
     uint8_t h[32];
     sha.finalize(h, sizeof(h));
@@ -285,7 +326,7 @@ static bool save_meta() {
     mp.crc16 = fota_crc16((const uint8_t*)&mp, (uint16_t)(sizeof(mp) - 2u));
 
     FotaFS.remove(FOTA_FS_META);
-    File f(FotaFS);
+    FotaFile f(FotaFS);
     if (!f.open(FOTA_FS_META, FILE_O_WRITE)) {
         FOTA_DEBUG_PRINTLN("[FOTA] meta: zápis zlyhal"); return false;
     }
@@ -295,7 +336,7 @@ static bool save_meta() {
 }
 
 static bool load_meta(FotaMetaPersist* out) {
-    File f(FotaFS);
+    FotaFile f(FotaFS);
     if (!f.open(FOTA_FS_META, FILE_O_READ)) return false;
     bool ok = (f.read((uint8_t*)out, sizeof(*out)) == (int)sizeof(*out));
     f.close();
@@ -312,7 +353,7 @@ static void save_bitmap() {
     if (fota.total_chunks == 0) return;
     uint16_t nbytes = (fota.total_chunks + 7u) / 8u;
     FotaFS.remove(FOTA_FS_BITMAP);
-    File f(FotaFS);
+    FotaFile f(FotaFS);
     if (!f.open(FOTA_FS_BITMAP, FILE_O_WRITE)) return;
     f.write(fota.bitmap, nbytes);
     f.close();
@@ -322,7 +363,7 @@ static void save_bitmap() {
 static bool load_bitmap() {
     if (fota.total_chunks == 0) return false;
     uint16_t nbytes = (fota.total_chunks + 7u) / 8u;
-    File f(FotaFS);
+    FotaFile f(FotaFS);
     if (!f.open(FOTA_FS_BITMAP, FILE_O_READ)) return false;
     bool ok = (f.read(fota.bitmap, nbytes) == (int)nbytes);
     f.close();
@@ -335,7 +376,7 @@ static bool load_bitmap() {
 //sk: Každý záznam: [idx 2B LE][data_len 2B LE][data N]
 // =====================================================================
 static bool log_append(uint16_t idx, const uint8_t* data, uint16_t data_len) {
-    File f(FotaFS);
+    FotaFile f(FotaFS);
     if (!f.open(FOTA_FS_LOG, FILE_O_WRITE)) {
         FOTA_DEBUG_PRINTLN("[FOTA] log: zápis zlyhal"); return false;
     }
@@ -363,7 +404,7 @@ static uint16_t chunk_exp_len(uint16_t i) {
 
 //en: Pass 1: fill s_log_data_offset[] from recv.log (the last occurrence of an idx wins).
 //sk: Prechod 1: naplň s_log_data_offset[] z recv.log (posledný výskyt idx vyhrá).
-static void build_log_offsets(File& log_r) {
+static void build_log_offsets(FotaFile& log_r) {
     memset(s_log_data_offset, 0xFF, sizeof(s_log_data_offset));
     uint32_t log_pos = 0;
     uint8_t  hdr[4];
@@ -383,7 +424,7 @@ static void build_log_offsets(File& log_r) {
 //sk: Vráti zostavenú veľkosť (== fota.patch_size) alebo 0 pri chybe/chýbajúcom chunku.
 static uint32_t assemble_log_to_buf(uint8_t* buf, uint32_t cap) {
     if (fota.total_chunks == 0 || fota.patch_size == 0 || fota.patch_size > cap) return 0;
-    File log_r(FotaFS);
+    FotaFile log_r(FotaFS);
     if (!log_r.open(FOTA_FS_LOG, FILE_O_READ)) return 0;
     build_log_offsets(log_r);
     uint32_t out_pos = 0;
@@ -403,12 +444,12 @@ static uint32_t assemble_log_to_buf(uint8_t* buf, uint32_t cap) {
 //en: RAM mode: patch SHA256 streamed from recv.log (no patch.bin, no large buffer).
 //sk: RAM mód: SHA256 patchu streamovo z recv.log (bez patch.bin, bez veľkého buffra).
 static bool verify_log_sha() {
-    File log_r(FotaFS);
+    FotaFile log_r(FotaFS);
     if (!log_r.open(FOTA_FS_LOG, FILE_O_READ)) {
         FOTA_DEBUG_PRINTLN("[FOTA] log: čítanie zlyhal"); return false;
     }
     build_log_offsets(log_r);
-    SHA256 sha;
+    FotaSha256 sha;
     uint8_t buf[FOTA_CHUNK_DATA_MAX];
     for (uint16_t i = 0; i < fota.total_chunks; i++) {
         if (s_log_data_offset[i] == 0xFFFFFFFFu) {
@@ -449,17 +490,17 @@ static bool assemble_and_verify() {
     return true;
 #else
     FOTA_DEBUG_PRINTLN("[FOTA] Zostavujem patch.bin...");
-    File log_r(FotaFS);
+    FotaFile log_r(FotaFS);
     if (!log_r.open(FOTA_FS_LOG, FILE_O_READ)) {
         FOTA_DEBUG_PRINTLN("[FOTA] log: čítanie zlyhal"); return false;
     }
     build_log_offsets(log_r);
 
     FotaFS.remove(FOTA_FS_PATCH);
-    File out_f(FotaFS);
+    FotaFile out_f(FotaFS);
     if (!out_f.open(FOTA_FS_PATCH, FILE_O_WRITE)) { log_r.close(); return false; }
 
-    SHA256 sha;
+    FotaSha256 sha;
     bool   ok = true;
     uint8_t buf[FOTA_CHUNK_DATA_MAX];
     for (uint16_t i = 0; i < fota.total_chunks && ok; i++) {
@@ -504,7 +545,7 @@ static bool assemble_and_verify() {
 // =====================================================================
 uint8_t* fota_acquire_patch_ram(uint32_t* out_size) {
 #ifdef USE_PATCHBIN_FILE
-    File f(FotaFS);
+    FotaFile f(FotaFS);
     if (!f.open(FOTA_FS_PATCH, FILE_O_READ)) { FOTA_DEBUG_PRINTLN("[FOTA] patch.bin chýba"); return nullptr; }
     uint32_t sz = (uint32_t)f.size();
     if (sz == 0 || sz > FOTA_FS_FLASH_SIZE) { f.close(); return nullptr; }
