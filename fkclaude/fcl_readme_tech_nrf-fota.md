@@ -206,6 +206,15 @@ makrá `FOTA_DEBUG_PRINT/PRINTLN` (`nrffota/FotaDebug.h`) gated **`-D FOTA_DEBUG
 (FOTA envy default zapnuté). Bez flagu sa vôbec nekompilujú; CLI odpovede (reply buffer)
 fungujú vždy — sú to funkčné výstupy, nie diagnostika.
 
+**Serial CLI a preklepy (build ≥ 318):** reader v `main.cpp` bufferuje každý bajt, takže
+backspace/šípky by normálne skončili ako „unknown command". `fotaHandleCliCommand`
+(FotaMyMesh.cpp, `fota_scrub_cli_line`) preto buffer pred parsovaním vyčistí in-place:
+aplikuje backspace/DEL, odstráni ANSI sekvencie šípok (CSI/SS3) a zahodí riadiace znaky —
+a keďže čistí aj keď vráti `false`, opravené preklepy fungujú aj pre common CLI príkazy.
+Nepokryté ostávajú len `setperm` / `get acl` / `discover.neighbors` (matchujú sa v
+`MyMesh::handleCommand` pred naším hookom) a `load` mód regiónov. Šípky kurzor neposúvajú,
+len sa neutralizujú.
+
 ---
 
 ## 8. Vyriešené problémy (technický rozbor pre budúcnosť)

@@ -44,7 +44,9 @@
   void fotaEarlyInit();
   void fotaBegin();
   void fotaLoop();
-  bool fotaHandleCliCommand(const char* command, char* reply);
+  //en: non-const command — scrubs line-editing artifacts (backspace, arrows) in-place
+  //sk: non-const command — čistí artefakty editovania riadku (backspace, šípky) in-place
+  bool fotaHandleCliCommand(char* command, char* reply);
 #if FOTA_DEBUG
   //en: Serial-only debug CLI (getacl / getpath|setpath by pub_key prefix)
   //sk: Serial-only debug CLI (getacl / getpath|setpath cez pub_key prefix)

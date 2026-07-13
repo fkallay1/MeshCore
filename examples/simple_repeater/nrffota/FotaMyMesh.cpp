@@ -361,13 +361,53 @@ void MyMesh::fotaBegin() {
 // =====================================================================
 //en: CLI — both the Serial (inline) and LoRa (deferred) paths
 // =====================================================================
+//en: Scrub serial line-editing artifacts in-place before parsing: apply backspace/DEL
+//en: (erase previous char), strip ANSI escape sequences from cursor/function keys
+//en: (CSI "ESC[…X" — arrows, Del, Home…; SS3 "ESC O X") and drop other control chars.
+//en: The reader in main.cpp buffers EVERY byte, so a corrected typo (or a stray arrow
+//en: key) leaves raw bytes in the buffer and the command ends as "unknown command".
+//en: Arrows cannot move the cursor here — they are just neutralized, typing continues
+//en: at the end of the line.
+//sk: Vyčistí artefakty editovania riadku na serial in-place ešte pred parsovaním:
+//sk: aplikuje backspace/DEL (zmaže predchádzajúci znak), odstráni ANSI escape
+//sk: sekvencie kurzorových/funkčných kláves (CSI "ESC[…X" — šípky, Del, Home…;
+//sk: SS3 "ESC O X") a zahodí ostatné riadiace znaky. Reader v main.cpp bufferuje
+//sk: KAŽDÝ bajt, takže opravený preklep (či omylom stlačená šípka) nechá v buffri
+//sk: surové bajty a príkaz skončí ako "unknown command". Šípky kurzor neposúvajú —
+//sk: len sa neutralizujú, písanie pokračuje na konci riadku.
+static void fota_scrub_cli_line(char* cmd) {
+  char *src = cmd, *dst = cmd;
+  while (*src) {
+    char c = *src++;
+    if (c == 0x08 || c == 0x7F) {          //en: backspace / DEL  //sk: backspace / DEL
+      if (dst > cmd) dst--;
+    } else if (c == 0x1B) {                //en: ESC: skip the whole sequence  //sk: ESC: preskoč celú sekvenciu
+      if (*src == '[' || *src == 'O') {
+        src++;
+        while (*src && ((uint8_t)*src < 0x40 || (uint8_t)*src > 0x7E)) src++;  //en: params  //sk: parametre
+        if (*src) src++;                   //en: final byte (A/B/C/D/~…)  //sk: koncový bajt (A/B/C/D/~…)
+      }
+    } else if ((uint8_t)c >= 0x20) {
+      *dst++ = c;                          //en: printable: keep  //sk: tlačiteľný: ponechaj
+    }                                      //en: other control chars: drop  //sk: ostatné riadiace znaky: zahoď
+  }
+  *dst = 0;
+}
+
 //en: Serial/inline path (hook from MyMesh::handleCommand). Returns false if it is
 //en: not a FOTA command ('fota …' / legacy 'ota …'). Runs on a shallow stack.
 //en: The LoRa path never gets here — onPeerDataRecv defers it via fotaHandleLoRaCli.
 //sk: Serial/inline cesta (hook z MyMesh::handleCommand). Vracia false ak to
 //sk: nie je FOTA príkaz ('fota …' / legacy 'ota …'). Beží na plytkom stacku.
 //sk: LoRa cesta sem nepríde — onPeerDataRecv ju odloží cez fotaHandleLoRaCli.
-bool MyMesh::fotaHandleCliCommand(const char* command, char* reply) {
+bool MyMesh::fotaHandleCliCommand(char* command, char* reply) {
+  //en: Scrub even when returning false — the cleaned buffer continues into the
+  //en: common CLI, so corrected typos work for ordinary commands too. (setperm /
+  //en: get acl / discover.neighbors match BEFORE this hook and stay uncovered.)
+  //sk: Čisti aj keď vraciame false — vyčistený buffer pokračuje do common CLI,
+  //sk: takže opravené preklepy fungujú aj pre bežné príkazy. (setperm / get acl /
+  //sk: discover.neighbors sa matchujú PRED týmto hookom a ostávajú nepokryté.)
+  fota_scrub_cli_line(command);
   const char* fargs = fota_args_of(command);
   if (!fargs) return false;
 #if FOTA_DEBUG
