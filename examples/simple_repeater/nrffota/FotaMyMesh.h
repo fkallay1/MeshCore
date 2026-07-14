@@ -47,6 +47,14 @@
   //en: non-const command — scrubs line-editing artifacts (backspace, arrows) in-place
   //sk: non-const command — čistí artefakty editovania riadku (backspace, šípky) in-place
   bool fotaHandleCliCommand(char* command, char* reply);
+  //en: v0-prefix FOTA: return pubkeys of ACL admins matching a 4 B prefix.
+  //en: The free function is the strong override of the FotaReceiver hook — friend,
+  //en: because this block lands in the protected section of MyMesh.
+  //sk: v0-prefix FOTA: vráť pubkey ACL adminov so zhodným 4 B prefixom.
+  //sk: Free funkcia je silná verzia hooku z FotaReceiver — friend, lebo tento
+  //sk: blok sa vkladá do protected sekcie MyMesh.
+  int fotaAclAdminPubkeys(const uint8_t prefix[4], const uint8_t* out_keys[], int max);
+  friend int fota_acl_admin_pubkeys(const uint8_t prefix[4], const uint8_t* out_keys[], int max);
 #if FOTA_DEBUG
   //en: Serial-only debug CLI (getacl / getpath|setpath by pub_key prefix)
   //sk: Serial-only debug CLI (getacl / getpath|setpath cez pub_key prefix)

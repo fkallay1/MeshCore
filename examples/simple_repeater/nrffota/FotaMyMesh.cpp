@@ -942,4 +942,31 @@ void MyMesh::fotaLoop() {
 #endif // FK_DEBUG
 }
 
+//en: v0-prefix FOTA signature — candidates from the ACL: admin role only
+//en: (PERM_ACL_ADMIN; Read/Write and below do NOT qualify), matched by the
+//en: first 4 B of their identity pubkey. Called from try_verify_header()
+//en: in loop() context (deferred), so the Ed25519 verify cost stays off the RX path.
+//sk: v0-prefix FOTA podpis — kandidáti z ACL: len admin rola (PERM_ACL_ADMIN;
+//sk: Read/Write a nižšie sa NEkvalifikujú), zhoda prvých 4 B identity pubkey.
+//sk: Volané z try_verify_header() v loop() kontexte (deferovane), takže cena
+//sk: Ed25519 verify neblokuje RX cestu.
+int MyMesh::fotaAclAdminPubkeys(const uint8_t prefix[4], const uint8_t* out_keys[], int max) {
+  int n = 0;
+  int cnt = acl.getNumClients();
+  for (int i = 0; i < cnt && n < max; i++) {
+    ClientInfo* c = acl.getClientByIdx(i);
+    if (!c->isAdmin()) continue;
+    if (memcmp(c->id.pub_key, prefix, FOTA_SIG_PREFIX_LEN) != 0) continue;
+    out_keys[n++] = c->id.pub_key;
+  }
+  return n;
+}
+
+//en: strong override of the FotaReceiver default (MeshCore build)
+//sk: silná verzia defaultu z FotaReceiver (MeshCore build)
+extern MyMesh the_mesh;
+int fota_acl_admin_pubkeys(const uint8_t prefix[4], const uint8_t* out_keys[], int max) {
+  return the_mesh.fotaAclAdminPubkeys(prefix, out_keys, max);
+}
+
 #endif  // WITH_LORA_FOTA
