@@ -74,9 +74,12 @@
 //sk: Odpoveď 'fota id' (build#, veľkosť image, sha prefix) — FotaReceiver.cpp: fota_print_fw_id().
 #define FOTA_TXT_ID_FMT               "id b#%lu sz=%lu sha=%02X%02X%02X%02X"
 
-//en: 'fota agc' radio gain diagnostics reply — FotaMyMesh.cpp: runFotaCli().
-//sk: Odpoveď 'fota agc' — diagnostika gain rádia — FotaMyMesh.cpp: runFotaCli().
+//en: 'fota agc' radio gain diagnostics reply — MeshCore: FotaMyMesh.cpp runFotaCli();
+//en: ZephCore variant (no raw SX1262 register access) — FotaRepeaterMesh.cpp runFotaCli().
+//sk: Odpoveď 'fota agc' — diagnostika gain rádia — MeshCore: FotaMyMesh.cpp runFotaCli();
+//sk: ZephCore variant (bez prístupu k SX1262 registrom) — FotaRepeaterMesh.cpp runFotaCli().
 #define FOTA_TXT_AGC_FMT              "AGC gain=0x%02X(%s) boost=%s rssi=%ddBm nf=%d agc_reset=%lus"
+#define FOTA_TXT_AGC_ZEPHYR_FMT       "AGC (zephyr) nf=%d rxpkts=%lu rxerr=%lu agc_reset=%lus"
 
 //en: 'fota getpath' (LoRa, this client) — FotaMyMesh.cpp: fotaHandleLoRaCli().
 //sk: 'fota getpath' (LoRa, tento klient) — FotaMyMesh.cpp: fotaHandleLoRaCli().
@@ -259,6 +262,8 @@
 // =====================================================================
 //
 // ── FotaMyMesh.cpp ───────────────────────────────────────────────────
+//en: (ZephCore glue FotaRepeaterMesh.cpp mirrors these messages 1:1 — apply changes to both.)
+//sk: (ZephCore glue FotaRepeaterMesh.cpp tieto správy zrkadlí 1:1 — zmeny rob v oboch.)
 //en: onGroupDataRecv():      "WARN pending buffer busy, packet dropped"
 //sk:                          WARN pending buffer obsadený, paket zahodený
 //en: fotaHandleLoRaCli():    "setpath: %u hops (hs=%u) stored into ACL"
