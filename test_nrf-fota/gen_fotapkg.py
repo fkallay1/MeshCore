@@ -186,10 +186,10 @@ def main():
     ap.add_argument('--path', default='')
     ap.add_argument('--freq', type=float, default=869.618); ap.add_argument('--bw', type=float, default=62.5)
     ap.add_argument('--sf', type=int, default=8); ap.add_argument('--cr', type=int, default=5)
-    ap.add_argument('--privkey', help="Ed25519 priv (default test_key.der ak je); '' = nepodpisuj")
-    ap.add_argument('--privkey-hex', help="Ed25519 expandovaný kľúč (128 hex, companion formát)")
-    ap.add_argument('--keyid', type=int, default=0,
-                    help="0=v0-prefix (nový formát, default), >=1 legacy pre staré FW")
+    from fota_texts import T
+    ap.add_argument('--privkey', help="Ed25519 priv (default test_key.der if present); '' = do not sign")
+    ap.add_argument('--privkey-hex', help=T('help_privkey_hex'))
+    ap.add_argument('--keyid', type=int, default=0, help=T('help_keyid'))
     args = ap.parse_args()
     if args.privkey == '':
         args.privkey = None

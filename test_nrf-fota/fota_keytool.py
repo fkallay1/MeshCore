@@ -12,16 +12,17 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from fota_ed25519_expanded import ExpandedKey, key_from_der, key_from_hex
+from fota_texts import T
 
 def print_key_info(name: str, k: ExpandedKey, show_priv: bool):
     print(f"== {name} ==")
     print(f"pub        : {k.pub.hex()}")
     print(f"prefix     : {k.prefix.hex().upper()}")
     if show_priv:
-        print(f"priv (hex) : {k.expanded.hex()}   # companion/expanded formát")
+        print(f"priv (hex) : {k.expanded.hex()}{T('keytool_priv_comment')}")
     rows = [k.pub[i:i + 8] for i in range(0, 32, 8)]
     body = ",\n".join("           " + ", ".join(f"0x{b:02X}" for b in row) for row in rows)
-    print("C snippet pre s_authors (FotaReceiver_signkey.cpp):")
+    print(T("keytool_csnippet_hdr"))
     print(f"    //en: {name} — pub prefix {k.prefix.hex().upper()}")
     print("    { {" + body.lstrip() + " } },")
 
@@ -39,10 +40,10 @@ def main():
         from Crypto.PublicKey import ECC
         out = Path(arg)
         if out.exists():
-            sys.exit(f"[CHYBA] {out} už existuje — nechcem prepísať kľúč")
+            sys.exit(T("keytool_exists", path=out))
         key = ECC.generate(curve='ed25519')
         out.write_bytes(key.export_key(format='DER'))
-        print(f"[gen] zapísané: {out}")
+        print(T("keytool_wrote", path=out))
         print_key_info(out.name, key_from_der(out), show_priv=True)
     elif cmd == 'der2hex':
         print_key_info(Path(arg).name, key_from_der(arg), show_priv=True)
@@ -50,7 +51,7 @@ def main():
         print_key_info(arg if not Path(arg).exists() else Path(arg).name,
                        load_any(arg), show_priv=False)
     else:
-        sys.exit(f"[CHYBA] neznámy príkaz '{cmd}'\n{__doc__}")
+        sys.exit(T("keytool_unknown_cmd", cmd=cmd) + "\n" + __doc__)
 
 if __name__ == '__main__':
     main()

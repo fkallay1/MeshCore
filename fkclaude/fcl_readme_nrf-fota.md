@@ -195,6 +195,13 @@ python fota_keytool.py pub  <kľúč.der | 128hex>              # pubkey / prefi
 s clampingom (jednosmerná funkcia), seed sa z neho spätne nedá získať; preto
 `hex2der` neexistuje. Kľúče `fota_signkey1..4.der` sú gitignored (ako `test_key.der`).
 
+**Jazyk PC nástrojov:** používateľské texty (help, chyby, výpisy `keytool`/podpisu) sú
+v `test_nrf-fota/fota_texts.py` (obdoba `FotaTexts.h`). **Default = angličtina**;
+`set FOTA_LANG=sk` prepne na slovenčinu. Strojovo parsované výpisy (`[patch] … sha256=`,
+`[fotapkg] …`, počítadlá chunkov) cez katalóg NEidú — ostávajú bajt-stabilné (rovnaké
+pravidlo ako v FW). Migrácia je prvá tranža (keytool + podpisové hlášky + help kľúčov);
+zvyšné diagnostické `[patch]`/`[mcpy]` hlášky sa dajú presúvať do katalógu postupne.
+
 **Stav — OVERENÉ NA HW (2026-07-15, build #334→#335):** builtin v0-prefix cesta
 cez companion (Xiao COM3 → ProMicro repeater COM5): patch podpísaný `test_key.der`
 (key_id=0, prefix C22F8AE0) → repeater `HEADER signer=builtin[0]` → `HEADER OK` →

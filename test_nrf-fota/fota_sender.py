@@ -103,10 +103,11 @@ def load_ed25519_privkey(key_path: Path):
 def load_ed25519_privkey_hex(hexstr: str):
     """64 B expandovaný kľúč (companion 'dlhý hex') -> ExpandedKey."""
     from fota_ed25519_expanded import key_from_hex
+    from fota_texts import T
     try:
         return key_from_hex(hexstr)
     except ValueError as e:
-        sys.exit(f"[CHYBA] --privkey-hex: {e}")
+        sys.exit(T("sign_privkey_hex_err", msg=e))
 
 def sign_fota_header(otbmsg: bytes, privkey) -> bytes:
     """Podpise message (102B META) a vráti 64B signature."""
@@ -186,7 +187,8 @@ def build_sig_payload(meta: bytes, privkey, key_id: int) -> bytes:
     out = bytes([FOTA_PKT_HDR_SIG, FOTA_PROT_INF_V0]) + old_sha256 + bytes([key_id]) + sig
     if key_id == FOTA_KEY_ID_PREFIX:
         if privkey is None:
-            sys.exit("[CHYBA] key_id=0 (prefix formát) vyžaduje privkey — pre unsigned použi --keyid 1")
+            from fota_texts import T
+            sys.exit(T("sign_keyid0_needs_priv"))
         out += privkey.pub[:4]
         assert len(out) == 103, f"SIG(v0-prefix) musi byt 103B, je {len(out)}"
     else:
@@ -635,11 +637,10 @@ def main():
                                 help='Pravdepodobnosť [0..1] zahodenia chunku (simulácia LoRa straty, test kumulácie).')
     ap.add_argument('--cycle-delay', type=float, default=2.0,
                                 help='Pauza medzi cyklami [s].')
-    ap.add_argument('--privkey', help='Ed25519 private key (DER) na podpis HEADER')
-    ap.add_argument('--privkey-hex', help='Ed25519 expandovaný kľúč (128 hex, companion formát)')
-    ap.add_argument('--keyid',    type=int, default=0,
-                                help='Key ID v SIG: 0=v0-prefix (nový formát, default), '
-                                     '>=1 legacy pre staré FW (s_authors[keyid-1])')
+    from fota_texts import T
+    ap.add_argument('--privkey', help=T('help_privkey'))
+    ap.add_argument('--privkey-hex', help=T('help_privkey_hex'))
+    ap.add_argument('--keyid',    type=int, default=0, help=T('help_keyid'))
     ap.add_argument('--packetorder', choices=['normal', 'hbegin', 'hmiddle', 'hend'],
                                 default='normal',
                                 help='Pozícia HEADER paketu (out-of-order test): '
@@ -734,7 +735,8 @@ def main():
         print(f'[init] Ed25519 private key: {args.privkey} (pub prefix {privkey.prefix.hex().upper()}, key_id=0x{args.keyid:02X})')
     elif args.keyid == FOTA_KEY_ID_PREFIX:
         args.keyid = 1   # unsigned nejde s prefix formátom -> legacy zero-sig
-        print('[init] bez privkey -> legacy key_id=1, nulový podpis')
+        from fota_texts import T
+        print(T("sign_no_privkey_legacy"))
 
     # Otvor serial
     print(f'[serial] {args.port} @ {args.baud}')
