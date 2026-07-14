@@ -153,6 +153,64 @@ ohľadu na jazyk.
 
 ---
 
+## 4b. Podpis FOTA balíka — v0-prefix + ACL (build ≥ 335)
+
+FOTA HEADER (META) je podpísaný Ed25519. Repeater overuje podpis dvomi cestami:
+
+**Formáty SIG paketu:**
+- **v0-prefix (nový, default) — `key_id=0`:** za 99B SIG nasledujú 4 B = prefix
+  (prvé 4 B) Ed25519 pubkey podpisovateľa → spolu **103 B**. Repeater podľa prefixu
+  nájde kľúč a overí (1 verify).
+- **legacy — `key_id ≥ 1`:** pôvodných 99 B, mapovanie `key_id N → s_authors[N-1]`.
+  Ostáva pre **staré FW** (build < 335), ktoré v0-prefix nepoznajú. Nový sender
+  vyrába legacy formát cez `--keyid 1`.
+
+**Kde repeater hľadá kľúč (len pri key_id=0):**
+1. `s_authors[]` vo `FotaReceiver_signkey.cpp` (5 zakompilovaných kľúčov, adresované
+   prefixom): index 0 = `test_key.der`, index 1–4 = `fota_signkey1..4.der`.
+2. Ak prefix nesedí so žiadnym builtin → **ACL admini** repeatera (`ClientACL`, len
+   záznamy s `PERM_ACL_ADMIN`; Read/Write a nižšie sa nekvalifikujú). Zhoda podľa
+   prvých 4 B identity pubkey. Revokácia = vyhodenie admina z ACL (`acl` clear/login).
+
+Log: `HEADER signer=builtin[i]` (zakompilovaný) alebo `HEADER signer=ACL admin`;
+neúspech `signer prefix XXXXXXXX not found/valid (authors+ACL)`.
+
+**Podpisovanie (PC sendre `fota_sender.py` / `fota_sender_mcpy.py` / `fota_export_pkg.py`
+/ `gen_fotapkg.py`):**
+- `--privkey <kľúč.der>` — DER súbor (seed sa interne expanduje).
+- `--privkey-hex <128 hex>` — **companion identity kľúč** (dlhý hex, ktorý zobrazí
+  companion/appka; je to expandovaný 64 B kľúč, nie seed).
+- default `--keyid 0` (v0-prefix); `--keyid 1` = legacy pre staré FW. Bez privkey
+  sa auto-prepne na legacy `key_id=1` s nulovým podpisom (repeater bez
+  `FOTA_ALLOW_UNSIGNED` ho odmietne).
+- `.fotapkg.json` blok `signed` má navyše `signer_prefix` (8 hex) a `key_id`.
+
+**`fota_keytool.py`** (v `test_nrf-fota/`):
+```
+python fota_keytool.py gen test_nrf-fota\fota_signkey1.der   # nový keypair + C snippet pre s_authors
+python fota_keytool.py der2hex test_nrf-fota\test_key.der    # seed -> expandovaný 128-hex (companion formát) + pub
+python fota_keytool.py pub  <kľúč.der | 128hex>              # pubkey / prefix / C snippet
+```
+`.der → hex` ide (der2hex). **`hex → .der` NEJDE** — companion hex je `SHA512(seed)`
+s clampingom (jednosmerná funkcia), seed sa z neho spätne nedá získať; preto
+`hex2der` neexistuje. Kľúče `fota_signkey1..4.der` sú gitignored (ako `test_key.der`).
+
+**Stav — OVERENÉ NA HW (2026-07-15, build #334→#335):** builtin v0-prefix cesta
+cez companion (Xiao COM3 → ProMicro repeater COM5): patch podpísaný `test_key.der`
+(key_id=0, prefix C22F8AE0) → repeater `HEADER signer=builtin[0]` → `HEADER OK` →
+`VERIFIED`. Zmena `FOTA_META_MAGIC` (v2) korektne zahodí starý `meta.bin` bez crashu.
+
+**Manuálny ACL-admin test (vyžaduje príst. k privátnemu identity kľúču companiona):**
+1. Cez appku (alebo companion) sa prihlás na repeater ako admin (`ADMIN_PASSWORD`,
+   default `"password"`) → vznikne ACL admin záznam s identitou companiona.
+2. Zisti privátny identity kľúč companiona ako dlhý hex (appka ho vie zobraziť).
+3. Pošli patch podpísaný týmto hexom: `fota_sender_mcpy.py … --privkey-hex <hex>`
+   (default key_id=0). Base FW patchu musí sedieť s bežiacim FW repeatera.
+4. Očakávaj na repeateri: `HEADER signer=ACL admin` → `HEADER OK`. Negatívny test:
+   kľúč, ktorý nie je ani builtin ani ACL admin → `signer prefix … not found`.
+
+---
+
 ## 5. Build number (dočasné testovacie lešenie)
 
 `test_nrf-fota/gen_build_info.py` (pre-script FOTA env-u) pri každom builde inkrementuje

@@ -69,6 +69,17 @@ Keď chceš iný pár než „posledné dva" (napr. base build NIE je posledný 
 - `--auto --device sensecap` → 2 najnovšie buildy z archívu.
 - `--from-hex <firmware.hex> --device <d>` → extrahuje+archivuje z HEX, potom gen posledné dva.
 - `--privkey ''` → vynúť UNSIGNED; inak sa použije `test_key.der` ak existuje.
+- `--privkey-hex <128 hex>` → podpíš **companion identity kľúčom** (dlhý hex z appky).
+- `--keyid 0` (default) = v0-prefix formát; `--keyid 1` = legacy pre **staré FW** (< build 335).
+
+**Podpisové kľúče — `fota_keytool.py`** (viac v `fcl_readme_nrf-fota.md` §4b):
+```
+python test_nrf-fota\fota_keytool.py gen test_nrf-fota\fota_signkey1.der   # nový kľúč + C snippet do s_authors
+python test_nrf-fota\fota_keytool.py der2hex test_nrf-fota\test_key.der    # .der -> companion 128-hex + pub/prefix
+python test_nrf-fota\fota_keytool.py pub  <kľúč.der | 128hex>              # pub / prefix / C snippet
+```
+`.der → hex` áno; `hex → .der` NIE (companion hex = SHA512(seed), jednosmerné).
+Kľúče `fota_signkey1..4.der` sú gitignored.
 
 Výstup: `fotapkg_json/<old>-<new>.<device>.fotapkg.json` (upgrade) + `.rev.` (rollback).
 Používaj **penv python** (`gen_fotapkg.py` importuje `fota_export_pkg`/`fota_sender` — potrebuje ich deps).

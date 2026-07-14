@@ -123,6 +123,15 @@ FOTA pakety idú ako MeshCore `PAYLOAD_TYPE_GRP_DATA` (0x06) na **dedikovanom ka
 (`onGroupDataRecv` preskočí `data+4`). Typy: HEADER=META (0x10), SIG (0x13), CHUNK (0x11),
 APPLY (0x12), (STATUS/NACK 0x20/0x21 = spätný kanál).
 
+**SIG podpis (build ≥ 335):** META (102 B) je podpísaná Ed25519. SIG paket:
+`[type][prot_inf][old_sha256 32][key_id][signature 64]`. Pri `key_id=0` (v0-prefix,
+default) nasledujú +4 B = prefix pubkey podpisovateľa → 103 B; `verify_header_signature`
+podľa prefixu hľadá v `s_authors[]` a potom cez hook `fota_acl_admin_pubkeys()` v ACL
+adminoch (`MyMesh::fotaAclAdminPubkeys`, len `PERM_ACL_ADMIN`). `key_id ≥ 1` = legacy
+99 B, `s_authors[key_id-1]` (staré FW). Prefix + podpis persistujú v `meta.bin`
+(`hdr_signer_prefix`, `FOTA_META_MAGIC` v2). Hook má weak default (0 kandidátov) pre
+ZephCore build bez ACL. Podrobne: `fcl_readme_nrf-fota.md` §4b.
+
 ### Deferred spracovanie (dôležité pre RX)
 `onGroupDataRecv()` (volané z recv cesty dispatchera) **len skopíruje payload** do
 `_fota_pending[]` a nastaví `_fota_pending_len`. Ťažké CustomLFS I/O (`fota_process`) sa robí až

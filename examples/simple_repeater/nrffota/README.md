@@ -34,6 +34,12 @@ PC (fota_sender.py)                     Repeater (nRF52840)
   `searchChannelsByHash()`/`onGroupDataRecv()`); v samotnom `MyMesh.cpp`
   je len 6 tenkých `#ifdef WITH_LORA_FOTA` hookov (~30 riadkov diff vs upstream).
 - **Krypto:** `mesh::Utils::sha256` + `rweather/Crypto` (rovnaká dep ako MeshCore).
+- **Podpis:** META (102 B) je podpísaná Ed25519. SIG paket nesie `key_id`;
+  `key_id=0` (v0-prefix, default) → za podpisom je 4 B prefix pubkey podpisovateľa,
+  repeater ho hľadá v zakompilovaných `s_authors[]` a potom v ACL adminoch
+  (`PERM_ACL_ADMIN`). `key_id ≥ 1` = legacy 99 B formát (`s_authors[key_id-1]`)
+  pre staré FW. Podpisovanie: `fota_sender.py --privkey <der>` alebo `--privkey-hex
+  <companion identity hex>`; kľúče spravuje `test_nrf-fota/fota_keytool.py`.
 - **FS:** dedikovaný `CustomLFS` na 0xD4000 (oddelený od MeshCore `InternalFS`).
 - **Patch formát:** HPatchLite `inplaceB` zabalený v `[ZLIB][uncomp][new_fw][deflate]`.
 
