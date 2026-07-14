@@ -202,17 +202,24 @@ v `test_nrf-fota/fota_texts.py` (obdoba `FotaTexts.h`). **Default = angličtina*
 pravidlo ako v FW). Migrácia je prvá tranža (keytool + podpisové hlášky + help kľúčov);
 zvyšné diagnostické `[patch]`/`[mcpy]` hlášky sa dajú presúvať do katalógu postupne.
 
-**Stav — OVERENÉ NA HW (2026-07-15, build #334→#335):** builtin v0-prefix cesta
-cez companion (Xiao COM3 → ProMicro repeater COM5): patch podpísaný `test_key.der`
-(key_id=0, prefix C22F8AE0) → repeater `HEADER signer=builtin[0]` → `HEADER OK` →
-`VERIFIED`. Zmena `FOTA_META_MAGIC` (v2) korektne zahodí starý `meta.bin` bez crashu.
+**Stav — OBE CESTY OVERENÉ NA HW (2026-07-15, build #334, Xiao COM3 companion →
+ProMicro repeater COM5):**
+- **builtin:** patch podpísaný `test_key.der` (key_id=0, prefix C22F8AE0) → repeater
+  `HEADER signer=builtin[0]` → `HEADER OK` → `VERIFIED`.
+- **ACL admin:** patch podpísaný companion identity hexom (prefix BA3DC5DA, nie v
+  `s_authors`, ale `acl[3] ba3dc5da perm=0x03 admin`) → repeater prešiel do ACL vetvy →
+  `HEADER signer=ACL admin` → `HEADER OK`.
+- Zmena `FOTA_META_MAGIC` (v2) korektne zahodí starý `meta.bin` bez crashu.
 
-**Manuálny ACL-admin test (vyžaduje príst. k privátnemu identity kľúču companiona):**
+**ACL-admin test — postup (na zopakovanie):**
 1. Cez appku (alebo companion) sa prihlás na repeater ako admin (`ADMIN_PASSWORD`,
-   default `"password"`) → vznikne ACL admin záznam s identitou companiona.
-2. Zisti privátny identity kľúč companiona ako dlhý hex (appka ho vie zobraziť).
+   default `"password"`) → vznikne ACL admin záznam s identitou companiona. Over cez
+   Serial `fota getacl` (hľadaj `perm=0x03 admin` s prefixom companiona).
+2. Zisti privátny identity kľúč companiona ako dlhý hex (128 hex = expandovaný;
+   appka ho vie zobraziť). Prefix odvodíš cez `fota_keytool.py pub <hex>`.
 3. Pošli patch podpísaný týmto hexom: `fota_sender_mcpy.py … --privkey-hex <hex>`
-   (default key_id=0). Base FW patchu musí sedieť s bežiacim FW repeatera.
+   (default key_id=0). Base FW patchu musí sedieť s bežiacim FW repeatera (napr.
+   old = práve bežiaci build, bez `--reboot` sa neflashne).
 4. Očakávaj na repeateri: `HEADER signer=ACL admin` → `HEADER OK`. Negatívny test:
    kľúč, ktorý nie je ani builtin ani ACL admin → `signer prefix … not found`.
 
