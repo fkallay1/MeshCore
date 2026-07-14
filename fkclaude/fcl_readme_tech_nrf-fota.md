@@ -58,6 +58,7 @@ Všetko nové je v `examples/simple_repeater/nrffota/` (podadresár), guardovan�
 | `nrffota/FotaMesh.{h,cpp}` | glue: kanál (#-konvencia), `fota_handle_command()` (status/verify/flash/...) |
 | `nrffota/FotaMyMesh.cpp` | **FOTA časť triedy MyMesh** — telá metód/overridov + deferred CLI/paket/flash logika (od 2026-07-03; v MyMesh.cpp len tenké hooky) |
 | `nrffota/FotaDebug.h` | `FOTA_DEBUG_PRINT/PRINTLN` makrá (printf; gated `-D FOTA_DEBUG=1`, vzor MESH_DEBUG) |
+| `nrffota/FotaTexts.h` | **centrálny katalóg CLI textov** `FOTA_TXT_*` (EN default / SK cez `-D FOTA_LANG_SK=1`) + komentárový katalóg debug hlášok; viď §7.1 |
 | `nrffota/FotaBuffer.{h,cpp}` | zdieľaný 512 B scratch (borrow/release) — hpatch cache + deferred CLI snapshot |
 | `nrffota/FwId.{h,cpp}` | FW identity trailer (build#, image_size, sha256) v .rodata |
 | `nrffota/puff_stream.{c,h}` | standalone streaming DEFLATE dekompresor (bez libc/setjmp) |
@@ -205,6 +206,31 @@ Diagnostické Serial výpisy (`[FOTA] …`, `[FLASHER-DBG] …`, heartbeat `AALI
 makrá `FOTA_DEBUG_PRINT/PRINTLN` (`nrffota/FotaDebug.h`) gated **`-D FOTA_DEBUG=1`**
 (FOTA envy default zapnuté). Bez flagu sa vôbec nekompilujú; CLI odpovede (reply buffer)
 fungujú vždy — sú to funkčné výstupy, nie diagnostika.
+
+### 7.1 Texty — FotaTexts.h (od buildu 324)
+
+Správa textov je rozdelená do troch tried s rôznym režimom:
+
+1. **CLI odpovede (reply buffer)** — centralizované v `nrffota/FotaTexts.h` ako
+   `FOTA_TXT_*` makrá; pri každom makre je komentár, kde sa používa (súbor/funkcia).
+   - **Jazyk:** default **angličtina**; `-D FOTA_LANG_SK=1` (nastavené vo všetkých
+     3 FOTA envoch) prepne na slovenčinu. Upstream/EN build = jednoducho bez flagu.
+   - **Strojovo parsované formáty** (`FOTA %u/%u st=…`, `miss=`, `id b#…`, výpisy
+     ciest, `FOTA flash accepted`…) sú jazykovo **neutrálne** — definované len raz,
+     NElokalizovať (parsuje ich Flutter appka a `test_nrf-fota` skripty).
+   - Pravidlo: statická hláška = `const char*` na makro (bez kopírovania);
+     formátovaná = formátovacie makro + `snprintf` priamo do reply.
+2. **Chybové dôvody helperov** — `fota_parse_path_arg` / `fota_client_by_prefix`
+   vracajú `const char**` smerník na literál z FotaTexts.h (žiadne `strcpy` do
+   lokálnych bufferov, žiadny `char err[48]` na stacku). Dry-run dôvody
+   (`fota_patch_to_file`) idú cez `set_err` do 48 B buffera volajúceho — texty
+   `FOTA_TXT_VFY_*` držať krátke.
+3. **Debug hlášky (`FOTA_DEBUG_*`)** — ostávajú **inline po anglicky** na mieste
+   volania (nelokalizujú sa, bez flagu sa nekompilujú). Referenčný katalóg
+   EN↔SK + miesta použitia je ako komentár na konci `FotaTexts.h`.
+
+POZOR pri zmene textov: `"FNV-1a of output"` (FLASHER-TRACE) a `"build #"`
+parsuje `fota_test_lora_repeater.py` (regex akceptuje aj staré SK `výstupu`).
 
 **Serial CLI a preklepy (build ≥ 318):** reader v `main.cpp` bufferuje každý bajt, takže
 backspace/šípky by normálne skončili ako „unknown command". `fotaHandleCliCommand`

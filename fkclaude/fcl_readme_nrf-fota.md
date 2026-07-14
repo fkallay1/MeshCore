@@ -143,6 +143,13 @@ neposúvajú, len sa neutralizujú.
 
 Diagnostické výpisy (`[FOTA] …`, heartbeat `AALIVE`) sú za flagom `-D FOTA_DEBUG=1`
 (`nrffota/FotaDebug.h`, vzor MESH_DEBUG) — FOTA envy ho majú default zapnutý.
+Debug výpisy sú **po anglicky** (nelokalizujú sa).
+
+**Jazyk CLI odpovedí (build ≥ 324):** texty odpovedí sú centrálne v `nrffota/FotaTexts.h`
+(`FOTA_TXT_*`). Default je angličtina; naše FOTA envy majú `-D FOTA_LANG_SK=1` → odpovede
+po slovensky (ako doteraz). Strojovo parsované formáty (`FOTA n/n st=…`, `miss=`, `id b#…`,
+`FOTA flash accepted`…) sú v oboch jazykoch rovnaké — appka aj test skripty fungujú bez
+ohľadu na jazyk.
 
 ---
 
