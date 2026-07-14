@@ -135,6 +135,12 @@ Cez Serial píš priamo (`fota status`). Cez LoRa idú ako admin CLI príkazy (e
 MeshCore cesta). Flasher sa púšťa **manuálne** (`fota flash`) — auto-APPLY cez LoRa je tiež
 možný (`fota_sender --reboot`), ale default je manuálne spustenie po `fota verify`.
 
+**Preklepy na Serial CLI (build ≥ 318):** backspace/DEL aj šípky sa pred parsovaním
+vyčistia (`fota_scrub_cli_line` vo FotaMyMesh.cpp) — opravený preklep už nekončí ako
+„unknown command", a to aj pre bežné (nie-FOTA) príkazy. Výnimka: `setperm`, `get acl`,
+`discover.neighbors` a `load` mód regiónov (spracujú sa pred naším hookom). Šípky kurzor
+neposúvajú, len sa neutralizujú.
+
 Diagnostické výpisy (`[FOTA] …`, heartbeat `AALIVE`) sú za flagom `-D FOTA_DEBUG=1`
 (`nrffota/FotaDebug.h`, vzor MESH_DEBUG) — FOTA envy ho majú default zapnutý.
 
