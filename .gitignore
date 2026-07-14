@@ -38,4 +38,5 @@ __pycache__/
 
 # FOTA test private key + pycache (never commit)
 test_nrf-fota/test_key.der
+test_nrf-fota/fota_signkey*.der
 test_nrf-fota/__pycache__/
