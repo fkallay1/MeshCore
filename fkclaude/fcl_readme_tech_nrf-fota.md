@@ -136,8 +136,10 @@ default) nasledujú +4 B = prefix pubkey podpisovateľa → 103 B; `verify_heade
 podľa prefixu hľadá v `s_authors[]` a potom cez hook `fota_acl_admin_pubkeys()` v ACL
 adminoch (`MyMesh::fotaAclAdminPubkeys`, len `PERM_ACL_ADMIN`). `key_id ≥ 1` = legacy
 99 B, `s_authors[key_id-1]` (staré FW). Prefix + podpis persistujú v `meta.bin`
-(`hdr_signer_prefix`, `FOTA_META_MAGIC` v2). Hook má weak default (0 kandidátov) pre
-ZephCore build bez ACL. Podrobne: `fcl_readme_nrf-fota.md` §4b.
+(`hdr_signer_prefix`, `FOTA_META_MAGIC` v2). Hook: default stub (0 kandidátov) sa
+kompiluje len na platforme bez glue; MeshCore silná verzia = `FotaMyMesh.cpp`,
+ZephCore silná verzia = `FotaRepeaterMesh.cpp` (`s_fota_self`, port 2026-07-16 —
+ACL-admin podpis funguje aj na ZephCore). Podrobne: `fcl_readme_nrf-fota.md` §4b.
 
 ### Deferred spracovanie (dôležité pre RX)
 `onGroupDataRecv()` (volané z recv cesty dispatchera) **len skopíruje payload** do
