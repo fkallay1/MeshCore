@@ -275,6 +275,23 @@ len sa neutralizujú.
 - **Flash mapa** — flasher presunutý z 0xF2000 (sniffer) na 0xEB000, aby sa vyhol MeshCore
   InternalFS (0xED000).
 
+### 8.1b Zápis na 0x40000514 mrazil T1000-E pri pripojení USB (2026-07-16, fix 8863ea76)
+- **Symptóm:** FOTA build na T1000-E (batéria) úplne zamrzol (aj LoRa) pri pripojení USB
+  za behu; na PC to maskoval otvorený terminál len zhodou okolností nie — spúšťačom bol
+  USBDETECTED event. Stock build OK. ProMicro/Solar bez symptómu — board bez batérie
+  „USB plug za behu" nikdy nezažije (bootuje vždy s VBUS), bug bol latentný na všetkých.
+- **Príčina:** `fota_check_flasher_debug()` čítal+mazal „GPREGRET2" na **0x40000514** —
+  tá adresa ale NIE JE GPREGRET2 (skutočný = 0x40000520); je to REZERVOVANÝ priestor
+  POWER periférie vedľa POFCON (0x510). Zápis rozbil stav POWER periférie → zamrznutie
+  pri najbližšom POWER evente (USB plug).
+- **Fix:** register prístup odstránený úplne — MC flasher marker do registra aj tak už
+  nezapisuje (`fmark`=no-op, kroky nesie flash trace log; ZC má RAM breadcrumb).
+  RESETREAS (0x400, správna adresa) ostáva. + `fota_print_flasher_trace()` sanity check:
+  stale/cudzí trace región (čerstvá doska, ne-MeshCore FW — napr. po ZephCore) už
+  nevypíše 512 riadkov smetí, zastaví sa na prvom nevalidnom kóde.
+- **Diagnostika:** HW bisect D1–D6 (postupné vypínanie: debug flagy → boot hooky →
+  FS mount → register hook); D5/D6 pár izoloval register hook ako jedinú premennú.
+
 ### 8.2 Príjem / patchovanie chunkov
 - **Meshcore chunk CRC vs AES padding** — AES-ECB doplní 159→160 B; bez strhnutia paddingu
   CRC nesedel. Fix v `handle_chunk`: presná dĺžka chunku z `idx`/`patch_size` + clamp.
