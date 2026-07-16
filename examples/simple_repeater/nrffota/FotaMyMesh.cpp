@@ -720,6 +720,7 @@ void MyMesh::runFotaCli(const char* fargs, char* reply) {
     //sk: AGC/gain diagnostika rádia (READ-ONLY — nemení konfiguráciu rádia, žiadny
     //sk: dopad na kompatibilitu s inými MeshCore zariadeniami). Pri point-blank
     //sk: (RSSI ~-23) overuje či sa receiver nedesenzitizoval / aký má gain mód.
+#ifdef USE_SX1262
     uint8_t rxgain = 0;
     radio.readRegister(0x08AC, &rxgain, 1);   //en: RADIOLIB_SX126X_REG_RX_GAIN
     float inst_rssi = radio.getRSSI(false);   //en: instantaneous channel RSSI (GetRssiInst)
@@ -733,6 +734,20 @@ void MyMesh::runFotaCli(const char* fargs, char* reply) {
             rxgain, gm, radio_driver.getRxBoostedGainMode() ? "on" : "off",
             (int)inst_rssi, (int)_radio->getNoiseFloor(),
             (unsigned long)(((uint32_t)_prefs.agc_reset_interval) * 4));
+#else
+    //en: non-SX126x radio (e.g. LR1110 on T1000-E): no RX_GAIN register / GetRssiInst —
+    //en: report the boost preference and noise floor only.
+    //sk: iné rádio než SX126x (napr. LR1110 na T1000-E): bez RX_GAIN registra /
+    //sk: GetRssiInst — vypíš len boost preferenciu a noise floor.
+    FOTA_DEBUG_PRINTLN("[FOTA] AGC gain-reg=n/a  boost_pref=%s  nf=%d  agc_reset=%lus(0=off)",
+                       radio_driver.getRxBoostedGainMode() ? "on" : "off",
+                       (int)_radio->getNoiseFloor(),
+                       (unsigned long)(((uint32_t)_prefs.agc_reset_interval) * 4));
+    sprintf(reply, FOTA_TXT_AGC_NOREG_FMT,
+            radio_driver.getRxBoostedGainMode() ? "on" : "off",
+            (int)_radio->getNoiseFloor(),
+            (unsigned long)(((uint32_t)_prefs.agc_reset_interval) * 4));
+#endif
   } else {
     //en: WARNING: do NOT combine AGC auto-reset (set agc.reset.interval > 0) with FOTA flashing!
     //en: If AGC resets (radio.sleep+calibrate) run during a FOTA session, the next

@@ -19,10 +19,12 @@ Súvis: [fcl_readme_nrf-fota.md](fcl_readme_nrf-fota.md) (užívateľský popis 
 | Archív buildov (app image .bin + .uf2) | `test_nrf-fota/builds/` — názov `<device>.fw_<N>.bin` (gitignored) |
 | Vygenerované balíky | `test_nrf-fota/fotapkg_json/` — `<old>-<new>.<device>.fotapkg.json` (+ `.rev.` = rollback) |
 | Globálny build counter | `test_nrf-fota/build_number.txt` (bumpuje ho `pre:gen_build_info.py` pri každom builde). **V repe je neutrálna hodnota 300** (obe FOTA vetvy); lokálne reálne číslo drží `git update-index --skip-worktree test_nrf-fota/build_number.txt` → git ho nehlási ani necommituje. Po novom klone flag nastaviť znova; ak checkout hlási „would be overwritten", dočasne `--no-skip-worktree`. |
-| FOTA env názvy | `ProMicro_repeater_fota`, `SenseCap_Solar_repeater_fota`, `Xiao_nrf52_repeater_fota` |
+| FOTA env názvy | `ProMicro_repeater_fota`, `SenseCap_Solar_repeater_fota`, `Xiao_nrf52_repeater_fota`, `t1000e_repeater_fota`, `RAK_3401_repeater_fota` (= „RAK 1W"), `RAK_4631_repeater_fota` |
 
 **`device` v názvoch** = `PIOENV.split("_")[0].lower()` → `ProMicro_repeater_fota` → `promicro`,
-`SenseCap_Solar_repeater_fota` → `sensecap`, `Xiao_nrf52_repeater_fota` → `xiao`.
+`SenseCap_Solar_repeater_fota` → `sensecap`, `Xiao_nrf52_repeater_fota` → `xiao`, `t1000e_repeater_fota` → `t1000e`.
+**Výnimka:** ak by prvý segment kolidoval, env nastaví `custom_fota_device` v `platformio.ini`
+(hook `gen_fotapkg_hook.py` ho preferuje) — `RAK_3401_repeater_fota` → `rak3401`, `RAK_4631_repeater_fota` → `rak4631`.
 
 ---
 

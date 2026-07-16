@@ -78,9 +78,16 @@ Integrácia do jadra repeatera (od 2026-07-03 minimalizovaná — telá presunut
   - **`logTxRaw` je nový core hook** v `src/Dispatcher.{h,cpp}` (prázdny default; volaný v
     `checkSend()` hneď po `startSendRaw`, zrkadlo `logRxRaw`) — viď RAW log §7.
 - `variants/promicro/platformio.ini`, `variants/sensecap_solar/platformio.ini`,
-  `variants/xiao_nrf52/platformio.ini` — envy `ProMicro_repeater_fota` (v6) /
-  `SenseCap_Solar_repeater_fota` (v7) / `Xiao_nrf52_repeater_fota` (v7) — všetky
-  `WITH_LORA_FOTA`+`FOTA_DEBUG`, `extra_scripts` s `create-uf2.py` + 3× `gen_` (jednotné).
+  `variants/xiao_nrf52/platformio.ini`, `variants/t1000-e/platformio.ini`,
+  `variants/rak3401/platformio.ini`, `variants/rak4631/platformio.ini` — envy
+  `ProMicro_repeater_fota` (v6) / `SenseCap_Solar_repeater_fota` (v7) /
+  `Xiao_nrf52_repeater_fota` (v7) / `t1000e_repeater_fota` (v7, **LR1110**) /
+  `RAK_3401_repeater_fota` (v6, „RAK 1W") / `RAK_4631_repeater_fota` (v6) — všetky
+  `WITH_LORA_FOTA`+`FOTA_DEBUG`, `extra_scripts` s `create-uf2.py` + 3× `gen_` (jednotné;
+  RAK4631 navyše dedí `fix_bsec_lib.py` z base). RAK envy majú `custom_fota_device`
+  (rak3401/rak4631), lebo prvý segment PIOENV „rak" by v archíve kolidoval.
+  Pozn. LR1110: `fota agc` na T1000-E vracia skrátený `FOTA_TXT_AGC_NOREG_FMT`
+  (bez SX126x RX_GAIN registra) — `#ifdef USE_SX1262` v `FotaMyMesh.cpp: runFotaCli()`.
 
 Testovacia infraštruktúra v `test_nrf-fota/`:
 - `fota_sender.py` — generuje patch (hdiffi+zlib), vysiela cez bridge (mode `meshcore`/`direct`).
@@ -160,8 +167,9 @@ bootloader @ 0xF4000.
 - Flasher na **0xEB000** (nie 0xF2000 ako pôvodný FK_lora sniffer) — aby sa vyhol MeshCore
   InternalFS na 0xED000.
 - Strop patchu ~40 kB (recv.log + patch.bin musia byť súčasne v 92 kB FS).
-- Env `ProMicro_repeater_fota` používa `boards/nrf52840_s140_v6_extrafs.ld` (712704 B);
-  `SenseCap_Solar_repeater_fota` a `Xiao_nrf52_repeater_fota` používajú `..._v7_extrafs.ld` (708608 B).
+- Envy `ProMicro_repeater_fota`, `RAK_3401_repeater_fota` a `RAK_4631_repeater_fota`
+  používajú `boards/nrf52840_s140_v6_extrafs.ld` (712704 B); `SenseCap_Solar_repeater_fota`,
+  `Xiao_nrf52_repeater_fota` a `t1000e_repeater_fota` používajú `..._v7_extrafs.ld` (708608 B).
 - Pre XIAO / s140 v7 (app base 0x27000): nič netreba — board-agnostické (base z linker symbolu, runtime do flashera). Jeden `flasher_code.h`.
 
 ---

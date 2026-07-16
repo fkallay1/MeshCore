@@ -44,8 +44,15 @@ def _post(source, target, env):  # noqa: ANN001
         return
     hexf = env.subst("$BUILD_DIR/${PROGNAME}.hex")
     script = Path(env.subst("$PROJECT_DIR")) / "test_nrf-fota" / "gen_fotapkg.py"
-    # názov zariadenia z env: "ProMicro_repeater_fota" → "promicro"
-    device = env.subst("$PIOENV").split("_")[0].lower() or "device"
+    # názov zariadenia z env: "ProMicro_repeater_fota" → "promicro".
+    # POZOR: prvý segment nemusí byť unikátny (RAK_3401 aj RAK_4631 → "rak")
+    # → v platformio.ini envu možno nastaviť explicitne: custom_fota_device = rak4631
+    try:
+        device = (env.GetProjectOption("custom_fota_device", "") or "").strip().lower()
+    except Exception:  # noqa: BLE001
+        device = ""
+    if not device:
+        device = env.subst("$PIOENV").split("_")[0].lower() or "device"
     try:
         # Vynúť UTF-8 na oboch stranách: dieťa tlačí slovenské znaky v UTF-8,
         # bez tohto by parent na Windows dekódoval cez locale (cp1250) a spadol
