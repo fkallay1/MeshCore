@@ -1,5 +1,8 @@
 #include "Mesh.h"
 //#include <Arduino.h>
+#ifdef FK_DEBUG
+  #include <Arduino.h>   //en: [FK_DEBUG] Serial for silent-drop diagnostics  //sk: Serial pre diagnostiku tichých dropov
+#endif
 
 namespace mesh {
 
@@ -227,7 +230,7 @@ DispatcherAction Mesh::onRecvPacket(Packet* pkt) {
       int i = 0;
       uint8_t channel_hash = pkt->payload[i++];
 
-      uint8_t* macAndData = &pkt->payload[i];   // MAC + encrypted data 
+      uint8_t* macAndData = &pkt->payload[i];   // MAC + encrypted data
       if (i + 2 >= pkt->payload_len) {
         MESH_DEBUG_PRINTLN("%s Mesh::onRecvPacket(): incomplete data packet", getLogDateTime());
       } else if (!_tables->wasSeen(pkt)) {
@@ -236,17 +239,39 @@ DispatcherAction Mesh::onRecvPacket(Packet* pkt) {
         GroupChannel channels[4];
         int num = searchChannelsByHash(&channel_hash, channels, 4);
         // for each matching channel, try to decrypt data
+        bool fk_decrypted = false;
         for (int j = 0; j < num; j++) {
           // decrypt, checking MAC is valid
           uint8_t data[MAX_PACKET_PAYLOAD];
           int len = Utils::MACThenDecrypt(channels[j].secret, data, macAndData, pkt->payload_len - i);
           if (len > 0) {  // success!
+            fk_decrypted = true;
             onGroupDataRecv(pkt, pkt->getPayloadType(), channels[j], data, len);
             break;
           }
         }
+        (void)fk_decrypted;
+#ifdef FK_DEBUG
+        //en: [FK_DEBUG] GRP_DATA only (GRP_TXT chat copies would spam) — names the
+        //en: silent drop gate: no channel with this hash, or MAC/decrypt failed
+        //en: (foreign channel with colliding hash byte, or corrupted payload).
+        //sk: [FK_DEBUG] len GRP_DATA (GRP_TXT chat kópie by spamovali) — pomenuje
+        //sk: tichú drop bránu: žiadny kanál s týmto hashom, alebo MAC/decrypt
+        //sk: zlyhal (cudzí kanál s kolíznym hash bajtom, alebo poškodený payload).
+        if (!fk_decrypted && pkt->getPayloadType() == PAYLOAD_TYPE_GRP_DATA) {
+          Serial.printf("[FK] GRP_DATA %02X: %s\r\n", (unsigned)channel_hash,
+                        num == 0 ? "no matching channel" : "MAC fail (foreign/corrupt)");
+        }
+#endif
         action = routeRecvPacket(pkt);
       }
+#ifdef FK_DEBUG
+      //en: [FK_DEBUG] seen-table dedup — RAW log shows the packet, processing does not run
+      //sk: [FK_DEBUG] seen-table dedup — RAW log paket ukáže, spracovanie už nebeží
+      else if (pkt->getPayloadType() == PAYLOAD_TYPE_GRP_DATA) {
+        Serial.printf("[FK] GRP_DATA %02X: DEDUP (seen)\r\n", (unsigned)pkt->payload[0]);
+      }
+#endif
       break;
     }
     case PAYLOAD_TYPE_ADVERT: {

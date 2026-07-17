@@ -1,6 +1,6 @@
 #include "Dispatcher.h"
 
-#if MESH_PACKET_LOGGING
+#if MESH_PACKET_LOGGING || defined(FK_DEBUG)
   #include <Arduino.h>
 #endif
 
@@ -201,6 +201,11 @@ void Dispatcher::checkRecv() {
       pkt = _mgr->allocNew();
       if (pkt == NULL) {
         MESH_DEBUG_PRINTLN("%s Dispatcher::checkRecv(): WARNING: received data, no unused packets available!", getLogDateTime());
+#ifdef FK_DEBUG
+        //en: [FK_DEBUG] visible even without MESH_DEBUG — silent RX drop diagnosis
+        //sk: [FK_DEBUG] viditeľné aj bez MESH_DEBUG — diagnostika tichého RX dropu
+        Serial.println("[FK] RX DROP: packet pool empty!");
+#endif
       } else {
         if (tryParsePacket(pkt, raw, len)) {
           pkt->_snr = _radio->getLastSNR() * 4.0f;
