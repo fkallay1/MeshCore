@@ -226,6 +226,29 @@ makrá `FOTA_DEBUG_PRINT/PRINTLN` (`nrffota/FotaDebug.h`) gated **`-D FOTA_DEBUG
 (FOTA envy default zapnuté). Bez flagu sa vôbec nekompilujú; CLI odpovede (reply buffer)
 fungujú vždy — sú to funkčné výstupy, nie diagnostika.
 
+### 7.0b FK fork flagy pre login handshake v rušnom meshi (2026-07-17, 0d9192db)
+
+Problém (200 km trasa): uplink floody dolietajú, ale **flood odpoveď repeatera
+(login PATH+RESPONSE) takmer nikdy neprežije cestu späť** — štartuje 300 ms po
+requeste rovno do jeho echo búrky a na ďalších hopoch ju dorazí pozadová
+prevádzka. Manuálne cesty (`fota setpath`) fungujú, štandardný handshake nie.
+Dva voliteľné flagy v `examples/simple_repeater/MyMesh.{h,cpp}` (bez flagu sa
+kód nekompiluje, správanie = upstream):
+
+- **`-D FK_SERVER_FLOOD_RESPONSE_DELAY=<ms>`** — samostatný delay LEN pre flood
+  odpovede (login PATH, RESPONSE/REQ flood fallbacky); odpoveď počká, kým echo
+  búrka requestu utíchne. Direct odpovede ostávajú na 300 ms.
+- **`-D FK_ANON_FLOOD_DIRECT_FALLBACK=<ms>`** — ak do okna po flood odpovedi
+  nepríde recipročný PATH (klientova `out_path` v ACL ostala UNKNOWN), login
+  odpoveď sa pošle znova **DIRECT po otočenej ceste requestu** a otočená cesta
+  sa zapíše ako provizórna out_path. Direct kópia má čerstvý random blob
+  (`reply[8..11]`) → iný packet hash, dedup ju nezahodí. 2 pending sloty,
+  kontrola vo `fkAnonFallbackLoop()` z `MyMesh::loop()`. Worst case = upstream.
+
+Zapnuté v `t1000e_repeater_fota` (1500/2000 ms). Pozn.: klient↔klient handshake
+(TXT/ACK) má rovnakú zraniteľnosť, ale beží medzi telefónmi — tam to neovplyvníme.
+ZephCore mirror (RepeaterMesh.cpp) zatiaľ NEportnutý — až po HW validácii.
+
 ### 7.1 Texty — FotaTexts.h (od buildu 324)
 
 Správa textov je rozdelená do troch tried s rôznym režimom:
