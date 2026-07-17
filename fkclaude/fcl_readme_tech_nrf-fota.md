@@ -226,6 +226,14 @@ makrá `FOTA_DEBUG_PRINT/PRINTLN` (`nrffota/FotaDebug.h`) gated **`-D FOTA_DEBUG
 (FOTA envy default zapnuté). Bez flagu sa vôbec nekompilujú; CLI odpovede (reply buffer)
 fungujú vždy — sú to funkčné výstupy, nie diagnostika.
 
+Pod **`-D FK_DEBUG=1`** navyše (od b3523fe2, build ≥ 352) core vypisuje **tiché drop
+brány GRP_DATA** (`src/Mesh.cpp`, `src/Dispatcher.cpp`): `[FK] GRP_DATA xx: DEDUP (seen)`
+(seen-table — RAW paket ukáže, spracovanie nebeží), `[FK] GRP_DATA xx: MAC fail
+(foreign/corrupt)` / `no matching channel`, a `[FK] RX DROP: packet pool empty!`
+(Dispatcher bez voľného paketu — dovtedy viditeľné len pod MESH_DEBUG). Len GRP_DATA —
+GRP_TXT kópie chatov by log spamovali. Dôvod vzniku: flood chunky na 200 km teste
+v RAW logu bez `[FOTA] CHUNK` spracovania (viď `fcl_remote_e2e_rpi.md` §2.2).
+
 ### 7.0b FK fork flagy pre login handshake v rušnom meshi (2026-07-17, 0d9192db)
 
 Problém (200 km trasa): uplink floody dolietajú, ale **flood odpoveď repeatera
