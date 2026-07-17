@@ -234,6 +234,21 @@ brány GRP_DATA** (`src/Mesh.cpp`, `src/Dispatcher.cpp`): `[FK] GRP_DATA xx: DED
 GRP_TXT kópie chatov by log spamovali. Dôvod vzniku: flood chunky na 200 km teste
 v RAW logu bez `[FOTA] CHUNK` spracovania (viď `fcl_remote_e2e_rpi.md` §2.2).
 
+Od buildu **#355** FK_DEBUG dekóduje aj **PATH pakety** (`src/Mesh.cpp`) — RAW log
+ukazuje len šifrovaný obal, tieto výpisy pomenúvajú obsah a drop brány (diagnóza
+„PATH odišiel, ale nedošiel" na oboch smeroch):
+
+- `[FK] PATH RX src=XX ret_path[N]=AABBCC extra_t=.. extra_len=.. flood(->reciprocal)|direct`
+  — úspešne dešifrovaný PATH pre nás: aká spiatočná cesta nám bola oznámená; pri
+  flood variante repeater následne pošle recipročný PATH (direct).
+- `[FK] PATH RX XX->YY: unknown peer | MAC fail (corrupt?)` — PATH adresovaný nám,
+  ale odosielateľ nie je v ACL / dešifrovanie zlyhalo (poškodenie pri nízkom SNR).
+- `[FK] PATH RX XX->YY: DEDUP (seen)` — PATH pre nás zahodený seen-table dedupom
+  (napr. neskoršia kópia po viacerých cestách).
+- `[FK] PATH TX to=XX ret_path[N]=AABBCC extra_t=.. extra_len=..` — obsah KAŽDÉHO
+  odchádzajúceho PATH (jediné hrdlo `createPathReturn`; extra_t=255 = bez extra,
+  len anti-dedup blob). Páruj s nasledujúcim `TX RAW type=8` riadkom.
+
 ### 7.0b FK fork flagy pre login handshake v rušnom meshi (2026-07-17, 0d9192db)
 
 Problém (200 km trasa): uplink floody dolietajú, ale **flood odpoveď repeatera

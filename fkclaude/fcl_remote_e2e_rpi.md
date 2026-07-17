@@ -1,13 +1,13 @@
 # Vzdialený 200 km test — stav, problémy a plán e2e/flash cez RPi
 
-*(poznámky pre ďalšiu session; stav k 2026-07-17 večer, MC branch `features/nrf-fota` @ b3523fe2)*
+*(poznámky pre ďalšiu session; stav k 2026-07-17 neskoro večer, MC branch `features/nrf-fota` @ b3523fe2)*
 
 ## 1. Zostava
 
 | Kus | Kde | Stav |
 |---|---|---|
-| **T1000-E repeater** (cieľ testu) | vzdialené stanovište ~200 km | beží **build #347** (fix 0x514, BEZ FK flagov); serial visí na RPi |
-| **RPi (Zero?)** | pri vzdialenom repeateri | Fedor naň chodí cez **PuTTY (SSH)** a serial číta cez **picocom** |
+| **T1000-E repeater** (cieľ testu) | vzdialené stanovište ~200 km | beží **build #352** (diag build; flashnutý DFU cez RPi 2026-07-17; predtým tam bol #348 — FOTA upgrade 347→348 sa teda DOKONČIL) |
+| **RPi (WPSD hotspot `wpsd1ba`)** | pri vzdialenom repeateri | **10.21.0.103** cez WireGuard (Wg1; NIE .104!), user `pi-star`; SSH kľúč nainštalovaný → z tohto PC funguje `ssh rpi` bez hesla; Fedor naň chodí cez **PuTTY (SSH)** |
 | **Telefón + companion** (vysielač) | lokálne u Fedora | Flutter appka (meshcore-open fork), adb funguje z tohto PC |
 | **Kontrolný ProMicro repeater** | lokálne u Fedora (2 m od vysielača) | **build #334** (spred 0x514 fixu — latentný USB-freeze bug, pri USB napájaní sa neprejaví; časom povýšiť) |
 | RDP transfer `\\tsclient\D\10_RDP_Transfer` | — | **ku koncu session nefunkčný** (Access denied) — flash builds na vzdialené PC cezeň |
@@ -55,41 +55,81 @@
 | `fotapkg_json/348-352.*.json` | podpísaný patch (+rollback) |
 | CHÝBA `347→352` | ak sa má #352 nasadiť cez FOTA priamo z #347, vygenerovať: `python test_nrf-fota/gen_fotapkg.py --old test_nrf-fota/builds/t1000e.fw_347.bin --new test_nrf-fota/builds/t1000e.fw_352.bin --device t1000e` |
 
-## 4. Plán: vzdialený e2e test cez RPi (Claude ovláda obe strany)
+## 4. Vzdialený prístup cez RPi — NASTAVENÉ (2026-07-17)
 
-**Čo Claude potrebuje od Fedora (zatiaľ nedodané):**
-1. SSH prístup na RPi z tohto PC: IP/hostname (VPN?), user, auth (heslo raz → nainštalujem kľúč).
-2. Názov serial zariadenia na RPi (`/dev/ttyACM0`?).
-3. Lokálny vysielač pre automatizáciu: companion/bridge na USB tohto PC + COM port
-   (telefón viem len adb push, appku neovládam).
+**SSH:** RPi = `10.21.0.103` (WireGuard Wg1; pozor, NIE .104), user `pi-star`, host `wpsd1ba`
+(Debian 13, WPSD hotspot). Kľúč `D:\FkDev\cli_home\.ssh\id_ed25519` je v authorized_keys;
+ssh config alias je v `C:\Users\globesy\.ssh\config` (Windows ssh číta REÁLNY profil, nie
+cli_home!) → z tohto PC stačí **`ssh rpi`** / `scp <súbor> rpi:/tmp/`.
 
-**Setup na RPi (zdieľaný prístup k serialu, žiadne bitky o port):**
+- Serial: `/dev/ttyACM0` (T1000-E), user je v skupine `dialout`, sudo bez hesla, root FS rw.
+- Nainštalované: `tmux`, `picocom` (bol), **adafruit-nrfutil v venv `~/nrfvenv`**
+  (Debian 13 = externally-managed pip, preto venv): `~/nrfvenv/bin/adafruit-nrfutil`.
+- POZOR pri generovaní kľúča z PowerShellu: `-N '""'` nastaví passphrase doslova `""`
+  (kľúč sa v BatchMode neodomkne, sshd loguje „Connection reset [preauth]") — správne
+  je `cmd /c 'ssh-keygen ... -N ""'`.
+
+**Bežiaci setup (zdieľaný prístup k serialu, žiadne bitky o port):**
 ```bash
-tmux new -s rptr -d "picocom -b 115200 --imap lfcrlf --logfile /home/pi/rptr.log /dev/ttyACM0"
-# Claude číta:   ssh pi@<rpi> "tail -f /home/pi/rptr.log"
-# Claude píše:   ssh pi@<rpi> "tmux send-keys -t rptr 'fota status' Enter"
-# Fedor pozerá:  ssh + tmux attach -t rptr
+# beží tmux session "rptr" s picocomom, log sa appenduje do /home/pi-star/rptr.log
+tmux new -s rptr -d "picocom -b 115200 --imap lfcrlf --logfile /home/pi-star/rptr.log /dev/ttyACM0"
+# Claude číta:   ssh rpi "tail -f /home/pi-star/rptr.log"     (alebo tail -50)
+# Claude píše:   ssh rpi "tmux send-keys -t rptr 'fota status' Enter"
+# Fedor pozerá:  PuTTY → 10.21.0.103, pi-star → `tmux attach -t rptr` (interaktívne,
+#                dá sa písať CLI; ODPOJIŤ = Ctrl+B, potom D — NIE Ctrl+A/Ctrl+X, to zabije picocom)
+#                alebo len na čítanie: `tail -f ~/rptr.log` (bezpečné paralelne s Claude)
+# viacero tmux attach naraz je OK; NIKDY druhý picocom priamo na /dev/ttyACM0
 ```
 
 **Priebeh e2e:** poslať patch (fota_sender_mcpy / appka) → na RPi logu sledovať RAW +
 `[FK]` diagnostiky + CHUNK → `fota miss`/doposlanie → `verify` → `flash` → z heartbeatu
 overiť nový build#. Poznámka: FOTA flash = soft reset, bez rizika 0x514 triedy problémov.
 
-## 5. Vzdialený FLASH cez RPi (rýchly, bez LoRa)
+## 5. Vzdialený FLASH cez RPi (rýchly, bez LoRa) — OVERENÉ 2026-07-17 (#348→#352)
 
 Adafruit bootloader podporuje **DFU cez serial** — presne to robí lokálny „NoBuild upload"
-task. Na RPi:
+task. Postup (funkčný, ~40 s):
 
 ```bash
-# jednorazovo
-pip3 install adafruit-nrfutil
-
 # prenos balíka (z tohto PC)
-scp test_nrf-fota/builds/t1000e.fw_352.zip pi@<rpi>:/tmp/
+scp test_nrf-fota/builds/t1000e.fw_352.zip rpi:/tmp/
 
-# flash (picocom NAJPRV odpojiť od portu! napr. tmux kill-session -t rptr)
-adafruit-nrfutil dfu serial --package /tmp/t1000e.fw_352.zip -p /dev/ttyACM0 -b 115200 --singlebank --touch 1200
+# flash (picocom NAJPRV odpojiť od portu!)
+ssh rpi "tmux kill-session -t rptr; ~/nrfvenv/bin/adafruit-nrfutil dfu serial --package /tmp/t1000e.fw_352.zip -p /dev/ttyACM0 -b 115200 --singlebank --touch 1200"
 # --touch 1200 = 1200bps touch prepne bežiacu appku do bootloadera automaticky (netreba tlačidlo)
+
+# obnoviť logovanie + overiť build# (heartbeat AALIVE chodí ~každých 30 s)
+ssh rpi "sleep 6; tmux new -s rptr -d 'picocom -b 115200 --imap lfcrlf --logfile /home/pi-star/rptr.log /dev/ttyACM0'"
+ssh rpi "sleep 45; grep AALIVE ~/rptr.log | tail -2"
+```
+
+Pozn.: `ver` vracia stále „v1.16.0 (Build: 6 Jun 2026)" — dátum sa nemení, build#
+vidno len v `AALIVE` heartbeate (reboot poznať podľa resetu `rawrx` počítadla).
+
+## 5b. FOTA cez LoRa na 200 km — pracovný postup (2026-07-18)
+
+Vysielač = companion na **COM3** tohto PC (`fota_sender_mcpy.py`). Živá sieť →
+**`--delay 5`** (1 paket / 5 s, nikdy rýchlejšie!). Známe cesty: tam=`632139779C`,
+späť=`C0777363`. Repeater = T1000-E, build# viď AALIVE.
+
+```bash
+PENV="D:/FkDev/.platformio/penv/Scripts/python.exe"
+
+# 1. prvý prechod (celý patch): flood — na 200 km prešlo len ~20 % chunkov
+$PENV test_nrf-fota/fota_sender_mcpy.py --old test_nrf-fota/builds/t1000e.fw_352.bin \
+    --new test_nrf-fota/builds/t1000e.fw_355.bin --port COM3 --delay 5 \
+    --scope flood --privkey test_nrf-fota/test_key.der
+
+# 2. stav + chýbajúce chunky (cez RPi tmux CLI)
+ssh rpi "tmux send-keys -t rptr 'fota missall' Enter; sleep 3; tail -4 ~/rptr.log"
+
+# 3. doposlanie LEN chýbajúcich, direct po známej ceste (doručuje ovela lepšie než flood)
+#    --chunks berie priamo výstup missall; META/SIG sa pri --chunks preskakuje
+#    (--with-header ich pridá)
+$PENV test_nrf-fota/fota_sender_mcpy.py --old ... --new ... --port COM3 --delay 5 \
+    --scope direct --path 632139779C --chunks "1-6,9,10,12-14,..."
+
+# 4. opakovať missall→--chunks kým 50/50, potom verify+flash cez tmux CLI
 ```
 
 - `.zip` DFU balík vzniká pri každom builde (`.pio/build/<env>/firmware.zip`); pre #352 je
@@ -101,12 +141,14 @@ adafruit-nrfutil dfu serial --package /tmp/t1000e.fw_352.zip -p /dev/ttyACM0 -b 
   RPi↔repeater — na to nikto na mieste nie je, takže flashovať len so stabilným napájaním.
 - POZOR: kým appka nebeží (počas DFU), repeater nerepeatuje — okno ~1 min.
 
-## 6. Prvé kroky ďalšej session
+## 6. Ďalšie kroky
 
-1. Vypýtať SSH údaje na RPi (bod 4) → setup tmux+picocom logfile.
-2. Nasadiť **#352** na vzdialený repeater — ideálne DFU cez RPi (§5), inak FOTA
-   (vygenerovať 347→352 patch, §3).
-3. Zopakovať flood chunk test → prečítať `[FK]` výpisy → pomenovať bránu.
-4. Otestovať login handshake s FK flagmi (fallback) na 200 km.
+1. ~~SSH setup + tmux/picocom logfile~~ HOTOVO (§4).
+2. ~~Nasadiť #352~~ HOTOVO — DFU cez RPi 2026-07-17 (§5); zariadenie beží #352
+   a prijíma pakety.
+3. Zopakovať flood chunk test → prečítať `[FK]` výpisy (`DEDUP` / `MAC fail` /
+   `no matching channel` / `pool empty`) → pomenovať bránu.
+4. Otestovať login handshake s FK flagmi (fallback + delay, sú v #348+) na 200 km —
+   sledovať `FK anon fallback: armed / direct resend (N hops) / handshake OK`.
 5. Po validácii: FK flagy zapnúť aj pre ostatné FOTA envy + zvážiť ZC mirror; povýšiť
    kontrolný ProMicro (#334 → aktuál).

@@ -173,6 +173,20 @@ DispatcherAction Mesh::onRecvPacket(Packet* pkt) {
                 uint8_t extra_type = data[k++] & 0x0F;   // upper 4 bits reserved for future use
                 uint8_t* extra = &data[k];
                 uint8_t extra_len = len - k;   // remainder of packet (may be padded with zeroes!)
+#ifdef FK_DEBUG
+                //en: [FK_DEBUG] decoded PATH content (the inner, encrypted return path) —
+                //en: RAW log shows only the outer envelope; this names WHAT path the peer
+                //en: told us to use (route diagnosis: "PATH sent but never arrived" etc.).
+                //sk: [FK_DEBUG] dekódovaný obsah PATH (vnútorná, šifrovaná spiatočná cesta) —
+                //sk: RAW log ukáže len vonkajší obal; toto pomenuje AKÚ cestu nám peer
+                //sk: oznámil (diagnóza rout: „PATH odišiel ale nedošiel" a pod.).
+                {
+                  Serial.printf("[FK] PATH RX src=%02X ret_path[%u]=", (unsigned)src_hash, (unsigned)hash_count);
+                  for (int fk = 0; fk < hash_size * hash_count; fk++) Serial.printf("%02X", (unsigned)path[fk]);
+                  Serial.printf(" extra_t=%u extra_len=%u %s\r\n", (unsigned)extra_type, (unsigned)extra_len,
+                                pkt->isRouteFlood() ? "flood(->reciprocal)" : "direct");
+                }
+#endif
                 if (onPeerPathRecv(pkt, j, secret, path, path_len, extra_type, extra, extra_len)) {
                   if (pkt->isRouteFlood()) {
                     // send a reciprocal return path to sender, but send DIRECTLY!
@@ -191,10 +205,28 @@ DispatcherAction Mesh::onRecvPacket(Packet* pkt) {
             pkt->markDoNotRetransmit();  // packet was for this node, so don't retransmit
           } else {
             MESH_DEBUG_PRINTLN("%s recv matches no peers, src_hash=%02X", getLogDateTime(), (uint32_t)src_hash);
+#ifdef FK_DEBUG
+            //en: [FK_DEBUG] PATH addressed to us but not decodable — unknown peer
+            //en: (not in ACL) or MAC/decrypt failed (corruption at low SNR).
+            //sk: [FK_DEBUG] PATH adresovaný nám, ale nedekódovateľný — neznámy peer
+            //sk: (nie je v ACL) alebo MAC/decrypt zlyhal (poškodenie pri nízkom SNR).
+            if (pkt->getPayloadType() == PAYLOAD_TYPE_PATH) {
+              Serial.printf("[FK] PATH RX %02X->%02X: %s\r\n", (unsigned)src_hash, (unsigned)dest_hash,
+                            num == 0 ? "unknown peer" : "MAC fail (corrupt?)");
+            }
+#endif
           }
         }
         action = routeRecvPacket(pkt);
       }
+#ifdef FK_DEBUG
+      //en: [FK_DEBUG] PATH to us dropped by seen-table dedup — RAW shows it, processing skipped
+      //sk: [FK_DEBUG] PATH pre nás zahodený seen-table dedupom — RAW ho ukáže, spracovanie preskočené
+      else if (pkt->getPayloadType() == PAYLOAD_TYPE_PATH && self_id.isHashMatch(&pkt->payload[0])) {
+        Serial.printf("[FK] PATH RX %02X->%02X: DEDUP (seen)\r\n",
+                      (unsigned)pkt->payload[1], (unsigned)pkt->payload[0]);
+      }
+#endif
       break;
     }
     case PAYLOAD_TYPE_ANON_REQ: {
@@ -507,6 +539,15 @@ Packet* Mesh::createPathReturn(const uint8_t* dest_hash, const uint8_t* secret, 
 
   packet->payload_len = len;
 
+#ifdef FK_DEBUG
+  //en: [FK_DEBUG] outgoing PATH content (return path we are telling the peer) — the
+  //en: TX RAW line that follows shows only the encrypted envelope; pair by dest hash.
+  //sk: [FK_DEBUG] obsah odchádzajúceho PATH (spiatočná cesta, ktorú peerovi oznamujeme) —
+  //sk: nasledujúci TX RAW riadok ukáže len šifrovaný obal; páruj podľa dest hashu.
+  Serial.printf("[FK] PATH TX to=%02X ret_path[%u]=", (unsigned)dest_hash[0], (unsigned)path_hash_count);
+  for (int fk = 0; fk < path_hash_count * path_hash_size; fk++) Serial.printf("%02X", (unsigned)path[fk]);
+  Serial.printf(" extra_t=%u extra_len=%u\r\n", extra_len > 0 ? (unsigned)extra_type : 0xFFu, (unsigned)extra_len);
+#endif
   return packet;
 }
 

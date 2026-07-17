@@ -39,6 +39,23 @@ def companion_chan_data_frame(channel_idx, path_len, path, data_type, data):
             + path + struct.pack('<H', data_type) + data)
 
 
+def parse_chunk_ranges(spec, total):
+    """'1-6,9,12-14' (formát fota missall) → zoradený zoznam indexov. H/S ignoruje."""
+    out = set()
+    for tok in spec.replace(' ', '').split(','):
+        if not tok or tok.upper() in ('H', 'S'):
+            continue
+        if '-' in tok:
+            a, b = tok.split('-', 1)
+            out.update(range(int(a), int(b) + 1))
+        else:
+            out.add(int(tok))
+    bad = [i for i in out if i < 0 or i >= total]
+    if bad:
+        raise ValueError(f"--chunks indexy mimo rozsah 0..{total-1}: {bad}")
+    return sorted(out)
+
+
 def scope_to_path(scope, path_bytes=b""):
     """Scope → (path_len, path) pre sendGroupData: zerohop=0, flood=0xFF, direct=N hashov."""
     if scope == "zerohop":
@@ -108,13 +125,22 @@ async def run_mcpy(args):
         await snd(meta, "META")
         await snd(sig, "SIG")
 
-    if args.packetorder in ("normal", "hbegin"):
+    #en: --chunks = re-send only the listed indexes (fota missall format); header
+    #en: is skipped (session already exists) unless --with-header is given.
+    #sk: --chunks = doposlať len uvedené indexy (formát fota missall); header sa
+    #sk: preskočí (session už beží), iba ak nie je --with-header.
+    send_list = parse_chunk_ranges(args.chunks, total) if args.chunks else list(range(total))
+    send_header = (not args.chunks) or args.with_header
+    if args.chunks:
+        print(f"[mcpy] re-send {len(send_list)} chunkov: {args.chunks}")
+
+    if send_header and args.packetorder in ("normal", "hbegin"):
         await send_hdr()
-    for idx in range(total):
+    for pos, idx in enumerate(send_list):
         await snd(build_fota_chunk(idx, chunks[idx], old_fw_size, old_prefix))
-        if (idx + 1) % 10 == 0 or idx == total - 1:
-            print(f"[mcpy]   chunk {idx+1}/{total}")
-    if args.packetorder == "hend":
+        if (pos + 1) % 10 == 0 or pos == len(send_list) - 1:
+            print(f"[mcpy]   chunk {pos+1}/{len(send_list)} (idx={idx})")
+    if send_header and args.packetorder == "hend":
         await send_hdr()
     if args.reboot:
         await snd(build_fota_apply(patch_sha256), "APPLY")
@@ -136,6 +162,8 @@ def main():
     ap.add_argument('--path', help='direct: hex hashe hopov (1B), napr. 6368')
     ap.add_argument('--delay', type=float, default=0.3)
     ap.add_argument('--packetorder', choices=['normal', 'hbegin', 'hend'], default='hend')
+    ap.add_argument('--chunks', help='doposlať len tieto indexy, formát fota missall: "1-6,9,12-14"')
+    ap.add_argument('--with-header', action='store_true', help='pri --chunks poslať aj META/SIG')
     ap.add_argument('--reboot', action='store_true')
     ap.add_argument('--privkey')
     ap.add_argument('--privkey-hex')
