@@ -167,8 +167,11 @@ odchod `q`) — tam šípky ostávajú lokálne.
    sledovať `FK anon fallback: armed / direct resend (N hops) / handshake OK`.
    V #355 je aj `[FK] PATH RX/TX` dekódovanie (tech doc §7.0a) — uvidno obe strany
    handshaku.
-5. Nasadiť **#356** (fix CLI lockup, eb0dffd5) — ideálne cez FOTA 355→356
-   (`fotapkg_json/355-356.*.json` je vygenerovaný) a tentokrát dokončiť `fota flash`
-   cez LoRa/CLI ako plný e2e.
+5. ~~Nasadiť fix CLI lockup~~ HOTOVO — **2026-07-18 prvý KOMPLETNÝ 200 km e2e**:
+   FOTA 355→**358** (#358 = merged upstream/dev ab156acc + CLI fix + PATH decode),
+   44 chunkov direct po `632139779C`, 1. prechod 50 %, spolu 6 kôl `--chunks`
+   ≈ 12 min → 44/44 → `fota verify` OK → **`fota flash` cez CLI** → AALIVE #358.
+   POZOR: FOTA flash (USB re-enumerácia) zhodí picocom aj tmux server — po flashi
+   session založiť nanovo (§4).
 6. Po validácii: FK flagy zapnúť aj pre ostatné FOTA envy + zvážiť ZC mirror; povýšiť
    kontrolný ProMicro (#334 → aktuál).
