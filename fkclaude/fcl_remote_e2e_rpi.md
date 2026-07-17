@@ -71,14 +71,21 @@ cli_home!) → z tohto PC stačí **`ssh rpi`** / `scp <súbor> rpi:/tmp/`.
 
 **Bežiaci setup (zdieľaný prístup k serialu, žiadne bitky o port):**
 ```bash
-# beží tmux session "rptr" s picocomom, log sa appenduje do /home/pi-star/rptr.log
-tmux new -s rptr -d "picocom -b 115200 --imap lfcrlf --logfile /home/pi-star/rptr.log /dev/ttyACM0"
+# tmux session "rptr": picocom v reštart-slučke (prežije FOTA flash / USB re-enum),
+# log sa appenduje do /home/pi-star/rptr.log
+tmux new -s rptr -d 'while true; do picocom -b 115200 --imap lfcrlf --logfile /home/pi-star/rptr.log /dev/ttyACM0; echo PICOCOM-EXIT, restart o 3 s; sleep 3; done'
+# ~/.tmux.conf: history-limit 100000 + mouse on (nastavené 2026-07-18)
 # Claude číta:   ssh rpi "tail -f /home/pi-star/rptr.log"     (alebo tail -50)
 # Claude píše:   ssh rpi "tmux send-keys -t rptr 'fota status' Enter"
 # Fedor pozerá:  PuTTY → 10.21.0.103, pi-star → `tmux attach -t rptr` (interaktívne,
 #                dá sa písať CLI; ODPOJIŤ = Ctrl+B, potom D — NIE Ctrl+A/Ctrl+X, to zabije picocom)
 #                alebo len na čítanie: `tail -f ~/rptr.log` (bezpečné paralelne s Claude)
+# SCROLLBACK v tmux: koliesko myši (mouse on), alebo Ctrl+B [ → PgUp/šípky, koniec q
+#                (v copy-mode ostávajú klávesy lokálne — do zariadenia NEIDÚ);
+#                šípky MIMO copy-mode idú do CLI zariadenia! Celá história: less ~/rptr.log
 # viacero tmux attach naraz je OK; NIKDY druhý picocom priamo na /dev/ttyACM0
+# POZOR: pri DFU flashi slučka picocom hneď reštartuje a drží port — na DFU treba
+#        tmux kill-session -t rptr (nie len čakať na exit picocomu)
 ```
 
 **Priebeh e2e:** poslať patch (fota_sender_mcpy / appka) → na RPi logu sledovať RAW +
