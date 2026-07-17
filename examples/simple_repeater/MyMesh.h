@@ -124,6 +124,13 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks {
   uint8_t handleAnonRegionsReq(const mesh::Identity& sender, uint32_t sender_timestamp, const uint8_t* data);
   uint8_t handleAnonOwnerReq(const mesh::Identity& sender, uint32_t sender_timestamp, const uint8_t* data);
   uint8_t handleAnonClockReq(const mesh::Identity& sender, uint32_t sender_timestamp, const uint8_t* data);
+#ifdef FK_ANON_FLOOD_DIRECT_FALLBACK
+  //en: FK fork: direct fallback of the login reply (bodies + docs in MyMesh.cpp)
+  //sk: FK fork: direct fallback login odpovede (telá + popis v MyMesh.cpp)
+  void fkAnonFallbackArm(const mesh::Identity& sender, const uint8_t* secret,
+                         const mesh::Packet* packet, const uint8_t* reply, uint8_t reply_len);
+  void fkAnonFallbackLoop();
+#endif
   int handleRequest(ClientInfo* sender, uint32_t sender_timestamp, uint8_t* payload, size_t payload_len);
   mesh::Packet* createSelfAdvert();
 

@@ -37,6 +37,26 @@
   #define SERVER_RESPONSE_DELAY 300
 #endif
 
+//en: FK fork: optional separate delay for FLOOD replies (login PATH+RESPONSE,
+//en: flood fallbacks of REQ responses). Lets the reply wait out the echo storm
+//en: of the request's own flood in multi-hop meshes — at 300 ms the reply
+//en: launches into a channel still busy with re-floods of the request and
+//en: rarely survives the trip back. Direct replies keep SERVER_RESPONSE_DELAY.
+//en: Enable per-env: -D FK_SERVER_FLOOD_RESPONSE_DELAY=<ms>; without the flag
+//en: behaviour is identical to upstream.
+//sk: FK fork: voliteľný samostatný delay pre FLOOD odpovede (login
+//sk: PATH+RESPONSE, flood fallbacky REQ odpovedí). Odpoveď počká, kým dobehne
+//sk: echo búrka floodu samotného requestu vo viac-hopovom meshi — pri 300 ms
+//sk: odpoveď štartuje do kanála ešte obsadeného re-floodmi requestu a spiatočnú
+//sk: cestu zriedka prežije. Direct odpovede ostávajú na SERVER_RESPONSE_DELAY.
+//sk: Zapnutie per-env: -D FK_SERVER_FLOOD_RESPONSE_DELAY=<ms>; bez flagu je
+//sk: správanie identické s upstreamom.
+#ifdef FK_SERVER_FLOOD_RESPONSE_DELAY
+  #define FK_FLOOD_RESP_DELAY   FK_SERVER_FLOOD_RESPONSE_DELAY
+#else
+  #define FK_FLOOD_RESP_DELAY   SERVER_RESPONSE_DELAY
+#endif
+
 #ifndef TXT_ACK_DELAY
   #define TXT_ACK_DELAY 200
 #endif
@@ -603,10 +623,13 @@ void MyMesh::onAnonDataRecv(mesh::Packet *packet, const uint8_t *secret, const m
       // let this sender know path TO here, so they can use sendDirect(), and ALSO encode the response
       mesh::Packet* path = createPathReturn(sender, secret, packet->path, packet->path_len,
                                             PAYLOAD_TYPE_RESPONSE, reply_data, reply_len);
-      if (path) sendFloodReply(path, SERVER_RESPONSE_DELAY, packet->getPathHashSize());
+      if (path) sendFloodReply(path, FK_FLOOD_RESP_DELAY, packet->getPathHashSize());
+#ifdef FK_ANON_FLOOD_DIRECT_FALLBACK
+      fkAnonFallbackArm(sender, secret, packet, reply_data, reply_len);
+#endif
     } else if (reply_path_len < 0) {
       mesh::Packet* reply = createDatagram(PAYLOAD_TYPE_RESPONSE, sender, secret, reply_data, reply_len);
-      if (reply) sendFloodReply(reply, SERVER_RESPONSE_DELAY, packet->getPathHashSize());
+      if (reply) sendFloodReply(reply, FK_FLOOD_RESP_DELAY, packet->getPathHashSize());
     } else {
       mesh::Packet* reply = createDatagram(PAYLOAD_TYPE_RESPONSE, sender, secret, reply_data, reply_len);
       uint8_t path_len = ((reply_path_hash_size - 1) << 6) | (reply_path_len & 63);
@@ -614,6 +637,117 @@ void MyMesh::onAnonDataRecv(mesh::Packet *packet, const uint8_t *secret, const m
     }
   }
 }
+
+#ifdef FK_ANON_FLOOD_DIRECT_FALLBACK
+//en: ── FK fork: direct fallback of the login-handshake reply ────────────────
+//en: The flooded PATH+RESPONSE login reply often dies in busy multi-hop meshes
+//en: (uplink floods arrive, the reply flood rarely survives the trip back).
+//en: After sending the flood reply we park a pending record; if the client's
+//en: reciprocal PATH does not arrive within the window (=> client->out_path in
+//en: the ACL is still OUT_PATH_UNKNOWN), the reply is re-sent DIRECT along the
+//en: REVERSED inbound request path, and that reversed path is stored as the
+//en: provisional out_path. The direct copy gets a fresh random blob
+//en: (reply[8..11]) so its packet hash differs and dedup does not drop it.
+//en: Worst case equals upstream behaviour (flood only, fallback lost too).
+//en: Flag: -D FK_ANON_FLOOD_DIRECT_FALLBACK=<ms window after the flood TX>;
+//en: without the flag none of this code is compiled.
+//sk: ── FK fork: direct fallback odpovede login handshaku ────────────────────
+//sk: Floodovaná PATH+RESPONSE login odpoveď v rušnom viac-hopovom meshi často
+//sk: zomrie (uplink floody dolietajú, spiatočný flood zriedka prežije).
+//sk: Po odoslaní flood odpovede si odparkujeme pending záznam; ak recipročný
+//sk: PATH od klienta nepríde do okna (=> client->out_path v ACL je stále
+//sk: OUT_PATH_UNKNOWN), odpoveď sa pošle znova DIRECT po OTOČENEJ ceste
+//sk: prichádzajúceho requestu a otočená cesta sa zapíše ako provizórna
+//sk: out_path. Direct kópia dostane čerstvý random blob (reply[8..11]), aby
+//sk: mala iný packet hash a dedup ju nezahodil. Worst case = upstream
+//sk: správanie (len flood, aj fallback stratený).
+//sk: Flag: -D FK_ANON_FLOOD_DIRECT_FALLBACK=<ms okno po TX floodu>;
+//sk: bez flagu sa tento kód vôbec nekompiluje.
+#define FK_ANON_PENDING_SLOTS  2
+struct FkAnonPending {
+  unsigned long deadline;              //en: 0 = slot free  //sk: 0 = slot voľný
+  uint8_t  pub_key[PUB_KEY_SIZE];
+  uint8_t  secret[PUB_KEY_SIZE];
+  uint8_t  fwd_path[MAX_PATH_SIZE];    //en: as received (client→repeater) — goes into the payload
+                                       //sk: ako prišla (klient→repeater) — ide do payloadu
+  uint8_t  rev_path[MAX_PATH_SIZE];    //en: reversed (repeater→client) — transport route of the direct copy
+                                       //sk: otočená (repeater→klient) — transportná trasa direct kópie
+  uint8_t  path_len_enc;               //en: encoded ((hash_size-1)<<6 | count)  //sk: enkódované
+  uint8_t  reply[16];                  //en: login reply is 13 B  //sk: login odpoveď má 13 B
+  uint8_t  reply_len;
+};
+static FkAnonPending s_fk_anon[FK_ANON_PENDING_SLOTS];
+
+void MyMesh::fkAnonFallbackArm(const mesh::Identity& sender, const uint8_t* secret,
+                               const mesh::Packet* packet, const uint8_t* reply, uint8_t reply_len) {
+  uint8_t hs     = packet->getPathHashSize();
+  uint8_t cnt    = packet->getPathHashCount();
+  uint8_t nbytes = packet->getPathByteLen();
+  //en: zero-hop: direct copy would use the same single link as the flood — nothing to gain
+  //sk: zero-hop: direct kópia by šla tou istou jedinou linkou ako flood — niet čo získať
+  if (cnt == 0 || nbytes > MAX_PATH_SIZE) return;
+  if (reply_len > sizeof(s_fk_anon[0].reply)) return;
+
+  //en: free slot, else evict the one expiring soonest (oldest handshake)
+  //sk: voľný slot, inak vytlač ten s najskorším deadlinom (najstarší handshake)
+  FkAnonPending* e = &s_fk_anon[0];
+  for (int i = 0; i < FK_ANON_PENDING_SLOTS; i++) {
+    if (s_fk_anon[i].deadline == 0) { e = &s_fk_anon[i]; break; }
+    if (s_fk_anon[i].deadline < e->deadline) e = &s_fk_anon[i];
+  }
+
+  memcpy(e->pub_key, sender.pub_key, PUB_KEY_SIZE);
+  memcpy(e->secret, secret, PUB_KEY_SIZE);
+  memcpy(e->fwd_path, packet->path, nbytes);
+  for (int i = 0; i < cnt; i++) {   //en: reverse hash-sized groups  //sk: otoč po skupinách veľkosti hashu
+    memcpy(&e->rev_path[i * hs], &packet->path[(cnt - 1 - i) * hs], hs);
+  }
+  e->path_len_enc = packet->path_len;
+  memcpy(e->reply, reply, reply_len);
+  e->reply_len = reply_len;
+  //en: window counts from the (possibly FK-delayed) flood TX, not from now
+  //sk: okno sa počíta od (prípadne FK-oneskoreného) TX floodu, nie od teraz
+  e->deadline = futureMillis(FK_FLOOD_RESP_DELAY + FK_ANON_FLOOD_DIRECT_FALLBACK);
+  MESH_DEBUG_PRINTLN("FK anon fallback: armed (%u hops, window %d ms)",
+                     (uint32_t)cnt, (int)(FK_FLOOD_RESP_DELAY + FK_ANON_FLOOD_DIRECT_FALLBACK));
+}
+
+void MyMesh::fkAnonFallbackLoop() {
+  for (int i = 0; i < FK_ANON_PENDING_SLOTS; i++) {
+    FkAnonPending* e = &s_fk_anon[i];
+    if (e->deadline == 0 || !millisHasNowPassed(e->deadline)) continue;
+    e->deadline = 0;
+
+    ClientInfo* c = acl.getClient(e->pub_key, PUB_KEY_SIZE);
+    if (c == NULL) continue;   //en: evicted meanwhile  //sk: medzitým vytlačený z ACL
+    if (c->out_path_len != OUT_PATH_UNKNOWN) {
+      //en: reciprocal PATH arrived — the flood reply made it, nothing to do
+      //sk: recipročný PATH prišiel — flood odpoveď sa doručila, netreba nič
+      MESH_DEBUG_PRINTLN("FK anon fallback: handshake OK, direct resend not needed");
+      continue;
+    }
+
+    //en: fresh random blob (reply_data[8..11] of the login reply) → different
+    //en: packet hash, otherwise nodes that saw the flood copy would drop this one
+    //sk: čerstvý random blob (reply_data[8..11] login odpovede) → iný packet
+    //sk: hash, inak by uzly, ktoré videli flood kópiu, túto zahodili
+    getRNG()->random(&e->reply[8], 4);
+    mesh::Packet* p = createPathReturn(e->pub_key, e->secret, e->fwd_path, e->path_len_enc,
+                                       PAYLOAD_TYPE_RESPONSE, e->reply, e->reply_len);
+    if (p == NULL) continue;
+
+    //en: provisional out_path (repeater→client); confirmed by the client's first direct packet
+    //sk: provizórna out_path (repeater→klient); potvrdí ju prvý direct paket od klienta
+    uint8_t nbytes = ((e->path_len_enc >> 6) + 1) * (e->path_len_enc & 63);
+    memcpy(c->out_path, e->rev_path, nbytes);
+    c->out_path_len = e->path_len_enc;
+
+    sendDirect(p, e->rev_path, e->path_len_enc, 0);
+    MESH_DEBUG_PRINTLN("FK anon fallback: no reciprocal PATH, direct resend (%u hops)",
+                       (uint32_t)(e->path_len_enc & 63));
+  }
+}
+#endif // FK_ANON_FLOOD_DIRECT_FALLBACK
 
 int MyMesh::searchPeersByHash(const uint8_t *hash) {
   int n = 0;
@@ -679,7 +813,7 @@ void MyMesh::onPeerDataRecv(mesh::Packet *packet, uint8_t type, int sender_idx, 
         // let this sender know path TO here, so they can use sendDirect(), and ALSO encode the response
         mesh::Packet *path = createPathReturn(client->id, secret, packet->path, packet->path_len,
                                               PAYLOAD_TYPE_RESPONSE, reply_data, reply_len);
-        if (path) sendFloodReply(path, SERVER_RESPONSE_DELAY, packet->getPathHashSize());
+        if (path) sendFloodReply(path, FK_FLOOD_RESP_DELAY, packet->getPathHashSize());
       } else {
         mesh::Packet *reply =
             createDatagram(PAYLOAD_TYPE_RESPONSE, client->id, secret, reply_data, reply_len);
@@ -687,7 +821,7 @@ void MyMesh::onPeerDataRecv(mesh::Packet *packet, uint8_t type, int sender_idx, 
           if (client->out_path_len != OUT_PATH_UNKNOWN) { // we have an out_path, so send DIRECT
             sendDirect(reply, client->out_path, client->out_path_len, SERVER_RESPONSE_DELAY);
           } else {
-            sendFloodReply(reply, SERVER_RESPONSE_DELAY, packet->getPathHashSize());
+            sendFloodReply(reply, FK_FLOOD_RESP_DELAY, packet->getPathHashSize());
           }
         }
       }
@@ -1299,6 +1433,11 @@ void MyMesh::loop() {
 #endif
 
   mesh::Mesh::loop();
+
+#ifdef FK_ANON_FLOOD_DIRECT_FALLBACK
+  fkAnonFallbackLoop();   //en: direct resend of the login reply when the flood copy got lost
+                          //sk: direct re-send login odpovede, keď sa flood kópia stratila
+#endif
 
   if (next_flood_advert && millisHasNowPassed(next_flood_advert)) {
     mesh::Packet *pkt = createSelfAdvert();
