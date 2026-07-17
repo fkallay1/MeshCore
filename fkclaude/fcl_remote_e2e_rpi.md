@@ -132,6 +132,20 @@ $PENV test_nrf-fota/fota_sender_mcpy.py --old ... --new ... --port COM3 --delay 
 # 4. opakovať missall→--chunks kým 50/50, potom verify+flash cez tmux CLI
 ```
 
+**Výsledok 2026-07-18 (patch 352→355, 7120 B / 50 chunkov):** flood 1. prechod 10/50
+(~20 %), direct kolá ~10–40 % (kolíše), spolu 7 kôl ≈ 25 min → 50/50, `fota verify`
+dry-run OK (SHA sedela). Doručenie potvrdené aj FK diagom: 1× `MAC fail
+(foreign/corrupt)` (poškodený chunk), žiadny DEDUP/pool drop — mystérium §2.2 sa
+pri delay=5 s neprejavilo.
+
+**POZOR — CLI lockup bug (opravený v #356, eb0dffd5):** ak sa do serial CLI dostane
+≥159 znakov bez `\r` (napr. **šípky stlačené v attachnutom tmux mimo copy-mode —
+ESC[A sekvencie idú rovno do picocomu/zariadenia!**), CLI sa zasekne až do rebootu
+(buffer-full vetva dávala `\r` na zlý index). Presne to zožralo náš `fota flash`
+→ #355 sme nakoniec flashli cez serial DFU (§5; 1200 bps touch beží mimo CLI,
+funguje aj so zaseknutým CLI). Skrollovať v tmux len cez copy-mode (`Ctrl+B [`,
+odchod `q`) — tam šípky ostávajú lokálne.
+
 - `.zip` DFU balík vzniká pri každom builde (`.pio/build/<env>/firmware.zip`); pre #352 je
   odložený v `builds/t1000e.fw_352.zip`. Pre iný build bez rebuil-du: adafruit-nrfutil
   `dfu genpkg --dev-type 0x0052 --sd-req 0x0123 --application <hex>` (0x0123 = s140 v7;
@@ -144,11 +158,17 @@ $PENV test_nrf-fota/fota_sender_mcpy.py --old ... --new ... --port COM3 --delay 
 ## 6. Ďalšie kroky
 
 1. ~~SSH setup + tmux/picocom logfile~~ HOTOVO (§4).
-2. ~~Nasadiť #352~~ HOTOVO — DFU cez RPi 2026-07-17 (§5); zariadenie beží #352
-   a prijíma pakety.
-3. Zopakovať flood chunk test → prečítať `[FK]` výpisy (`DEDUP` / `MAC fail` /
-   `no matching channel` / `pool empty`) → pomenovať bránu.
+2. ~~Nasadiť #352~~ → HOTOVO; 2026-07-18 už beží **#355** (FOTA doručenie+verify cez
+   LoRa OK, finálny flash cez DFU kvôli CLI lockup bugu — viď §5b).
+3. ~~Flood chunk test~~ — FK diag bežal: pri delay=5 s žiadne DEDUP/pool dropy, 1×
+   MAC fail; §2.2 mystérium bolo pravdepodobne spôsobené rýchlym posielaním (dedup
+   neskorších kópií) — potvrdiť pri rýchlejšom teste, ak ešte treba.
 4. Otestovať login handshake s FK flagmi (fallback + delay, sú v #348+) na 200 km —
    sledovať `FK anon fallback: armed / direct resend (N hops) / handshake OK`.
-5. Po validácii: FK flagy zapnúť aj pre ostatné FOTA envy + zvážiť ZC mirror; povýšiť
+   V #355 je aj `[FK] PATH RX/TX` dekódovanie (tech doc §7.0a) — uvidno obe strany
+   handshaku.
+5. Nasadiť **#356** (fix CLI lockup, eb0dffd5) — ideálne cez FOTA 355→356
+   (`fotapkg_json/355-356.*.json` je vygenerovaný) a tentokrát dokončiť `fota flash`
+   cez LoRa/CLI ako plný e2e.
+6. Po validácii: FK flagy zapnúť aj pre ostatné FOTA envy + zvážiť ZC mirror; povýšiť
    kontrolný ProMicro (#334 → aktuál).
