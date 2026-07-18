@@ -109,7 +109,13 @@ class Hub:
             self.status_line(f"klient {addr[0]}:{addr[1]} odpojený")
 
     def control(self, cmd, sock):
-        if "PAUSE" in cmd:
+        if "QUIT" in cmd:
+            self.status_line("QUIT — hub končí")
+            self.running = False
+            self.close_serial()
+            import os
+            os._exit(0)
+        elif "PAUSE" in cmd:
             self.paused = True
             self.close_serial()
             self.status_line(f"PAUSED — {self.com} uvoľnený (DFU môže bežať)")
@@ -153,10 +159,16 @@ class Hub:
                     self.status_line(f"{self.com} otvorený")
                     announced = False
                 except serial.SerialException as e:
+                    #en: port absent (reboot/re-enumeration) → fast retry to catch boot
+                    #en: messages from the device CDC TX buffer; busy → slow retry.
+                    #sk: port neexistuje (reboot/re-enumerácia) → rýchly retry, nech
+                    #sk: chytíme boot hlášky z CDC TX buffera zariadenia; obsadený → pomalý.
+                    busy = "denied" in str(e).lower() or "access" in str(e).lower()
                     if not announced:
-                        self.status_line(f"{self.com} nedostupný ({e.__class__.__name__}) — retry každé 2 s")
+                        self.status_line(f"{self.com} {'obsadený iným procesom' if busy else 'zmizol — čakám na návrat'}"
+                                         f" (retry {'1 s' if busy else '0.15 s'})")
                         announced = True
-                    time.sleep(2)
+                    time.sleep(1.0 if busy else 0.15)
                     continue
             try:
                 data = self.ser.read(4096)

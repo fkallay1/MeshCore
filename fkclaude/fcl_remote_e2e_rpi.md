@@ -145,8 +145,10 @@ jeden proces vlastní COM a zdieľa ho cez TCP: spusti `fota_remote_e2e.py hub -
 (alebo priamo `fota_serial_hub.py --device ...`), Fedor sa pripája **PuTTY → Raw →
 localhost:7455** (viac okien naraz OK), orchestrátor ide cez hub automaticky
 (`hub_port` v configu), log s pečiatkami v `logs/<dev>.log`. Prežíva reboot/DFU
-re-enumeráciu (retry). `flash-dfu` si port vypýta cez `~~HUB:PAUSE~~`/`RESUME`
-sám. Kým hub „reconnecting", port drží niečo iné (starý monitor) — zavrieť.
+re-enumeráciu (rýchly retry 0.15 s keď port zmizne → **chytá aj boot hlášky**
+z CDC buffera: [FOTA] init, GPREGRET2, build banner — overené cez `reboot`).
+`flash-dfu` si port vypýta cez `~~HUB:PAUSE~~`/`RESUME` sám; `~~HUB:QUIT~~`
+hub ukončí. Kým hub hlási „obsadený iným procesom", port drží niečo iné — zavrieť.
 
 Nové subcommandy: `build -d a,b|all`, `flash-dfu -d all`, `probe-path -d <dev>`
 (flood sonda → návrh path_to z RAW logu targetu; toleruje starý formát bez /FOTA tagu).
