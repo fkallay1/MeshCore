@@ -297,6 +297,12 @@ def resolve_zip(cfg, dev, args):
     ki = kind_info(cfg, dev)
     if args.rebuild:
         pio_build(ki["env"])
+    if ki.get("pio_zip"):
+        # bez builds/ archívu (napr. companion) — flashuje sa priamo .pio výstup
+        pz = ROOT / ".pio" / "build" / ki["env"] / "firmware.zip"
+        if not pz.exists():
+            sys.exit(f"[CHYBA] {pz} neexistuje — spusti s --rebuild")
+        return None, pz
     if args.build:
         z = build_by_num(ki["prefix"], args.build, ".zip")
         if not z:
@@ -304,12 +310,29 @@ def resolve_zip(cfg, dev, args):
         return args.build, z
     n, z = newest_build(ki["prefix"], ".zip")
     if not z:
-        # fallback: .pio výstup po --rebuild
         pz = ROOT / ".pio" / "build" / ki["env"] / "firmware.zip"
         if pz.exists():
             return None, pz
         sys.exit(f"[CHYBA] žiadny {ki['prefix']}.fw_*.zip v builds/ (skús --rebuild)")
     return n, z
+
+
+def devices_from_arg(cfg, arg, need_env=True):
+    """-d meno | a,b,c | all → zoznam zariadení. 'all' = všetky s vyplneným hostom/portom a známym kind."""
+    if not arg:
+        return [get_device(cfg, cfg["defaults"]["target"])]
+    if arg == "all":
+        out = []
+        for name, d in cfg["devices"].items():
+            if d.get("transport") == "rpi" and not d.get("host"):
+                log(f"[{name}] preskakujem — chýba host")
+                continue
+            if need_env and not cfg.get("kinds", {}).get(d.get("kind")):
+                log(f"[{name}] preskakujem — kind bez env mapy")
+                continue
+            out.append(get_device(cfg, name))
+        return out
+    return [get_device(cfg, n.strip()) for n in arg.split(",")]
 
 
 # ────────────────────────── setup / bootstrap ──────────────────────────
@@ -428,8 +451,42 @@ def cmd_log(cfg, args):
         pass
 
 
+def cmd_build(cfg, args):
+    """build vybraných/všetkých zariadení (len preklad, bez flashu); envy sa deduplikujú."""
+    devs = devices_from_arg(cfg, args.device)
+    envs = []
+    for dev in devs:
+        env = kind_info(cfg, dev)["env"]
+        if env not in envs:
+            envs.append(env)
+    for env in envs:
+        pio_build(env)
+    log(f"buildy hotové: {', '.join(envs)}")
+
+
 def cmd_flash_dfu(cfg, args):
-    dev = get_device(cfg, args.device or cfg["defaults"]["target"])
+    for dev in devices_from_arg(cfg, args.device):
+        flash_one(cfg, dev, args)
+
+
+def flash_one(cfg, dev, args):
+    ki = kind_info(cfg, dev)
+    if ki.get("method") == "pio-upload":
+        # ESP32 (napr. Heltec) — pio upload cez esptool, len lokálny COM
+        if dev["transport"] != "com":
+            sys.exit(f"[CHYBA] {dev['name']}: pio-upload ide len na lokálnom COM porte")
+        if args.rebuild:
+            pio_build(ki["env"])
+        pio = Path(sys.executable).with_name("pio.exe")
+        pio = str(pio) if pio.exists() else "pio"
+        log(f"pio upload {ki['env']} → {dev['port']} ...")
+        r = subprocess.run([pio, "run", "-e", ki["env"], "-t", "upload",
+                            "--upload-port", dev["port"]], cwd=ROOT, capture_output=True,
+                           text=True, encoding="utf-8", errors="replace", timeout=900)
+        if r.returncode != 0:
+            sys.exit(f"[CHYBA] upload zlyhal:\n" + "\n".join((r.stdout or "").splitlines()[-8:]))
+        log(f"{dev['name']}: upload OK")
+        return
     num, zpath = resolve_zip(cfg, dev, args)
     log(f"DFU flash {dev['name']} ← {zpath.name}" + (f" (build #{num})" if num else ""))
     if dev["transport"] == "rpi":
@@ -455,7 +512,11 @@ def cmd_flash_dfu(cfg, args):
             sys.exit(f"[CHYBA] DFU zlyhalo: {(r.stdout or '')[-300:]} {(r.stderr or '')[-200:]}")
         log("DFU: Device programmed")
         time.sleep(6)
-    verify_running_build(cfg, dev, num)
+    #sk: companion/pio_zip FW nemá FOTA CLI → 'fota id' overenie len pre repeatre
+    if dev.get("role") == "sender" or kind_info(cfg, dev).get("pio_zip"):
+        log(f"{dev['name']}: naflashované (bez fota id overenia — nie je repeater FW)")
+    else:
+        verify_running_build(cfg, dev, num)
 
 
 def verify_running_build(cfg, dev, expect_num, tries=12, delay=10):
@@ -489,6 +550,8 @@ def run_sender(cfg, dev, old_bin, new_bin, chunks=None, scope=None, delay=None, 
         args += ["--chunks", chunks]
     if with_header:
         args += ["--with-header"]
+    if dev.get("keyid") is not None:
+        args += ["--keyid", str(dev["keyid"])]  #sk: staré FW (pred v0-prefix) = 1
     log(f"sender: scope={scope}" + (f" chunks={chunks}" if chunks else " (celý patch)"))
     r = subprocess.run(args, cwd=ROOT, capture_output=True, text=True,
                        encoding="utf-8", errors="replace", timeout=3600)
@@ -611,6 +674,53 @@ def do_send(cfg, args):
     sys.exit(f"[CHYBA] po {max_rounds} kolách stále chýbajú chunky — RF podmienky? skús neskôr / iný scope")
 
 
+#sk: staré FW (#263) nemajú /FOTA tag a rssi/snr je pred type — tolerantný vzor
+RE_RAW_FOTA = re.compile(r"type=6\(GRP_DATA(?:/FOTA)?\).*?route=1.*?path\[(\d+)\]=([0-9A-Fa-f]+)")
+
+
+def cmd_probe_path(cfg, args):
+    """Flood sonda (len META/SIG) → z RAW logu targetu vyčítať, kadiaľ flood došiel,
+    a navrhnúť path_to pre scope=direct. Nič neflashuje; session po sebe uprace."""
+    dev = get_device(cfg, args.device or cfg["defaults"]["target"])
+    ki = kind_info(cfg, dev)
+    con = console_for(cfg, dev)
+
+    ident = fota_id(con)
+    if not ident:
+        sys.exit(f"[CHYBA] {dev['name']} neodpovedá na 'fota id'")
+    old_bin = build_by_num(ki["prefix"], ident[0], ".bin")
+    new_num, new_bin = newest_build(ki["prefix"], ".bin")
+    if not old_bin or not new_bin:
+        sys.exit(f"[CHYBA] na sondu treba builds/{ki['prefix']}.fw_{ident[0]}.bin aj nejaký novší .bin")
+
+    start = con._log_size() if isinstance(con, RpiConsole) else None
+    n_probes = args.probes
+    for i in range(n_probes):
+        log(f"sonda {i + 1}/{n_probes} (META+SIG, flood)...")
+        run_sender(cfg, dev, old_bin, new_bin, chunks="H", scope="flood",
+                   delay=args.delay, with_header=True)
+        time.sleep(3)
+
+    text = con._read_from(start) if isinstance(con, RpiConsole) else ""
+    if not isinstance(con, RpiConsole):
+        sys.exit("[CHYBA] probe-path zatiaľ len pre RPi target (lokálny netreba — je na USB)")
+    paths = [(int(m.group(1)), m.group(2).upper()) for m in RE_RAW_FOTA.finditer(text)]
+    con.cli("fota clear", expect=r"-> FOTA cleared", timeout=10)
+    if not paths:
+        sys.exit(f"[CHYBA] sonda na {dev['name']} nedošla (v RAW logu nič) — zopakuj / skús neskôr")
+    paths.sort()
+    uniq = []
+    for hops, p in paths:
+        if p not in [u[1] for u in uniq]:
+            uniq.append((hops, p))
+    log(f"počuté flood cesty ({len(paths)} paketov): " +
+        "; ".join(f"{p} ({h} hopov)" for h, p in uniq[:5]))
+    best = uniq[0]
+    log(f"NÁVRH path_to = {best[1]}  ({best[0]} hopy) — zapíš do fota_devices.json "
+        f"('{dev['name']}'.path_to) ak vyzerá rozumne")
+    return best[1]
+
+
 def cmd_send(cfg, args):
     mon = MonitorCapture(cfg, args.monitor) if args.monitor else None
     if mon:
@@ -665,11 +775,17 @@ def main():
 
     p = sub.add_parser("log", help="živý log zariadenia"); dev_arg(p)
 
-    p = sub.add_parser("flash-dfu", help="serial DFU flash (bez LoRa)"); dev_arg(p)
+    p = sub.add_parser("build", help="len preklad (pio run) vybraných zariadení"); dev_arg(p)
+
+    p = sub.add_parser("flash-dfu", help="priamy flash (serial DFU / pio upload), bez LoRa"); dev_arg(p)
     g = p.add_mutually_exclusive_group()
     g.add_argument("--latest", action="store_true", help="najnovší zip v builds/ (default)")
     g.add_argument("--build", type=int, help="konkrétny build# z builds/")
     p.add_argument("--rebuild", action="store_true", help="najprv pio run -e <env>")
+
+    p = sub.add_parser("probe-path", help="flood sonda → návrh path_to pre direct"); dev_arg(p)
+    p.add_argument("--probes", type=int, default=2, help="počet sond (default 2)")
+    p.add_argument("--delay", type=float)
 
     for name, hlp in (("send", "LoRa FOTA doručenie + miss-loop"),
                       ("e2e", "send → verify → flash cez CLI → overenie build#")):
@@ -685,7 +801,8 @@ def main():
     args = ap.parse_args()
     cfg = load_cfg(args.config)
     {"setup": cmd_setup, "status": cmd_status, "cmd": cmd_cmd, "log": cmd_log,
-     "flash-dfu": cmd_flash_dfu, "send": cmd_send, "e2e": cmd_e2e}[args.op](cfg, args)
+     "build": cmd_build, "flash-dfu": cmd_flash_dfu, "probe-path": cmd_probe_path,
+     "send": cmd_send, "e2e": cmd_e2e}[args.op](cfg, args)
 
 
 if __name__ == "__main__":

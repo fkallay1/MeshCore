@@ -27,14 +27,14 @@
     "xiao-5km": {
       "role": "target",
       "transport": "rpi",
-      "host": null,
-      "_todo": "doplniť IP/hostname RPi pri XIAO repeateri (5 km, 2 hopy) + path_to",
+      "host": "192.168.91.32",
+      "_todo": "path_to zistiť flood sondou (2 hopy)",
       "user": "pi-star",
       "serial": "/dev/ttyACM0",
       "tmux": "rptr",
       "log": "/home/pi-star/rptr.log",
       "kind": "xiao",
-      "path_to": null
+      "path_to": "21"
     }
   },
   "defaults": {
@@ -47,6 +47,8 @@
     "privkey": "test_nrf-fota/test_key.der"
   },
   "kinds": {
+    "_comment": "prefix = archív builds/<prefix>.fw_N.*; pio_zip=true = bez archívu, flashuje sa .pio/build/<env>/firmware.zip; method=pio-upload = ESP32 (pio run -t upload), inak nRF serial DFU",
+    "xiao-companion": { "env": "Xiao_nrf52_companion_radio_usb", "pio_zip": true },
     "t1000e":   { "env": "t1000e_repeater_fota",        "prefix": "t1000e" },
     "promicro": { "env": "ProMicro_repeater_fota",      "prefix": "promicro" },
     "xiao":     { "env": "Xiao_nrf52_repeater_fota",    "prefix": "xiao" },
