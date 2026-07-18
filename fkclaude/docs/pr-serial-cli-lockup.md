@@ -1,4 +1,6 @@
-# PR draft: serial CLI lockup fix (upstream meshcore-dev/MeshCore, base `dev`)
+# PR: serial CLI lockup fix (upstream meshcore-dev/MeshCore, base `dev`)
+
+**ODOSLANÝ 2026-07-18: https://github.com/meshcore-dev/MeshCore/pull/2978**
 
 Branch: `fkallay1:fix/serial-cli-buffer-lockup` (be236e13, based on upstream/dev 795989b9)
 
