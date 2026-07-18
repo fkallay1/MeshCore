@@ -27,7 +27,10 @@ rieši config. Po flashi repeatra skript sám overí build# cez `fota id`.
 ## Pravidlá a pasce
 
 - **COM port musí byť voľný** (zavri Serial Monitor/putty). Na RPi skript sám
-  zastaví picocom session a po flashi ju obnoví.
+  zastaví picocom session a po flashi ju obnoví. Lokálne konflikty rieši **serial
+  hub** (`hub -d <dev>`, `fota_serial_hub.py`): hub drží port trvalo, orchestrátor
+  aj Fedor (PuTTY Raw `localhost:<hub_port>`) idú cez neho a DFU si port vypýta
+  automaticky (PAUSE/RESUME). Ak hub beží, nič ďalšie neriešiš.
 - **Vzdialený DFU len pri stabilnom napájaní** — prerušené DFU nechá zariadenie
   v bootloaderi (dá sa zopakovať, nie je to brick, ale bez FW nerepeatuje).
 - **`--rebuild` na FOTA envoch bumpne build#** (auto-hook navyše vygeneruje fotapkg

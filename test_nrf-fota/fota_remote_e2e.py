@@ -23,7 +23,7 @@ Príklady:
 hh:mm:ss.mmm časom PC; na RPi drží setup tmux okno 'ts', ktoré zrkadlí picocom log
 do *.ts.log s časom RPi (NTP) — odoslanie vs. doručenie sa dá porovnávať naprieč stanovišťami.
 """
-import argparse, hashlib, json, re, subprocess, sys, threading, time
+import argparse, hashlib, json, re, socket, subprocess, sys, threading, time
 from datetime import datetime
 from pathlib import Path
 
@@ -227,10 +227,70 @@ class ComConsole(Console):
             return False
 
 
+class HubConsole(Console):
+    """COM zariadenie za fota_serial_hub.py — hub vlastní port, my sa pripájame TCP.
+    Hub loguje sám (logs/<meno>.log), takže tu nič nestampujeme."""
+    def __init__(self, dev):
+        self.dev = dev
+        self.addr = ("127.0.0.1", int(dev["hub_port"]))
+        self.logpath = LOGS / f"{dev['name']}.log"
+
+    def _connect(self, timeout=3.0):
+        s = socket.create_connection(self.addr, timeout=timeout)
+        s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        s.settimeout(0.4)
+        return s
+
+    def alive(self):
+        try:
+            self._connect(1.0).close()
+            return True
+        except OSError:
+            return False
+
+    def _collect(self, s, seconds, stop_rex=None):
+        buf = ""
+        deadline = time.time() + seconds
+        while time.time() < deadline:
+            try:
+                chunk = s.recv(4096)
+            except socket.timeout:
+                continue
+            if not chunk:
+                break
+            buf += chunk.decode("utf-8", errors="replace")
+            if stop_rex and stop_rex.search(buf):
+                break
+        return buf
+
+    def cli(self, cmd, expect=r"^\s*->", timeout=8.0):
+        with self._connect() as s:
+            self._collect(s, 0.3)  #sk: zahoď rozbehnutý výstup (heartbeaty)
+            s.sendall((cmd + "\r").encode())
+            return self._collect(s, timeout, re.compile(expect, re.M))
+
+    def wait(self, pattern, timeout=60.0, poll=None):
+        rex = re.compile(pattern, re.M)
+        with self._connect() as s:
+            buf = self._collect(s, timeout, rex)
+        return rex.search(buf)
+
+    def control(self, word):
+        with self._connect() as s:
+            s.sendall(f"~~HUB:{word}~~\n".encode())
+            time.sleep(0.3)
+
+
 def console_for(cfg, dev):
     if dev["transport"] == "rpi":
         return RpiConsole(dev, ssh_key=cfg.get("defaults", {}).get("ssh_key"))
     if dev["transport"] == "com":
+        #sk: ak beží serial hub, choď cez neho (port drží on); inak priamo na COM
+        if dev.get("hub_port"):
+            hc = HubConsole(dev)
+            if hc.alive():
+                return hc
+            log(f"[{dev['name']}] hub na :{dev['hub_port']} nebeží — idem priamo na {dev['port']}")
         return ComConsole(dev)
     sys.exit(f"[CHYBA] neznámy transport '{dev['transport']}' zariadenia '{dev['name']}'")
 
@@ -414,6 +474,23 @@ def cmd_setup(cfg, args):
 
 # ────────────────────────── operácie ──────────────────────────
 
+def cmd_hub(cfg, args):
+    """Spustí fota_serial_hub.py pre zariadenie v novom okne (beží ďalej sám)."""
+    dev = get_device(cfg, args.device or cfg["defaults"]["target"])
+    if dev.get("transport") != "com" or not dev.get("hub_port"):
+        sys.exit(f"[CHYBA] '{dev['name']}' nie je com zariadenie s hub_port v configu")
+    if HubConsole(dev).alive():
+        log(f"hub pre {dev['name']} už beží na localhost:{dev['hub_port']}")
+        return
+    flags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
+    subprocess.Popen([sys.executable, str(HERE / "fota_serial_hub.py"), "--device", dev["name"]],
+                     cwd=ROOT, creationflags=flags)
+    time.sleep(2)
+    ok = HubConsole(dev).alive()
+    log(f"hub {'beží' if ok else 'sa nerozbehol?!'} — pripojenie: PuTTY Raw localhost:{dev['hub_port']}"
+        f" | log: test_nrf-fota/logs/{dev['name']}.log")
+
+
 def cmd_status(cfg, args):
     dev = get_device(cfg, args.device or cfg["defaults"]["target"])
     con = console_for(cfg, dev)
@@ -505,9 +582,23 @@ def flash_one(cfg, dev, args):
     else:
         nrfutil = Path(sys.executable).with_name("adafruit-nrfutil.exe")
         nrfutil = str(nrfutil) if nrfutil.exists() else "adafruit-nrfutil"
-        r = subprocess.run([nrfutil, "dfu", "serial", "--package", str(zpath),
-                            "-p", dev["port"], "-b", "115200", "--singlebank", "--touch", "1200"],
-                           capture_output=True, text=True, timeout=420)
+        #sk: ak port drží serial hub, vypýtaj si ho (PAUSE) a po DFU vráť (RESUME)
+        hub = HubConsole(dev) if dev.get("hub_port") else None
+        hub_paused = False
+        if hub and hub.alive():
+            hub.control("PAUSE")
+            hub_paused = True
+            time.sleep(1.5)
+            log("hub PAUSED — port uvoľnený na DFU")
+        try:
+            r = subprocess.run([nrfutil, "dfu", "serial", "--package", str(zpath),
+                                "-p", dev["port"], "-b", "115200", "--singlebank", "--touch", "1200"],
+                               capture_output=True, text=True, timeout=420)
+        finally:
+            if hub_paused:
+                time.sleep(3)
+                hub.control("RESUME")
+                log("hub RESUME")
         if "Device programmed" not in (r.stdout or ""):
             sys.exit(f"[CHYBA] DFU zlyhalo: {(r.stdout or '')[-300:]} {(r.stderr or '')[-200:]}")
         log("DFU: Device programmed")
@@ -571,6 +662,13 @@ class MonitorCapture:
         self.rpi_start = None
 
     def __enter__(self):
+        if self.dev["transport"] == "com" and self.dev.get("hub_port") and HubConsole(self.dev).alive():
+            #sk: hub loguje sám do logs/<meno>.log — stačí si zapamätať offset
+            self.mark = LOGS / f"{self.dev['name']}.log"
+            self.start_size = self.mark.stat().st_size if self.mark.exists() else 0
+            self.thread = None
+            log(f"monitor: {self.dev['name']} (cez hub log)")
+            return self
         if self.dev["transport"] == "com":
             con = ComConsole(self.dev)
             def pump():
@@ -594,8 +692,9 @@ class MonitorCapture:
     def __exit__(self, *exc):
         counts = {}
         if self.dev["transport"] == "com":
-            self.stop_evt.set()
-            self.thread.join(timeout=3)
+            if self.thread:
+                self.stop_evt.set()
+                self.thread.join(timeout=3)
             text = ""
             if self.mark.exists():
                 with self.mark.open(encoding="utf-8", errors="replace") as f:
@@ -775,6 +874,8 @@ def main():
 
     p = sub.add_parser("log", help="živý log zariadenia"); dev_arg(p)
 
+    p = sub.add_parser("hub", help="spusti serial hub pre COM zariadenie (nové okno)"); dev_arg(p)
+
     p = sub.add_parser("build", help="len preklad (pio run) vybraných zariadení"); dev_arg(p)
 
     p = sub.add_parser("flash-dfu", help="priamy flash (serial DFU / pio upload), bez LoRa"); dev_arg(p)
@@ -801,8 +902,8 @@ def main():
     args = ap.parse_args()
     cfg = load_cfg(args.config)
     {"setup": cmd_setup, "status": cmd_status, "cmd": cmd_cmd, "log": cmd_log,
-     "build": cmd_build, "flash-dfu": cmd_flash_dfu, "probe-path": cmd_probe_path,
-     "send": cmd_send, "e2e": cmd_e2e}[args.op](cfg, args)
+     "hub": cmd_hub, "build": cmd_build, "flash-dfu": cmd_flash_dfu,
+     "probe-path": cmd_probe_path, "send": cmd_send, "e2e": cmd_e2e}[args.op](cfg, args)
 
 
 if __name__ == "__main__":

@@ -140,6 +140,14 @@ direct doručenie **5/5 na prvý prechod**. Pôvodný #263 povýšený DFU (`fla
 lebo patch 263→361 vyžadoval extraSafe 24 KB → starý 4 KB flasher v #263 by ho odmietol
 (0xE5) a 4 KB-kompat variant mal 455 chunkov (~hodina).
 
+**Serial hub pre lokálne COM porty (Windows „tmux") — `test_nrf-fota/fota_serial_hub.py`:**
+jeden proces vlastní COM a zdieľa ho cez TCP: spusti `fota_remote_e2e.py hub -d promicro-local`
+(alebo priamo `fota_serial_hub.py --device ...`), Fedor sa pripája **PuTTY → Raw →
+localhost:7455** (viac okien naraz OK), orchestrátor ide cez hub automaticky
+(`hub_port` v configu), log s pečiatkami v `logs/<dev>.log`. Prežíva reboot/DFU
+re-enumeráciu (retry). `flash-dfu` si port vypýta cez `~~HUB:PAUSE~~`/`RESUME`
+sám. Kým hub „reconnecting", port drží niečo iné (starý monitor) — zavrieť.
+
 Nové subcommandy: `build -d a,b|all`, `flash-dfu -d all`, `probe-path -d <dev>`
 (flood sonda → návrh path_to z RAW logu targetu; toleruje starý formát bez /FOTA tagu).
 Skill `/build-flash` = priamy build+flash bez FOTA. POZOR: upstream merge rozbil

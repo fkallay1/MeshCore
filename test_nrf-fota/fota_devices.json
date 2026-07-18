@@ -11,6 +11,7 @@
       "role": "monitor",
       "transport": "com",
       "port": "COM5",
+      "hub_port": 7455,
       "kind": "promicro"
     },
     "t1000e-200km": {
