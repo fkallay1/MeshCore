@@ -130,7 +130,21 @@ $PENV test_nrf-fota/fota_remote_e2e.py e2e --rebuild --monitor promicro-local   
 
 Časové pečiatky: lokálne logy `test_nrf-fota/logs/<dev>.log` (čas PC),
 na RPi `rptr.log.ts.log` (čas RPi/NTP, tmux okno `ts`) — porovnávanie TX↔RX naprieč
-stanovišťami. XIAO-5km target má v configu `_todo`: doplniť host RPi + path_to.
+stanovišťami.
+
+**Druhé stanovište `xiao-5km` (192.168.91.32, host `wpsd`) — NASTAVENÉ 2026-07-18:**
+kľúč nasadený, venv je symlink `~/nrfvenv → ~/meshcore-cli/env` (premenovanie by
+rozbilo shebangy), tmux+picocom+ts cez `setup`. **E2E PASS #361→#362 za 163 s** —
+`probe-path` našiel cestu (**1 hop cez `21`**, flood sondy počuli aj 2132/2162/2173/6321),
+direct doručenie **5/5 na prvý prechod**. Pôvodný #263 povýšený DFU (`flash-dfu --latest`),
+lebo patch 263→361 vyžadoval extraSafe 24 KB → starý 4 KB flasher v #263 by ho odmietol
+(0xE5) a 4 KB-kompat variant mal 455 chunkov (~hodina).
+
+Nové subcommandy: `build -d a,b|all`, `flash-dfu -d all`, `probe-path -d <dev>`
+(flood sonda → návrh path_to z RAW logu targetu; toleruje starý formát bez /FOTA tagu).
+Skill `/build-flash` = priamy build+flash bez FOTA. POZOR: upstream merge rozbil
+`Xiao_nrf52_repeater*` envy (repeater_btn PR nepridal xiao variantu `user_btn`) —
+opravené u nás 6614aea5, kandidát na ďalší upstream PR.
 
 ## 5b. FOTA cez LoRa na 200 km — pracovný postup (2026-07-18, dnes robí orchestrátor)
 
