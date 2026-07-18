@@ -113,7 +113,26 @@ ssh rpi "sleep 45; grep AALIVE ~/rptr.log | tail -2"
 Pozn.: `ver` vracia stále „v1.16.0 (Build: 6 Jun 2026)" — dátum sa nemení, build#
 vidno len v `AALIVE` heartbeate (reboot poznať podľa resetu `rawrx` počítadla).
 
-## 5b. FOTA cez LoRa na 200 km — pracovný postup (2026-07-18)
+## 5a. AUTOMATIZOVANÉ: orchestrátor `fota_remote_e2e.py` (2026-07-18)
+
+Celý postup z §5/§5b je zabalený do **`test_nrf-fota/fota_remote_e2e.py`** + skill
+**`/remote-e2e`** (`.claude/skills/remote-e2e/SKILL.md`). Zariadenia/role/cesty:
+`test_nrf-fota/fota_devices.json` (target/sender/monitor; transport com/rpi; kind →
+build env). Beží aj bez Claude:
+
+```bash
+PENV="D:/FkDev/.platformio/penv/Scripts/python.exe"
+$PENV test_nrf-fota/fota_remote_e2e.py setup                      # bootstrap všetkého
+$PENV test_nrf-fota/fota_remote_e2e.py status                     # build#, sha, fota stav
+$PENV test_nrf-fota/fota_remote_e2e.py flash-dfu --latest         # DFU flash cez RPi/COM
+$PENV test_nrf-fota/fota_remote_e2e.py e2e --rebuild --monitor promicro-local   # plný test
+```
+
+Časové pečiatky: lokálne logy `test_nrf-fota/logs/<dev>.log` (čas PC),
+na RPi `rptr.log.ts.log` (čas RPi/NTP, tmux okno `ts`) — porovnávanie TX↔RX naprieč
+stanovišťami. XIAO-5km target má v configu `_todo`: doplniť host RPi + path_to.
+
+## 5b. FOTA cez LoRa na 200 km — pracovný postup (2026-07-18, dnes robí orchestrátor)
 
 Vysielač = companion na **COM3** tohto PC (`fota_sender_mcpy.py`). Živá sieť →
 **`--delay 5`** (1 paket / 5 s, nikdy rýchlejšie!). Známe cesty: tam=`632139779C`,

@@ -1,0 +1,57 @@
+{
+  "_comment": "Zariadenia pre fota_remote_e2e.py. transport: 'com' (lokálny COM port) alebo 'rpi' (SSH+tmux+picocom). kind určuje build env a prefix archívu v builds/. path_to = direct LoRa cesta z companiona k zariadeniu (hex 1B hashe hopov).",
+  "devices": {
+    "companion": {
+      "role": "sender",
+      "transport": "com",
+      "port": "COM3",
+      "kind": "xiao-companion"
+    },
+    "promicro-local": {
+      "role": "monitor",
+      "transport": "com",
+      "port": "COM5",
+      "kind": "promicro"
+    },
+    "t1000e-200km": {
+      "role": "target",
+      "transport": "rpi",
+      "host": "10.21.0.103",
+      "user": "pi-star",
+      "serial": "/dev/ttyACM0",
+      "tmux": "rptr",
+      "log": "/home/pi-star/rptr.log",
+      "kind": "t1000e",
+      "path_to": "632139779C"
+    },
+    "xiao-5km": {
+      "role": "target",
+      "transport": "rpi",
+      "host": null,
+      "_todo": "doplniť IP/hostname RPi pri XIAO repeateri (5 km, 2 hopy) + path_to",
+      "user": "pi-star",
+      "serial": "/dev/ttyACM0",
+      "tmux": "rptr",
+      "log": "/home/pi-star/rptr.log",
+      "kind": "xiao",
+      "path_to": null
+    }
+  },
+  "defaults": {
+    "ssh_key": "D:\\FkDev\\cli_home\\.ssh\\id_ed25519",
+    "target": "t1000e-200km",
+    "sender": "companion",
+    "delay": 5.0,
+    "scope": "direct",
+    "max_rounds": 12,
+    "privkey": "test_nrf-fota/test_key.der"
+  },
+  "kinds": {
+    "t1000e":   { "env": "t1000e_repeater_fota",        "prefix": "t1000e" },
+    "promicro": { "env": "ProMicro_repeater_fota",      "prefix": "promicro" },
+    "xiao":     { "env": "Xiao_nrf52_repeater_fota",    "prefix": "xiao" },
+    "sensecap": { "env": "SenseCap_Solar_repeater_fota","prefix": "sensecap" },
+    "rak3401":  { "env": "RAK_3401_repeater_fota",      "prefix": "rak3401" },
+    "rak4631":  { "env": "RAK_4631_repeater_fota",      "prefix": "rak4631" }
+  }
+}
