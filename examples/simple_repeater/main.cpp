@@ -37,7 +37,20 @@ static unsigned long userBtnDownAt = 0;
 
 void setup() {
   Serial.begin(115200);
+#ifdef FK_SERIAL_WAIT_DTR
+  //en: wait for the host to actually open the port (DTR), instead of a blind
+  //en: delay — boot messages then reliably reach a terminal that races to
+  //en: (re)connect right after a reboot (e.g. the fota_serial_hub.py fast-reconnect
+  //en: loop). Falls through after FK_SERIAL_WAIT_DTR ms if nothing is listening.
+  //sk: počkaj, kým si host naozaj otvorí port (DTR), namiesto slepého delay —
+  //sk: boot hlášky sa tak spoľahlivo dostanú aj k terminálu, ktorý sa pripája
+  //sk: pretekom hneď po reboote (napr. fota_serial_hub.py rýchly reconnect).
+  //sk: Po FK_SERIAL_WAIT_DTR ms bez poslucháča pokračuje ďalej.
+  uint32_t serial_wait_t0 = millis();
+  while (!Serial && (millis() - serial_wait_t0) < FK_SERIAL_WAIT_DTR) delay(10);
+#else
   delay(1000);
+#endif
 
   board.begin();
 
@@ -127,7 +140,12 @@ void loop() {
   int len = strlen(command);
   while (Serial.available() && len < sizeof(command)-1) {
     char c = Serial.read();
-    if (c != '\n') {
+    if (c == '\b' || c == 0x7F) {  // accept both common terminal backspace encodings
+      if (len > 0) {
+        command[--len] = 0;
+        Serial.print("\b \b");  // erase the character in terminals without local echo
+      }
+    } else if (c != '\n') {
       command[len++] = c;
       command[len] = 0;
       Serial.print(c);

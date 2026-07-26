@@ -148,38 +148,75 @@ class Hub:
                 self.ser = None
 
     def serial_loop(self):
+        #en: this thread is the ONLY writer of live data — if it dies (any
+        #en: uncaught exception, e.g. a transient Windows file-sharing conflict
+        #en: on the log file), the hub looks alive (TCP still accepts clients)
+        #en: but silently stops reading/logging forever. Wrap the whole body so
+        #en: a single bad iteration can't kill the loop; log the exception and
+        #en: keep going instead of dying invisibly.
+        #sk: toto vlákno je JEDINÝ zapisovateľ živých dát — ak zomrie (čokoľvek
+        #sk: nezachytené, napr. prechodný Windows file-sharing konflikt na
+        #sk: logovacom súbore), hub vyzerá živo (TCP stále prijíma klientov),
+        #sk: ale ticho navždy prestane čítať/logovať. Obaľ celé telo, nech jedna
+        #sk: zlá iterácia slučku nezabije; výnimku zaloguj a pokračuj ďalej.
         announced = False
         while self.running:
-            if self.paused:
-                time.sleep(0.5)
-                continue
-            if self.ser is None:
-                try:
-                    self.ser = serial.Serial(self.com, self.baud, timeout=0.3)
-                    self.status_line(f"{self.com} otvorený")
-                    announced = False
-                except serial.SerialException as e:
-                    #en: port absent (reboot/re-enumeration) → fast retry to catch boot
-                    #en: messages from the device CDC TX buffer; busy → slow retry.
-                    #sk: port neexistuje (reboot/re-enumerácia) → rýchly retry, nech
-                    #sk: chytíme boot hlášky z CDC TX buffera zariadenia; obsadený → pomalý.
-                    busy = "denied" in str(e).lower() or "access" in str(e).lower()
-                    if not announced:
-                        self.status_line(f"{self.com} {'obsadený iným procesom' if busy else 'zmizol — čakám na návrat'}"
-                                         f" (retry {'1 s' if busy else '0.15 s'})")
-                        announced = True
-                    time.sleep(1.0 if busy else 0.15)
-                    continue
             try:
-                data = self.ser.read(4096)
-            except serial.SerialException:
-                self.close_serial()
-                self.status_line(f"{self.com} odpojený (reboot?) — čakám na návrat")
-                time.sleep(2)
-                continue
-            if data:
-                self.broadcast(data)
-                self.log_text(data.decode("utf-8", errors="replace"))
+                if self.paused:
+                    time.sleep(0.5)
+                    continue
+                if self.ser is None:
+                    try:
+                        self.ser = serial.Serial(self.com, self.baud, timeout=0.3)
+                        self.status_line(f"{self.com} otvorený")
+                        announced = False
+                    except serial.SerialException as e:
+                        #en: port absent (reboot/re-enumeration) → fast retry to catch boot
+                        #en: messages from the device CDC TX buffer; busy → slow retry.
+                        #sk: port neexistuje (reboot/re-enumerácia) → rýchly retry, nech
+                        #sk: chytíme boot hlášky z CDC TX buffera zariadenia; obsadený → pomalý.
+                        busy = "denied" in str(e).lower() or "access" in str(e).lower()
+                        if not announced:
+                            self.status_line(f"{self.com} {'obsadený iným procesom' if busy else 'zmizol — čakám na návrat'}"
+                                             f" (retry {'1 s' if busy else '0.15 s'})")
+                            announced = True
+                        time.sleep(1.0 if busy else 0.15)
+                        continue
+                try:
+                    data = self.ser.read(4096)
+                except serial.SerialException:
+                    self.close_serial()
+                    self.status_line(f"{self.com} odpojený (reboot?) — čakám na návrat")
+                    time.sleep(2)
+                    continue
+                if data:
+                    self.broadcast(data)
+                    try:
+                        self.log_text(data.decode("utf-8", errors="replace"))
+                    except OSError as e:
+                        #en: log write failed (e.g. file locked by a concurrent reader) —
+                        #en: drop this chunk from the log, but keep the loop (and broadcast) alive.
+                        #sk: zápis do logu zlyhal (napr. súbor uzamknutý iným čítačom) —
+                        #sk: tento kúsok logu zahoď, ale slučku (aj broadcast) drž nažive.
+                        print(f"[HUB {now_ts()}] WARN log zápis zlyhal: {e}", flush=True)
+            except Exception as e:
+                #en: last-resort catch-all — never let this thread die silently.
+                #sk: posledná poistka — toto vlákno nesmie ticho zomrieť.
+                print(f"[HUB {now_ts()}] CHYBA v serial_loop: {e!r} — pokračujem", flush=True)
+                time.sleep(0.5)
+
+    def _serial_loop_supervisor(self):
+        #en: belt-and-suspenders — serial_loop() already catches everything, but
+        #en: if it somehow still returns/dies (e.g. a fatal interpreter error),
+        #en: restart it rather than leaving the hub silently deaf forever.
+        #sk: pre istotu — serial_loop() už chytá všetko, ale keby aj tak niekedy
+        #sk: skončil (napr. fatálna chyba interpretera), reštartuj ho namiesto
+        #sk: toho, aby hub ostal navždy ticho hluchý.
+        while self.running:
+            self.serial_loop()
+            if self.running:
+                print(f"[HUB {now_ts()}] serial_loop skončil neočakávane — reštart o 1 s", flush=True)
+                time.sleep(1)
 
     def serve(self):
         LOGS.mkdir(exist_ok=True)
@@ -187,7 +224,7 @@ class Hub:
         srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         srv.bind(("127.0.0.1", self.listen_port))
         srv.listen(8)
-        threading.Thread(target=self.serial_loop, daemon=True).start()
+        threading.Thread(target=self._serial_loop_supervisor, daemon=True).start()
         self.status_line(f"hub beží: {self.com} ↔ localhost:{self.listen_port}, log={self.logpath.name}")
         try:
             while self.running:
