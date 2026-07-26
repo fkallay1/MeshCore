@@ -249,6 +249,23 @@ ukazuje len šifrovaný obal, tieto výpisy pomenúvajú obsah a drop brány (di
   odchádzajúceho PATH (jediné hrdlo `createPathReturn`; extra_t=255 = bez extra,
   len anti-dedup blob). Páruj s nasledujúcim `TX RAW type=8` riadkom.
 
+FK_DEBUG ďalej dekóduje aj **LOGIN/ANON_REQ handshake** (`src/Mesh.cpp` ANON_REQ
+vetva + `examples/simple_repeater/MyMesh.cpp` `handleLoginReq`/`fkAnonFallback*`)
+— vidno OBE strany handshaku vrátane fallbacku z §7.0b:
+
+- `[FK] ANON_REQ XX->YY: MAC fail (corrupt?)` / `DEDUP (seen)` — dorazil, ale
+  dešifrovanie zlyhalo / neskoršia kópia floodu zahodená.
+- `[FK] LOGIN src=XX: invalid password` / `replay ts=.. last=..` — zlé heslo /
+  replay attack (ts ≤ posledný známy).
+- `[FK] LOGIN src=XX: accepted flood|direct, out_path=known|unknown`.
+- `[FK] LOGIN fallback src=XX: not armed (hops=.. bytes=..)` / `reply too long (..)`
+  — zero-hop (niet čo získať) alebo odpoveď nezmestná do fallback bufferu.
+- `[FK] LOGIN fallback src=XX: armed hops=.. fire_in=.. ms` — fallback naparkovaný.
+- `[FK] LOGIN fallback src=XX: cancelled (ACL entry missing | reciprocal PATH received)`
+  — buď klienta medzitým vytlačilo z ACL, alebo recipročný PATH prišiel (flood OK).
+- `[FK] LOGIN fallback src=XX: DIRECT resend hops=.. route=AABBCC` — recipročný
+  PATH neprišiel včas, odpoveď sa poslala direct po otočenej ceste.
+
 ### 7.0b FK fork flagy pre login handshake v rušnom meshi (2026-07-17, 0d9192db)
 
 Problém (200 km trasa): uplink floody dolietajú, ale **flood odpoveď repeatera

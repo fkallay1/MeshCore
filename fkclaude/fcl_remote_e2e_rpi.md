@@ -150,6 +150,24 @@ z CDC buffera: [FOTA] init, GPREGRET2, build banner — overené cez `reboot`).
 `flash-dfu` si port vypýta cez `~~HUB:PAUSE~~`/`RESUME` sám; `~~HUB:QUIT~~`
 hub ukončí. Kým hub hlási „obsadený iným procesom", port drží niečo iné — zavrieť.
 
+**Robustnosť hubu (2026-07-26):** `serial_loop()` teraz obalené try/except (aj
+samotný zápis logu) + supervisor reštart — bez toho vedela nezachytená výnimka
+(napr. Windows file-sharing konflikt pri súbežnom čítaní logu iným nástrojom)
+**ticho zabiť čítacie vlákno navždy**: hub ostal na TCP „živý" (klientom
+odpovedal), ale prestal čítať/logovať serial → nekonzistentné `fota id` odpovede.
+Toto spôsobilo zmätok pri prvom teste FK_SERIAL_WAIT_DTR nižšie — po reštarte
+hubu (zabi proces na porte 7455, spusti znova) sa všetko ukázalo v poriadku.
+
+**FK_SERIAL_WAIT_DTR (build ≥ #382, `examples/simple_repeater/main.cpp` +
+6 FOTA envov, 2s):** `setup()` namiesto slepého `delay(1000)` čaká (max 2 s), kým
+host naozaj otvorí port (Adafruit core: `!Serial` = DTR nízke) — inšpirované
+ZephCore (`zephcore_usbd_wait_dtr`, event-driven; tu jednoduchší polling).
+V kombinácii s hubovým rýchlym reconnectom (0.15 s) sa boot log teraz **vždy**
+zachytí celý: overené na HW (ProMicro #382) — port zmizol, o 2.0 s sa znova
+otvoril, a `Repeater ID`/`[FOTA] init`/`GPREGRET2`/flasher trace/prvý `AALIVE`
+prišli bez medzery. Predtým (bez DTR čakania) boot hlášky často unikli, lebo
+zariadenie začalo vypisovať skôr, než sa terminál/hub stihol znova pripojiť.
+
 Nové subcommandy: `build -d a,b|all`, `flash-dfu -d all`, `probe-path -d <dev>`
 (flood sonda → návrh path_to z RAW logu targetu; toleruje starý formát bez /FOTA tagu).
 Skill `/build-flash` = priamy build+flash bez FOTA. POZOR: upstream merge rozbil
