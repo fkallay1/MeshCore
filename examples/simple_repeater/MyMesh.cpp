@@ -127,12 +127,20 @@ uint8_t MyMesh::handleLoginReq(const mesh::Identity& sender, const uint8_t* secr
 #if MESH_DEBUG
       MESH_DEBUG_PRINTLN("Invalid password: %s", data);
 #endif
+#ifdef FK_DEBUG
+      Serial.printf("[FK] LOGIN src=%02X: invalid password\r\n", (unsigned)sender.pub_key[0]);
+#endif
       return 0;
     }
 
     client = acl.putClient(sender, 0);  // add to contacts (if not already known)
     if (sender_timestamp <= client->last_timestamp) {
       MESH_DEBUG_PRINTLN("Possible login replay attack!");
+#ifdef FK_DEBUG
+      Serial.printf("[FK] LOGIN src=%02X: replay ts=%lu last=%lu\r\n",
+                    (unsigned)sender.pub_key[0], (unsigned long)sender_timestamp,
+                    (unsigned long)client->last_timestamp);
+#endif
       return 0;  // FATAL: client table is full -OR- replay attack
     }
 
@@ -151,6 +159,11 @@ uint8_t MyMesh::handleLoginReq(const mesh::Identity& sender, const uint8_t* secr
   if (is_flood) {
     client->out_path_len = OUT_PATH_UNKNOWN;  // need to rediscover out_path
   }
+#ifdef FK_DEBUG
+  Serial.printf("[FK] LOGIN src=%02X: accepted %s, out_path=%s\r\n",
+                (unsigned)sender.pub_key[0], is_flood ? "flood" : "direct",
+                client->out_path_len == OUT_PATH_UNKNOWN ? "unknown" : "known");
+#endif
 
   uint32_t now = getRTCClock()->getCurrentTimeUnique();
   memcpy(reply_data, &now, 4);   // response packets always prefixed with timestamp
@@ -685,8 +698,20 @@ void MyMesh::fkAnonFallbackArm(const mesh::Identity& sender, const uint8_t* secr
   uint8_t nbytes = packet->getPathByteLen();
   //en: zero-hop: direct copy would use the same single link as the flood — nothing to gain
   //sk: zero-hop: direct kópia by šla tou istou jedinou linkou ako flood — niet čo získať
-  if (cnt == 0 || nbytes > MAX_PATH_SIZE) return;
-  if (reply_len > sizeof(s_fk_anon[0].reply)) return;
+  if (cnt == 0 || nbytes > MAX_PATH_SIZE) {
+#ifdef FK_DEBUG
+    Serial.printf("[FK] LOGIN fallback src=%02X: not armed (hops=%u bytes=%u)\r\n",
+                  (unsigned)sender.pub_key[0], (unsigned)cnt, (unsigned)nbytes);
+#endif
+    return;
+  }
+  if (reply_len > sizeof(s_fk_anon[0].reply)) {
+#ifdef FK_DEBUG
+    Serial.printf("[FK] LOGIN fallback src=%02X: reply too long (%u)\r\n",
+                  (unsigned)sender.pub_key[0], (unsigned)reply_len);
+#endif
+    return;
+  }
 
   //en: free slot, else evict the one expiring soonest (oldest handshake)
   //sk: voľný slot, inak vytlač ten s najskorším deadlinom (najstarší handshake)
@@ -708,8 +733,11 @@ void MyMesh::fkAnonFallbackArm(const mesh::Identity& sender, const uint8_t* secr
   //en: window counts from the (possibly FK-delayed) flood TX, not from now
   //sk: okno sa počíta od (prípadne FK-oneskoreného) TX floodu, nie od teraz
   e->deadline = futureMillis(FK_FLOOD_RESP_DELAY + FK_ANON_FLOOD_DIRECT_FALLBACK);
-  MESH_DEBUG_PRINTLN("FK anon fallback: armed (%u hops, window %d ms)",
-                     (uint32_t)cnt, (int)(FK_FLOOD_RESP_DELAY + FK_ANON_FLOOD_DIRECT_FALLBACK));
+#ifdef FK_DEBUG
+  Serial.printf("[FK] LOGIN fallback src=%02X: armed hops=%u fire_in=%d ms\r\n",
+                (unsigned)sender.pub_key[0], (unsigned)cnt,
+                (int)(FK_FLOOD_RESP_DELAY + FK_ANON_FLOOD_DIRECT_FALLBACK));
+#endif
 }
 
 void MyMesh::fkAnonFallbackLoop() {
@@ -719,11 +747,20 @@ void MyMesh::fkAnonFallbackLoop() {
     e->deadline = 0;
 
     ClientInfo* c = acl.getClient(e->pub_key, PUB_KEY_SIZE);
-    if (c == NULL) continue;   //en: evicted meanwhile  //sk: medzitým vytlačený z ACL
+    if (c == NULL) {   //en: evicted meanwhile  //sk: medzitým vytlačený z ACL
+#ifdef FK_DEBUG
+      Serial.printf("[FK] LOGIN fallback src=%02X: cancelled (ACL entry missing)\r\n",
+                    (unsigned)e->pub_key[0]);
+#endif
+      continue;
+    }
     if (c->out_path_len != OUT_PATH_UNKNOWN) {
       //en: reciprocal PATH arrived — the flood reply made it, nothing to do
       //sk: recipročný PATH prišiel — flood odpoveď sa doručila, netreba nič
-      MESH_DEBUG_PRINTLN("FK anon fallback: handshake OK, direct resend not needed");
+#ifdef FK_DEBUG
+      Serial.printf("[FK] LOGIN fallback src=%02X: cancelled (reciprocal PATH received)\r\n",
+                    (unsigned)e->pub_key[0]);
+#endif
       continue;
     }
 
@@ -734,7 +771,13 @@ void MyMesh::fkAnonFallbackLoop() {
     getRNG()->random(&e->reply[8], 4);
     mesh::Packet* p = createPathReturn(e->pub_key, e->secret, e->fwd_path, e->path_len_enc,
                                        PAYLOAD_TYPE_RESPONSE, e->reply, e->reply_len);
-    if (p == NULL) continue;
+    if (p == NULL) {
+#ifdef FK_DEBUG
+      Serial.printf("[FK] LOGIN fallback src=%02X: createPathReturn failed\r\n",
+                    (unsigned)e->pub_key[0]);
+#endif
+      continue;
+    }
 
     //en: provisional out_path (repeater→client); confirmed by the client's first direct packet
     //sk: provizórna out_path (repeater→klient); potvrdí ju prvý direct paket od klienta
@@ -743,8 +786,12 @@ void MyMesh::fkAnonFallbackLoop() {
     c->out_path_len = e->path_len_enc;
 
     sendDirect(p, e->rev_path, e->path_len_enc, 0);
-    MESH_DEBUG_PRINTLN("FK anon fallback: no reciprocal PATH, direct resend (%u hops)",
-                       (uint32_t)(e->path_len_enc & 63));
+#ifdef FK_DEBUG
+    Serial.printf("[FK] LOGIN fallback src=%02X: DIRECT resend hops=%u route=",
+                  (unsigned)e->pub_key[0], (unsigned)(e->path_len_enc & 63));
+    for (uint8_t i = 0; i < nbytes; i++) Serial.printf("%02X", (unsigned)e->rev_path[i]);
+    Serial.printf("\r\n");
+#endif
   }
 }
 #endif // FK_ANON_FLOOD_DIRECT_FALLBACK

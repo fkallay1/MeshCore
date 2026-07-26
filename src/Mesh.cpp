@@ -252,9 +252,25 @@ DispatcherAction Mesh::onRecvPacket(Packet* pkt) {
             onAnonDataRecv(pkt, secret, sender, data, len);
             pkt->markDoNotRetransmit();
           }
+#ifdef FK_DEBUG
+          else {
+            //en: ANON_REQ reached us but pairwise authentication/decryption failed.
+            //sk: ANON_REQ dorazil k nam, ale parove overenie/dešifrovanie zlyhalo.
+            Serial.printf("[FK] ANON_REQ %02X->%02X: MAC fail (corrupt?)\r\n",
+                          (unsigned)sender_pub_key[0], (unsigned)dest_hash);
+          }
+#endif
         }
         action = routeRecvPacket(pkt);
       }
+#ifdef FK_DEBUG
+      //en: A later flood copy was dropped before decrypt/login dispatch.
+      //sk: Neskorsia kopia floodu bola zahodena pred decrypt/login dispatchom.
+      else if (self_id.isHashMatch(&pkt->payload[0])) {
+        Serial.printf("[FK] ANON_REQ %02X->%02X: DEDUP (seen)\r\n",
+                      (unsigned)pkt->payload[1], (unsigned)pkt->payload[0]);
+      }
+#endif
       break;
     }
     case PAYLOAD_TYPE_GRP_DATA: 
