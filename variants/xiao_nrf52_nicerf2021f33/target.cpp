@@ -29,6 +29,7 @@ bool radio_init() {
   nicerf2021f33_pre_init(radio);        // PA table must be set before begin() applies TX power
   if (!radio.std_init(&SPI)) return false;
   nicerf2021f33_post_init(radio);       // front-end RF switch: needs an initialised chip
+  nicerf2021f33_report(radio);          // module identity + supply/temperature
 
   return true;
 }

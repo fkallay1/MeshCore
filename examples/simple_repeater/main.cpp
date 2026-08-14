@@ -75,6 +75,18 @@ void setup() {
 
   if (!radio_init()) {
     MESH_DEBUG_PRINTLN("Radio init failed!");
+#ifdef FK_DEBUG
+    //en: A silent halt() looks exactly like a dead board on the terminal, and the
+    //en: one-shot error from std_init() is long gone before a terminal can attach.
+    //en: Keep repeating it so the reason is visible whenever you connect.
+    //sk: Tiché halt() vyzerá na termináli presne ako mŕtva doska a jednorazovú
+    //sk: hlášku z std_init() nikto nestihne. Opakuj ju, nech je dôvod vidieť
+    //sk: kedykoľvek sa pripojíš.
+    while (1) {
+      Serial.println("[FK] Radio init FAILED - halted (check the radio module: VCC, SPI wiring, IRQ pin)");
+      delay(2000);
+    }
+#endif
     halt();
   }
 

@@ -133,3 +133,47 @@ template <class T> static inline void nicerf2021f33_pre_init(T& radio) {
 template <class T> static inline void nicerf2021f33_post_init(T& radio) {
   radio.setRfSwitchTable(nicerf2021f33_rfswitch_dios, nicerf2021f33_rfswitch_table);
 }
+
+/*
+   Everything the chip can tell us about itself. The LR2021 has no UID / serial
+   number command - GetVersion (0x0101) is the only identification there is, so
+   the module type below comes from the build config, not from the hardware.
+   GetVBat is the useful one: it reports the supply the CHIP actually sees. With
+   VCC wired and the module's internal LDO regulating it reads ~3.3 V; a module
+   left on VCC-less parasitic feed through the GPIO ESD diodes will answer SPI
+   but cannot run its PA, and this is the reading that tells the two apart.
+*/
+template <class T> static inline void nicerf2021f33_report(T& radio) {
+  uint8_t  major = 0, minor = 0;
+  uint16_t vbat_mv = 0, errors = 0;
+  radio.getVersion(&major, &minor);
+  radio.getVbat(13, &vbat_mv);
+  radio.getErrors(&errors);
+  float temp = radio.getTemperature(RADIOLIB_LR2021_TEMP_SOURCE_VBE, 13);
+
+  Serial.printf("[LR2021] NiceRF LoRa2021F33-2G4  fw=%u.%u  vbat=%umV  temp=%.1fC  errors=0x%04X\r\n",
+                (unsigned)major, (unsigned)minor, (unsigned)vbat_mv, temp, (unsigned)errors);
+  Serial.printf("[LR2021] irq=DIO%d  tcxo=%.1fV  freq=%.3fMHz  band=%s  rfsw=DIO5/DIO6%s\r\n",
+                (int)NICERF2021F33_IRQ_DIO, (double)NICERF2021F33_TCXO_VOLTAGE,
+                (double)LORA_FREQ, (LORA_FREQ > 1500.0f) ? "HF(2G4)" : "LF(sub-GHz)",
+#ifdef NICERF2021F33_ENABLE_24G
+                "/DIO7/DIO8");
+#else
+                " (2G4 off)");
+#endif
+
+#ifndef NICERF2021F33_STOCK_PA_TABLE
+  //en: show what the requested dBm actually turns into at the chip - the module
+  //en: output is that plus the external PA gain, per the datasheet power table
+  int idx = (int)LORA_TX_POWER + 9;
+  if (idx < 0) idx = 0;
+  if (idx > 31) idx = 31;
+  int8_t pv = NICERF2021F33_PA_TABLE_LF[idx].paVal;
+  Serial.printf("[LR2021] pa=nicerf(duty%u/slices%u)  tx=%ddBm req -> paVal=%d (%.1fdBm chip drive)\r\n",
+                (unsigned)NICERF2021F33_PA_TABLE_LF[idx].paDutyCycle,
+                (unsigned)NICERF2021F33_PA_TABLE_LF[idx].paSlices,
+                (int)LORA_TX_POWER, (int)pv, (double)pv / 2.0);
+#else
+  Serial.printf("[LR2021] pa=radiolib-default  tx=%ddBm req\r\n", (int)LORA_TX_POWER);
+#endif
+}
