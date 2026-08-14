@@ -78,6 +78,33 @@ Rovnaká konvencia ako ostatné výkonné dosky v MeshCore (RAK3401 „1W" a spo
 `set tx 23` až `set tx 30` **nerobia nič** — RadioLib odmietne LF požiadavku nad
 +22 (`checkOutputPower`) a ticho nechá pôvodnú hodnotu. CLI pritom odpovie OK.
 
+### Nameraná krivka (2026-08-15, XIAO + modul, offset +8)
+
+| `set tx` | výstup | paVal | datasheet @5 V | merané | pomer |
+|---|---|---|---|---|---|
+| 15 | ~23 dBm | 17 | ~312 mA | 359 mA | 1,15× |
+| 16 | ~24 | 19 | ~336 | 392 | 1,17× |
+| 17 | ~25 | 21 | ~368 | 427 | 1,16× |
+| 18 | ~26 | 24 | ~416 | 491 | 1,18× |
+| 19 | ~27 | 27 | ~468 | 560 | 1,20× |
+| 20 | ~28 | 30 | ~522 | 635 | 1,22× |
+| 21 | ~29 | 35 | ~605 | 780 | 1,29× |
+| 22 | ~30 | 44 | ~724 | 950 | 1,31× |
+
+**Rastúci pomer = prepad napájania**, nie odber XIAO (ten je konštanta a pomer by
+klesal). Datasheetové prúdy sú pri 5 V; jeho tabuľka napätie/výkon dáva pri 4,0 V
+už len 28,2 dBm @626 mA a pri 3,3 V 26,2 dBm @540 mA. Pomer 1,15–1,31 sedí na
+VCC okolo 4,3–4,5 V pod záťažou. **Merať napätie priamo na pine 1 modulu počas
+TX** — ak tam pri ~1 A nie je aspoň 4,5 V, horné stupne aj tak nedávajú, čo majú.
+
+**Prevádzkové optimum je `set tx 18–19`** (~26–27 dBm, 0,49–0,56 A). Z 19 na 22
+je +70 % prúdu za asi +2 dB. Navyše 27 dBm ERP je presne strop pásma
+869,4–869,65 pri 10 % duty. `set tx 22` (0,95 A) je laboratórna hodnota — je to
+dvojnásobok toho, čo garantuje USB2.
+
+Krivka je hladká a monotónna, čo je zároveň dobrá správa o prispôsobení antény
+(pri zlom matchi býva odber rozhádzaný).
+
 **Prečo nie čisto RAK štýlom** (stock tabuľka RadioLibu, číslo = budenie čipu):
 RAK-ov SKY66122 pridáva ~8 dB, tento PA ~16 dB pri nízkom budení a saturuje sa
 okolo 30 dBm. So stock tabuľkou by už `set tx 14` znamenalo 14 dBm z čipu →
@@ -183,6 +210,51 @@ len to nie je odskúšané na železe.
 
 `custom_fota_device` je nutné — hook odvodzuje meno zariadenia z `PIOENV.split("_")[0]`,
 čo by dalo `xiao` a miešalo by sa to s archívom SX1262 XIAO.
+
+## Iné modulácie (LR-FHSS, FLRC, GFSK, OOK)
+
+Modul aj RadioLib ich vedia (`beginLRFHSS()`, `beginFLRC()`, `beginGFSK()`,
+`beginOOK()`), ale pre MeshCore to **nie je prepínač**:
+
+- **LR-FHSS sa nedá prijímať.** RadioLib `LR2021.cpp:339`: pri
+  `PACKET_TYPE_LR_FHSS` vráti `startReceive()` rovno `RADIOLIB_ERR_WRONG_MODEM`
+  („this modem cannot receive"). Je to uplink-only modulácia do LoRaWAN brány.
+- **FLRC prijímať vie**, ale MeshCore je na LoRa naviazané hlbšie: `Dispatcher`
+  počíta airtime a duty-cycle z LoRa parametrov, robí CAD, kalibruje šumový
+  podklad z LoRa RSSI; CLI `set radio` má tvar `freq,bw,sf,cr` a prefs držia
+  presne tieto štyri. Bola by to nová modemová vetva, nie konfigurácia. A nespojí
+  sa s ničím — celá sieť by musela bežať to isté.
+
+**LR-FHSS ako jednosmerný uplink do vlastnej brány** je reálna možnosť: uložiť
+LoRa stav → `beginLRFHSS()` → odoslať → obnoviť cez `std_init()` +
+`nicerf2021f33_post_init()`. RF switch to nerieši (`MODE_TX` je nezávislé od
+modemu) a PA tabuľka platí tiež. Uzol je počas toho pár sekúnd hluchý.
+
+⚠️ **Ale najprv brána:** SX1302 (WM1302) LR-FHSS demodulovať vie len po firmware
+update, ktorý **Semtech nedistribuuje verejne** — treba si oň napísať. Bez neho
+nemá zmysel stavať vysielaciu stranu. A na to, aby paket vyliezol v LoRaWAN
+network serveri, treba okolo neho poriadne LoRaWAN rámcovanie (DevAddr, MIC,
+čítače), inak je to pre server neznámy paket.
+
+## Multi-SF (side detectors)
+
+4. generácia LoRa IP v LR2021 vie popri hlavnom SF sledovať ďalšie SF súčasne.
+MeshCore to má v CLI: `set extra.sf 8,9,10` / `get extra.sf` (oddeľovač čiarka,
+ukladá sa do prefs). Pravidlá z `CustomLR2021Wrapper::configSideDetectors()`:
+
+- max **3** vedľajšie SF, hodnoty 5–12,
+- každé musí byť **vyššie** než primárne SF (kód odmieta `<= sf`; komentár
+  v zdrojáku tvrdí opak a je zavádzajúci),
+- rozpätie najviac **+4** nad primárnym,
+- pri primárnom **SF ≥ 10 je povolený len jeden** vedľajší detektor,
+- LDRO sa zapne samo pri symbole ≥ 16 ms, sync word 0x12.
+
+Uzol tak **prijíma** aj iné SF, ale **vysiela stále na svojom** primárnom —
+nie je to plnohodnotný SF bridging, odpovede idú primárnym SF.
+
+Známa vrtochovitosť je ošetrená v `RadioLibWrappers.cpp`: so zapnutými side
+detektormi vracal LR2021 `-706` pri `startReceive()` po hardvérovom CAD, preto sa
+tam volá `standby()` navyše.
 
 ## Neoverené / otvorené
 
