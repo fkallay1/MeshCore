@@ -25,6 +25,12 @@
       "kind": "t1000e",
       "path_to": "632139779C"
     },
+    "xiao-nicerf": {
+      "role": "target",
+      "transport": "com",
+      "port": "COM19",
+      "kind": "xiao-nicerf"
+    },
     "xiao-5km": {
       "role": "target",
       "transport": "rpi",
@@ -53,6 +59,7 @@
     "t1000e":   { "env": "t1000e_repeater_fota",        "prefix": "t1000e" },
     "promicro": { "env": "ProMicro_repeater_fota",      "prefix": "promicro" },
     "xiao":     { "env": "Xiao_nrf52_repeater_fota",    "prefix": "xiao" },
+    "xiao-nicerf": { "env": "Xiao_nrf52_nicerf2021f33_repeater_fota", "prefix": "xiaonicerf" },
     "sensecap": { "env": "SenseCap_Solar_repeater_fota","prefix": "sensecap" },
     "rak3401":  { "env": "RAK_3401_repeater_fota",      "prefix": "rak3401" },
     "rak4631":  { "env": "RAK_4631_repeater_fota",      "prefix": "rak4631" }
