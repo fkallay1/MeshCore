@@ -11,11 +11,8 @@
 
 #ifdef DISPLAY_CLASS
   #include <helpers/ui/NullDisplayDriver.h>
-  extern DISPLAY_CLASS display;
-#endif
-
-#ifdef PIN_USER_BTN
   #include <helpers/ui/MomentaryButton.h>
+  extern DISPLAY_CLASS display;
   extern MomentaryButton user_btn;
 #endif
 

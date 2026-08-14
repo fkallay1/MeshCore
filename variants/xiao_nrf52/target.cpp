@@ -4,9 +4,6 @@
 
 #ifdef DISPLAY_CLASS
   DISPLAY_CLASS display;
-#endif
-
-#ifdef PIN_USER_BTN
   // The XIAO nRF52840 has no physical user button. PIN_USER_BTN (PIN_BUTTON1=0,
   // the D0 edge pin) reads LOW when the LoRa radio is attached, which the
   // MomentaryButton (reverse=true => LOW == pressed) interprets as a held
