@@ -27,6 +27,12 @@ Detailný popis FOTA modulu samotného: [examples/simple_repeater/nrffota/README
   (`--scope` flood/zerohop/region/direct), multi-hop direct (pacing, distinct-hop pravidlo),
   bridge LBT + adaptívny resend. Overené VERIFIED až po 2-hop na živej SK sieti.
 - [fcl_e2e_runbook_nrf-fota.md](fcl_e2e_runbook_nrf-fota.md) — **runbook**: porty/zariadenia/úlohy + ako spustiť a overiť e2e.
+- [fcl_remote_e2e_rpi.md](fcl_remote_e2e_rpi.md) — vzdialené stanovištia cez RPi (200 km T1000-E,
+  5 km XIAO), serial hub pre lokálne COM porty, `fota_remote_e2e.py` orchestrátor.
+- **Claude skilly** (`.claude/skills/`, fungujú aj mimo Claude — volajú tie isté skripty):
+  `build-flash` (priamy build/flash USB/DFU), `remote-e2e` (FOTA cez LoRa, lokálne aj vzdialené),
+  `sync-upstream` (vyrovnanie vetiev upstream/dev → dev → features/nrf-fota, známe konfliktné
+  miesta, overovacia dávka buildov).
 
 ---
 
