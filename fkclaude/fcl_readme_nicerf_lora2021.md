@@ -63,6 +63,41 @@ diskusii #1772 zistili, že **VDCC1/VDCC2 nie sú na module vôbec zapojené** a
 potvrdil, že modul podporuje LDO režim. RadioLib `setRegMode()` sám od seba nevolá,
 takže čip ostáva vo východzom režime — netreba nič robiť.
 
+## Ciferník výkonu (`set tx`)
+
+Rovnaká konvencia ako ostatné výkonné dosky v MeshCore (RAK3401 „1W" a spol.):
+**číslo je nominálne, PA si pripočíta svoje, 22 = maximum.** Zabezpečuje to
+`NICERF2021F33_PA_OFFSET`, default **8**:
+
+| `set tx` | výstup modulu | prúd (merané, aj s XIAO) |
+|---|---|---|
+| 6 | ~14 dBm | ~200 mA |
+| 14 | ~22 dBm | ~310 mA |
+| 22 | ~30 dBm (1 W) | ~800 mA (odhad z datasheetu) |
+
+`set tx 23` až `set tx 30` **nerobia nič** — RadioLib odmietne LF požiadavku nad
++22 (`checkOutputPower`) a ticho nechá pôvodnú hodnotu. CLI pritom odpovie OK.
+
+**Prečo nie čisto RAK štýlom** (stock tabuľka RadioLibu, číslo = budenie čipu):
+RAK-ov SKY66122 pridáva ~8 dB, tento PA ~16 dB pri nízkom budení a saturuje sa
+okolo 30 dBm. So stock tabuľkou by už `set tx 14` znamenalo 14 dBm z čipu →
+~29 dBm z modulu, a celý ciferník od ~10 vyššie by bol zlepený na strope.
+Preto držíme budenie čipu nízko a kalibrovane — až vtedy majú kroky význam.
+
+Zisk PA z datasheetu (register → budenie čipu → výstup):
+
+| register | čip | výstup | zisk |
+|---|---|---|---|
+| −11 | −5,5 dBm | 10,4 dBm | 15,9 dB |
+| 7 | 3,5 dBm | 18,9 dBm | 15,4 dB |
+| 25 | 12,5 dBm | 26,5 dBm | 14,0 dB |
+| 44 | 22 dBm | 29,8 dBm | 7,8 dB |
+
+Nad register ~37 kúpiš +0,5 dB za +87 mA — nemá zmysel.
+
+**Limity pásma:** 869,4–869,65 MHz dovoľuje 500 mW ERP (27 dBm) pri 10 % duty
+cycle, väčšina ostatných 868 subpásiem len 25 mW ERP (14 dBm).
+
 ## Výstupný výkon — pozor
 
 `LORA_TX_POWER` v MeshCore ide do RadioLibu ako dBm a ten cez **PA tabuľku**
@@ -77,10 +112,23 @@ Preto `NiceRF2021F33.h` obsahuje vlastnú `NICERF2021F33_PA_TABLE_LF`, kde
 **`LORA_TX_POWER` znamená dBm na výstupe modulu** (default 14). PA drive je fixný
 7/6 — presne ako v NiceRF demo, čiže konfigurácia, pri ktorej merali svoje tabuľky.
 
-⚠️ Tabuľka je **interpolovaná z datasheetu, nie meraná** (body 868/915:
-register −11/−5/1/7/13/19/25/31/37/44 → 10,4/13,3/16,2/18,9/21,4/24,0/26,5/28,3/
-29,3/29,8 dBm). Pred spoľahnutím sa na absolútne číslo premerať.
-`-D NICERF2021F33_STOCK_PA_TABLE` prepne späť na RadioLib tabuľku.
+Tabuľka je **interpolovaná z datasheetu** (body 868/915: register
+−11/−5/1/7/13/19/25/31/37/44 → 10,4/13,3/16,2/18,9/21,4/24,0/26,5/28,3/29,3/
+29,8 dBm), ale **overená na HW meraním prúdu** (2026-08-14, ešte pri offsete 0):
+
+| požadované | paVal | očakávaný prúd modulu | merané (aj s XIAO) |
+|---|---|---|---|
+| 14 | −4 | ~186 mA | 200 mA |
+| 18 | 5 | ~213 mA | 230 mA |
+| 20 | 10 | ~243 mA | 268 mA |
+| 22 | 14 | ~277 mA | 310 mA |
+
+Prírastky sedia (+27/+30/+34 očakávané vs +30/+38/+42 merané), rozdiel je odber
+XIAO (~15–20 mA). Tabuľka je teda dobrá **na ~±1 dB**. Pre absolútne číslo pri
+regulačnom limite stále platí: premerať prístrojom.
+
+`-D NICERF2021F33_STOCK_PA_TABLE` prepne späť na RadioLib tabuľku (viď vyššie,
+prečo tu nie je dobrý nápad).
 
 ## Chyba v RadioLib, ktorú header obchádza
 

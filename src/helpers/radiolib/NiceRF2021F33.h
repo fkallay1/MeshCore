@@ -76,56 +76,76 @@ static const Module::RfSwitchMode_t nicerf2021f33_rfswitch_table[] = {
    the fixed 7/6 that NiceRF's demo uses for the whole sub-GHz range, which is
    also the configuration their published power figures were measured with.
 
-   The mapping was interpolated from the datasheet's 868/915 MHz table
+   NICERF2021F33_PAVAL_FOR_OUT[] maps a target MODULE OUTPUT of 10..30 dBm to the
+   register value, interpolated from the datasheet's 868/915 MHz table
    (register -11/-5/1/7/13/19/25/31/37/44 -> 10.4/13.3/16.2/18.9/21.4/24.0/
-   26.5/28.3/29.3/29.8 dBm) so that a requested power of N dBm lands near N dBm
-   at the antenna port. Below ~10 dBm the module cannot go any lower, so those
-   steps all clamp to the bottom register value.
+   26.5/28.3/29.3/29.8 dBm).
 
-   INTERPOLATED, NOT MEASURED - verify against a power meter before trusting the
-   absolute numbers, especially near a regulatory limit.
+   Interpolated, not measured, BUT cross-checked on hardware: supply current at
+   requested 14/18/20/22 dBm came out 200/230/268/310 mA against the datasheet's
+   186/213/243/277 mA for the same register values (the offset is the XIAO's own
+   draw). The curve tracks, so the table is good to roughly +-1 dB. Still measure
+   before trusting an absolute number near a regulatory limit.
+
+   NICERF2021F33_PA_OFFSET shifts what a requested dBm means. It defaults to 8,
+   which lines the dial up with how MeshCore behaves on other high-power boards
+   (RAK3401 "1W" and friends): the requested number is nominal, reality is higher,
+   and 22 is the top of the scale.
+
+       set tx 6  -> ~14 dBm out (EU 868 default sub-band limit)
+       set tx 14 -> ~22 dBm out
+       set tx 22 -> ~30 dBm out (module maximum, ~1 W)
+
+   The offset exists because RadioLib hard-limits an LF request to -9..+22
+   (checkOutputPower) while the module reaches ~29.8 dBm, so without a shift the
+   dial would stop at 22 dBm out and leave 8 dB unused.
+
+   Why not simply drop this table and let RadioLib's stock one do the job, the way
+   RAK3401 does? Because that board's SKY66122 FEM adds ~8 dB, while this module's
+   PA adds ~16 dB at low drive and saturates near 30 dBm (datasheet: chip -5.5 dBm
+   -> 10.4 out, +3.5 -> 18.9, +12.5 -> 26.5, +22 -> 29.8). With the stock table the
+   request equals the CHIP output, so anything from ~10 dBm up would already push
+   the PA into compression and the whole dial would collapse onto the maximum.
+   Keeping the chip drive low and calibrated is what makes the steps mean anything.
+   Anything above register ~37 buys +0.5 dB for +87 mA - not worth it.
 */
-static const LR2021PaTableEntry_t NICERF2021F33_PA_TABLE_LF[32] = {
-  { .paDutyCycle = 7, .paSlices = 6, .paVal = -11 },  // -9 dBm requested -> ~10.4 dBm out (floor)
-  { .paDutyCycle = 7, .paSlices = 6, .paVal = -11 },  // -8
-  { .paDutyCycle = 7, .paSlices = 6, .paVal = -11 },  // -7
-  { .paDutyCycle = 7, .paSlices = 6, .paVal = -11 },  // -6
-  { .paDutyCycle = 7, .paSlices = 6, .paVal = -11 },  // -5
-  { .paDutyCycle = 7, .paSlices = 6, .paVal = -11 },  // -4
-  { .paDutyCycle = 7, .paSlices = 6, .paVal = -11 },  // -3
-  { .paDutyCycle = 7, .paSlices = 6, .paVal = -11 },  // -2
-  { .paDutyCycle = 7, .paSlices = 6, .paVal = -11 },  // -1
-  { .paDutyCycle = 7, .paSlices = 6, .paVal = -11 },  //  0
-  { .paDutyCycle = 7, .paSlices = 6, .paVal = -11 },  //  1
-  { .paDutyCycle = 7, .paSlices = 6, .paVal = -11 },  //  2
-  { .paDutyCycle = 7, .paSlices = 6, .paVal = -11 },  //  3
-  { .paDutyCycle = 7, .paSlices = 6, .paVal = -11 },  //  4
-  { .paDutyCycle = 7, .paSlices = 6, .paVal = -11 },  //  5
-  { .paDutyCycle = 7, .paSlices = 6, .paVal = -11 },  //  6
-  { .paDutyCycle = 7, .paSlices = 6, .paVal = -11 },  //  7
-  { .paDutyCycle = 7, .paSlices = 6, .paVal = -11 },  //  8
-  { .paDutyCycle = 7, .paSlices = 6, .paVal = -11 },  //  9
-  { .paDutyCycle = 7, .paSlices = 6, .paVal = -11 },  // 10 dBm -> ~10.4
-  { .paDutyCycle = 7, .paSlices = 6, .paVal = -10 },  // 11
-  { .paDutyCycle = 7, .paSlices = 6, .paVal =  -8 },  // 12
-  { .paDutyCycle = 7, .paSlices = 6, .paVal =  -6 },  // 13
-  { .paDutyCycle = 7, .paSlices = 6, .paVal =  -4 },  // 14  <- EU 868 ERP limit band
-  { .paDutyCycle = 7, .paSlices = 6, .paVal =  -1 },  // 15
-  { .paDutyCycle = 7, .paSlices = 6, .paVal =   1 },  // 16
-  { .paDutyCycle = 7, .paSlices = 6, .paVal =   3 },  // 17
-  { .paDutyCycle = 7, .paSlices = 6, .paVal =   5 },  // 18
-  { .paDutyCycle = 7, .paSlices = 6, .paVal =   7 },  // 19
-  { .paDutyCycle = 7, .paSlices = 6, .paVal =  10 },  // 20
-  { .paDutyCycle = 7, .paSlices = 6, .paVal =  12 },  // 21
-  { .paDutyCycle = 7, .paSlices = 6, .paVal =  14 },  // 22 -> ~22 dBm out (~160 mA more than 14 dBm)
-};
+#ifndef NICERF2021F33_PA_OFFSET
+  #define NICERF2021F33_PA_OFFSET 8
 #endif
+
+//en: index 0 = 10 dBm module output ... index 20 = 30 dBm
+static const int8_t NICERF2021F33_PAVAL_FOR_OUT[21] = {
+  -11, -10, -8, -6, -4, -1,  1,  3,  5,  7, 10,   // 10..20 dBm
+   12,  14, 17, 19, 21, 24, 27, 30, 35, 44        // 21..30 dBm
+};
+
+static LR2021PaTableEntry_t NICERF2021F33_PA_TABLE_LF[32];
+
+//en: expected module output (dBm) for a requested power, after clamping
+static inline int nicerf2021f33_expected_out(int requested) {
+  int out = requested + (NICERF2021F33_PA_OFFSET);
+  if (out < 10) out = 10;
+  if (out > 30) out = 30;
+  return out;
+}
+
+static inline void nicerf2021f33_build_pa_table() {
+  for (int i = 0; i < 32; i++) {
+    int out = nicerf2021f33_expected_out(i - 9);
+    NICERF2021F33_PA_TABLE_LF[i].paDutyCycle = 7;
+    NICERF2021F33_PA_TABLE_LF[i].paSlices    = 6;
+    NICERF2021F33_PA_TABLE_LF[i].paVal       = NICERF2021F33_PAVAL_FOR_OUT[out - 10];
+  }
+}
+#endif  // NICERF2021F33_STOCK_PA_TABLE
+
 
 /* Call BEFORE std_init(): begin() already applies LORA_TX_POWER, so the table has
    to be in place by then. Pure setter, no SPI traffic. */
 template <class T> static inline void nicerf2021f33_pre_init(T& radio) {
 #ifndef NICERF2021F33_STOCK_PA_TABLE
-  radio.setPaTable(const_cast<LR2021PaTableEntry_t*>(NICERF2021F33_PA_TABLE_LF), false);
+  nicerf2021f33_build_pa_table();
+  radio.setPaTable(NICERF2021F33_PA_TABLE_LF, false);
 #endif
 }
 
@@ -163,16 +183,21 @@ template <class T> static inline void nicerf2021f33_report(T& radio) {
 #endif
 
 #ifndef NICERF2021F33_STOCK_PA_TABLE
-  //en: show what the requested dBm actually turns into at the chip - the module
-  //en: output is that plus the external PA gain, per the datasheet power table
+  //en: what a requested dBm actually becomes: register value (= chip drive) and
+  //en: the module output the datasheet predicts for it. RadioLib refuses any
+  //en: request outside -9..+22 outright, so 22 is always the top of the dial.
   int idx = (int)LORA_TX_POWER + 9;
   if (idx < 0) idx = 0;
   if (idx > 31) idx = 31;
   int8_t pv = NICERF2021F33_PA_TABLE_LF[idx].paVal;
-  Serial.printf("[LR2021] pa=nicerf(duty%u/slices%u)  tx=%ddBm req -> paVal=%d (%.1fdBm chip drive)\r\n",
+  Serial.printf("[LR2021] pa=nicerf(duty%u/slices%u) offset=%+d  tx=%ddBm req -> paVal=%d (%.1fdBm chip) -> ~%d dBm module out\r\n",
                 (unsigned)NICERF2021F33_PA_TABLE_LF[idx].paDutyCycle,
                 (unsigned)NICERF2021F33_PA_TABLE_LF[idx].paSlices,
-                (int)LORA_TX_POWER, (int)pv, (double)pv / 2.0);
+                (int)NICERF2021F33_PA_OFFSET,
+                (int)LORA_TX_POWER, (int)pv, (double)pv / 2.0,
+                nicerf2021f33_expected_out((int)LORA_TX_POWER));
+  Serial.printf("[LR2021] dial: tx=-9 -> ~%d dBm ... tx=22 -> ~%d dBm out\r\n",
+                nicerf2021f33_expected_out(-9), nicerf2021f33_expected_out(22));
 #else
   Serial.printf("[LR2021] pa=radiolib-default  tx=%ddBm req\r\n", (int)LORA_TX_POWER);
 #endif
