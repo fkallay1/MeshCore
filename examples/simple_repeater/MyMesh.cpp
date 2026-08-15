@@ -1500,12 +1500,77 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
   }
 }
 
+#ifdef LORA_RADIO_WATCHDOG
+/*
+  Detect a radio that has stopped answering, and re-initialise it.
+
+  MeshCore has no such check today. Dispatcher::loop() watches for a radio 'stuck'
+  outside Rx, but it asks isInRecvMode(), which reports the wrapper's own `state`
+  flag rather than the chip - and on LR2021 that flag is pinned to STATE_RX, so
+  the test can never fire. Even when it does, it only raises
+  ERR_EVENT_STARTRX_TIMEOUT and never attempts recovery. A radio that dies
+  quietly therefore leaves the node running, printing heartbeats and forwarding
+  nothing, until someone power-cycles it.
+
+  The signal used here is radio-agnostic: an unresponsive SPI slave makes
+  getCurrentRSSI() return a physically impossible value. Observed on a module
+  whose supply had been cut: last_rssi = -169 dBm and the noise floor pinned at
+  its -120 clamp. Real thermal noise never goes near -150, so that is a safe
+  threshold for any of the supported radios.
+
+  Three consecutive bad reads (i.e. ~90 s) are required before acting, so a
+  single glitch cannot trigger a re-init.
+*/
+void MyMesh::radioWatchdogLoop() {
+  if (!millisHasNowPassed(next_radio_check)) return;
+  next_radio_check = futureMillis(LORA_RADIO_WATCHDOG);
+
+  float rssi = radio_driver.getCurrentRSSI();
+  if (rssi > -150.0f) { radio_dead_count = 0; return; }   //en: plausible -> alive
+
+  radio_dead_count++;
+  MESH_DEBUG_PRINTLN("radioWatchdog: implausible RSSI %d dBm (%d/3)", (int)rssi, (int)radio_dead_count);
+  Serial.printf("[FK] radio watchdog: implausible RSSI %d dBm (%d/3)\r\n",
+                (int)rssi, (int)radio_dead_count);
+  if (radio_dead_count < 3) return;
+
+  radio_dead_count = 0;
+  Serial.println(F("[FK] radio not responding - re-initialising"));
+  if (!radio_init()) {
+    Serial.println(F("[FK] radio re-init FAILED - will retry"));
+    return;
+  }
+
+  //en: radio_init() alone is not enough to get back on the air:
+  //en:  - RadioLib's begin() drops the packet-received callback, so the wrapper
+  //en:    has to re-attach it (that is what its begin() does, and it also puts
+  //en:    the state back to IDLE so recvRaw() re-arms Rx);
+  //en:  - std_init() configures the radio from the COMPILE-TIME defaults, so the
+  //en:    runtime prefs have to be applied again or the node silently reverts to
+  //en:    the built-in frequency/SF/power.
+  radio_driver.begin();
+  radio_driver.setParams(_prefs.freq, _prefs.bw, _prefs.sf, _prefs.cr);
+  radio_driver.setTxPower(_prefs.tx_power_dbm);
+  radio_driver.setRxBoostedGainMode(_prefs.rx_boosted_gain);
+  board.setLoRaFemLnaEnabled(_prefs.radio_fem_rxgain);
+  board.setLoRaFemPaGainEnabled(_prefs.radio_fem_txgain);
+
+  Serial.printf("[FK] radio re-initialised OK (%.3fMHz sf=%d bw=%.1f tx=%d)\r\n",
+                (double)_prefs.freq, (int)_prefs.sf, (double)_prefs.bw,
+                (int)_prefs.tx_power_dbm);
+}
+#endif
+
 void MyMesh::loop() {
 #ifdef WITH_BRIDGE
   bridge.loop();
 #endif
 
   mesh::Mesh::loop();
+
+#ifdef LORA_RADIO_WATCHDOG
+  radioWatchdogLoop();
+#endif
 
 #ifdef FK_ANON_FLOOD_DIRECT_FALLBACK
   fkAnonFallbackLoop();   //en: direct resend of the login reply when the flood copy got lost

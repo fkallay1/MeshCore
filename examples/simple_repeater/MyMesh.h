@@ -87,6 +87,11 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks {
   uint32_t last_millis;
   uint64_t uptime_millis;
   unsigned long next_local_advert, next_flood_advert;
+#ifdef LORA_RADIO_WATCHDOG
+  unsigned long next_radio_check = 0;
+  uint8_t radio_dead_count = 0;
+  void radioWatchdogLoop();
+#endif
   bool _logging;
   NodePrefs _prefs;
   ClientACL  acl;

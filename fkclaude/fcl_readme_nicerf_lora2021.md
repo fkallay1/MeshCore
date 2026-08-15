@@ -302,6 +302,48 @@ Známa vrtochovitosť je ošetrená v `RadioLibWrappers.cpp`: so zapnutými side
 detektormi vracal LR2021 `-706` pri `startReceive()` po hardvérovom CAD, preto sa
 tam volá `standby()` navyše.
 
+## Watchdog rádia — flag `LORA_RADIO_WATCHDOG` (nezávislý od typu rádia)
+
+**Problém:** keď rádio ticho odumrie, MeshCore to nezistí. Uzol beží ďalej,
+vypisuje heartbeaty a nepreposiela nič, kým ho niekto fyzicky nereštartuje.
+
+Prečo to nezachytí: `Dispatcher::loop()` síce sleduje „rádio zaseknuté mimo Rx",
+ale pýta sa `isInRecvMode()`, čo je **vlastný softvérový príznak wrappera**, nie
+stav čipu — a na LR2021 je ten príznak natrvalo `STATE_RX`. Podmienka teda nikdy
+neplatí. A aj keby, len nastaví `ERR_EVENT_STARTRX_TIMEOUT`, ktorý sa nikde
+nevypisuje (uvidíš ho jedine cez `stats-radio`) a nespustí žiadnu obnovu.
+Je to tá istá slepota, ktorá stojí za chybou `setTxPower` (upstream PR 3218).
+
+**Detekcia:** neodpovedajúci SPI čip vracia z `getCurrentRSSI()` fyzikálne
+nemožnú hodnotu. Namerané na module bez napájania: **−255 dBm** (a v
+`stats-radio` −169 dBm s `noise_floor` na klampe −120). Reálny šum sa nikdy
+nepriblíži k −150, takže je to bezpečná hranica pre **ktorékoľvek** rádio —
+`getCurrentRSSI()` je vo wrapperi čisto virtuálna a implementuje ju každé.
+
+Tri nezmyselné čítania za sebou (pri 30 s intervale ~90 s) spustia obnovu.
+
+**Obnova musí spraviť viac než `radio_init()`** — to sme zistili tvrdo, prvá
+verzia sa „obnovila", ale neprijímala:
+1. `radio_init()` — čip (u nás aj CE hore, PA tabuľka, RF switch, PRAM, SIMO)
+2. `radio_driver.begin()` — **RadioLib `begin()` zahodí packet-received callback**,
+   takže bez tohto ISR nikdy nepríde; zároveň vráti stav na IDLE, aby sa Rx nahodil
+3. **znova aplikovať prefs** — `std_init()` konfiguruje rádio z **compile-time**
+   hodnôt, takže bez toho uzol ticho spadne na zabudovanú frekvenciu/SF/výkon
+
+Overené na HW (build #431, `fk ce off`):
+
+```
+[FK] radio watchdog: implausible RSSI -255 dBm (2/3)
+[FK] radio watchdog: implausible RSSI -255 dBm (3/3)
+[FK] radio not responding - re-initialising
+[FK] radio re-initialised OK (869.618MHz sf=7 bw=62.5 tx=15)
+```
+…a hneď po ňom 21 prijatých paketov, `rxerr=0`, `nf=-111`.
+
+Celé je to v `examples/simple_repeater/MyMesh.cpp` (`radioWatchdogLoop()`),
+**jadro MeshCore zostáva nedotknuté**. Funguje na každej doske, lebo
+`radio_init()` má každý variant. Kandidát na upstream.
+
 ## Testovacie CLI (`fk …`) — flag `FK_NICERF2021F33_TEST`
 
 Aby sa dal modul skúšať bez neustáleho preflashovania. Vyžaduje aj

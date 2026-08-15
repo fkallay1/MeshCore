@@ -51,6 +51,7 @@ public:
   uint32_t getRngSeed();
   void setTxPower(int8_t dbm);
 
+
   virtual float getCurrentRSSI() =0;
   virtual uint8_t getSpreadingFactor() const { return LORA_SF; }
   static uint16_t preambleLengthForSF(uint8_t sf) { return sf <= 8 ? 32 : 16; }
