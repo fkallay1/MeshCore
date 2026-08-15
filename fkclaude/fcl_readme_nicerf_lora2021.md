@@ -352,10 +352,26 @@ hlási boot report `pram: loaded=no`.
 Magic slovo `0x600DB002` sa prečíta späť, čiže čip patch prijal. Rádio beží
 ďalej normálne a **odber sa nezmenil** (viď meraciu maticu v sekcii DC-DC).
 
-⚠️ **Otvorené:** s nahratou PRAM hlási `vbat` **2454 mV** namiesto 3311 mV, a to
-aj pri vypnutom SIMO. Nevieme, ktorá hodnota je pravdivá — modul dodáva 3,3 V,
-takže 3311 vyzerá správnejšie, ale patch mohol opraviť kalibráciu merania.
-Neinterpretovať, kým to niekto neoverí voltmetrom.
+### ⚠️ Nevysvetlená vlastnosť merania VBAT
+
+Overené A/B na jednom builde a v jednom behu (2026-08-15):
+
+| kde sa meria | VBAT | teplota |
+|---|---|---|
+| boot report (rádio ešte nikdy nebolo v RX) | **3312 mV** | správna |
+| `fk info` (rádio už bežalo v príjme) | **2454 mV** | správna |
+
+**Nespôsobuje to ani PRAM, ani SIMO, ani druh standby** — všetky tri som
+postupne podozrieval a všetky tri vylúčil meraním:
+- bez PRAM a s vypnutým SIMO: boot 3312, `fk info` 2454
+- s PRAM a zapnutým SIMO: boot 3312, `fk info` 2454
+- `standby(STDBY_XOSC)` namiesto `standby()` (STDBY_RC): bez zmeny
+
+Rozhoduje teda **to, či rádio predtým bežalo v príjme**, nie konfigurácia.
+Teplota aj chybové príznaky sú pritom v oboch prípadoch v poriadku, takže **nič
+nie je pokazené** — je to vlastnosť merania, nie porucha.
+
+**Praktické pravidlo: verte boot hodnote (3312 mV), `fk info` brať orientačne.**
 
 ### Mechanizmus (Semtech `lr20xx_patch.c`, Clear BSD)
 
@@ -540,7 +556,9 @@ NiceRF preto pri CE dole žiada stiahnuť aj NSS a RESET.
 ## Neoverené / otvorené
 
 - ~~Má modul cievku pre SIMO?~~ **VYRIEŠENÉ — má, DC-DC ušetrí ~41 %.**
-- **`vbat` s PRAM hlási 2454 mV namiesto 3311 mV** — ktorá hodnota platí, nevieme.
+- **VBAT: 3312 mV pri boote vs 2454 mV po tom, čo rádio bežalo v RX** — príčina
+  neznáma, PRAM/SIMO/standby vylúčené meraním. Nič nie je pokazené, ale to číslo
+  sa nedá brať vážne mimo boot reportu.
 - **RadioLib `setRegMode()` posiela 5 argumentových bajtov**, kým datasheet
   Rev 2.1 (tab. 6-26) definuje **jediný** (`simo_usage`). Čip tie štyri navyše
   zjavne ignoruje (SIMO preukázateľne funguje a prúd klesol podľa datasheetu),

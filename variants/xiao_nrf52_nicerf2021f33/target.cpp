@@ -91,10 +91,14 @@ bool nicerfTestCliCommand(char* command, char* reply) {
   const char* arg = command + 3;
 
   if (memcmp(arg, "info", 4) == 0) {
-    //en: GetVBat/GetTemp are only valid in standby - measured while the radio is
-    //en: in Rx they return 2 mV / 0.0 C. Found the hard way: the boot report
-    //en: (which runs before Rx is armed) reads correctly, a later query did not.
-    radio.standby();
+    //en: GetVBat/GetTemp need standby - read while the radio is in Rx they return
+    //en: 2 mV / 0.0 C.
+    //en: KNOWN QUIRK, unexplained: once the radio has been receiving, VBat reads
+    //en: 2454 mV here instead of the 3312 mV the boot report gets, while the
+    //en: temperature stays correct. Not caused by the PRAM, not by SIMO and not by
+    //en: the standby flavour - all three were tested and ruled out with same-boot
+    //en: A/B runs. Trust the boot-time reading; treat this one as indicative only.
+    radio.standby(RADIOLIB_LR2021_STANDBY_XOSC);
     nicerf2021f33_report(radio);
     uint8_t maj = 0, min = 0; uint16_t vbat = 0, err = 0;
     radio.getVersion(&maj, &min);
@@ -110,7 +114,8 @@ bool nicerfTestCliCommand(char* command, char* reply) {
 #if defined(RADIOLIB_GODMODE)
   if (memcmp(arg, "simo ", 5) == 0) {
     bool on = (memcmp(arg + 5, "on", 2) == 0);
-    int16_t st = nicerf2021f33_set_simo(radio, on);   //en: leaves the chip in standby
+    int16_t st = nicerf2021f33_set_simo(radio, on);   //en: leaves the chip in STDBY_RC
+    radio.standby(RADIOLIB_LR2021_STANDBY_XOSC);      //en: VBat only reads right with the XOSC up
     //en: measure BEFORE re-arming Rx - the ADC is only valid in standby
     uint8_t maj = 0, min = 0; uint16_t vbat = 0, err = 0;
     radio.getVersion(&maj, &min);
