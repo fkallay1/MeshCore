@@ -1491,6 +1491,10 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
   } else if (fotaHandleCliCommand(command, reply)) {
     //en: FOTA CLI ('fota …' / legacy 'ota …') — nrffota/FotaMyMesh.cpp
 #endif
+#ifdef LORA_RADIO_DIAG_CLI
+  } else if (radioDiagCliCommand(command, reply)) {
+    //en: radio-agnostic bench diagnostics ('fk rssi|hammer|reinit')
+#endif
 #ifdef FK_NICERF2021F33_TEST
   } else if (nicerfTestCliCommand(command, reply)) {
     //en: bench test CLI ('fk …') for the NiceRF LR2021 module — variant target.cpp
@@ -1512,26 +1516,122 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
   quietly therefore leaves the node running, printing heartbeats and forwarding
   nothing, until someone power-cycles it.
 
-  The signal used here is radio-agnostic: an unresponsive SPI slave makes
-  getCurrentRSSI() return a physically impossible value. Observed on a module
-  whose supply had been cut: last_rssi = -169 dBm and the noise floor pinned at
-  its -120 clamp. Real thermal noise never goes near -150, so that is a safe
-  threshold for any of the supported radios.
+  The liveness test is RadioLibWrapper::isChipResponding(), so each radio can
+  answer in the way that actually works for it:
+    - LR2021 (default test): a lost supply makes getCurrentRSSI() return
+      -255 dBm; real thermal noise never approaches -150.
+    - SX126x: that test would be useless, because its instantaneous RSSI is a
+      single byte and can only express 0 .. -127.5 dBm - a dead SPI bus reads as
+      0 dBm or -127.5 dBm, both of which look legal. It checks the status byte
+      instead (0x00 / 0xFF are not valid chipMode/cmdStatus combinations).
 
   Three consecutive bad reads (i.e. ~90 s) are required before acting, so a
   single glitch cannot trigger a re-init.
 */
+/*
+  Take a burst of instantaneous RSSI readings and report the spread.
+
+  This is the liveness signal we are evaluating. A live receiver cannot return a
+  constant: thermal noise plus the 0.5 dB resolution guarantee the value moves
+  between reads. An unresponsive SPI slave returns the same byte every time -
+  0x00, 0xFF, or on LR2021 the -255 dBm we measured with the supply cut.
+
+  Unlike everything tried before it, this needs no traffic (so a 47-hour advert
+  interval does not matter), no mode changes and no register writes - the noise
+  floor sampler already reads RSSI this way, continuously.
+*/
+void MyMesh::radioSampleRssi(int n, int* out_min, int* out_max) {
+  int lo = 9999, hi = -9999;
+  for (int i = 0; i < n; i++) {
+    int r = (int) radio_driver.getCurrentRSSI();
+    if (r < lo) lo = r;
+    if (r > hi) hi = r;
+    delay(1);
+  }
+  *out_min = lo; *out_max = hi;
+}
+
+#ifdef LORA_RADIO_DIAG_CLI
+/*
+  Bench diagnostics, radio-agnostic (works on SX126x and LR2021 alike):
+    fk rssi [n]    - n RSSI samples (default 32), report min/max/spread
+    fk hammer [n]  - n rapid standby+startReceive cycles. This is what wedged an
+                     SX1262 hard enough that RadioLib's 1 ms reset pulse could not
+                     recover it - only sitting in the bootloader did. Use it to
+                     reproduce that state deliberately.
+    fk reinit      - run the full recovery by hand
+  Module-specific commands (simo/ce/pram) are left to the variant handler.
+*/
+bool MyMesh::radioDiagCliCommand(char* command, char* reply) {
+  if (memcmp(command, "fk ", 3) != 0) return false;
+  const char* arg = command + 3;
+
+  if (memcmp(arg, "rssi", 4) == 0) {
+    int n = (arg[4] == ' ') ? atoi(arg + 5) : 32;
+    if (n < 2 || n > 200) n = 32;
+    int lo = 0, hi = 0;
+    radioSampleRssi(n, &lo, &hi);
+    sprintf(reply, "rssi n=%d min=%d max=%d spread=%d %s", n, lo, hi, hi - lo,
+            (hi == lo) ? "CONSTANT -> chip not measuring" : "varying -> alive");
+    return true;
+  }
+
+  if (memcmp(arg, "hammer", 6) == 0) {
+    int n = (arg[6] == ' ') ? atoi(arg + 7) : 50;
+    if (n < 1 || n > 2000) n = 50;
+    //en: isChipResponding() is exactly the operation that wedged an SX1262 when it
+    //en: ran every 30 s (standby -> register read -> re-arm Rx). Hammering it
+    //en: compresses days of that into seconds.
+    int ok = 0;
+    for (int i = 0; i < n; i++) { if (radio_driver.isChipResponding()) ok++; }
+    int lo = 0, hi = 0;
+    radioSampleRssi(16, &lo, &hi);
+    sprintf(reply, "hammer x%d (%d ok) | rssi min=%d max=%d spread=%d", n, ok, lo, hi, hi - lo);
+    return true;
+  }
+
+  if (memcmp(arg, "reinit", 6) == 0) {
+    bool ok = radio_init();
+    if (ok) {
+      radio_driver.begin();
+      radio_driver.setParams(_prefs.freq, _prefs.bw, _prefs.sf, _prefs.cr);
+      radio_driver.setTxPower(_prefs.tx_power_dbm);
+      radio_driver.setRxBoostedGainMode(_prefs.rx_boosted_gain);
+    }
+    int lo = 0, hi = 0;
+    radioSampleRssi(16, &lo, &hi);
+    sprintf(reply, "reinit %s | rssi min=%d max=%d spread=%d", ok ? "OK" : "FAILED", lo, hi, hi - lo);
+    return true;
+  }
+
+  return false;   //en: not ours - let the variant handler have it
+}
+#endif
+
 void MyMesh::radioWatchdogLoop() {
   if (!millisHasNowPassed(next_radio_check)) return;
   next_radio_check = futureMillis(LORA_RADIO_WATCHDOG);
 
-  float rssi = radio_driver.getCurrentRSSI();
-  if (rssi > -150.0f) { radio_dead_count = 0; return; }   //en: plausible -> alive
+#ifdef LORA_RADIO_DIAG_ONLY
+  //en: OBSERVATION MODE - measure and report, never act. Used to find out what a
+  //en: healthy radio's RSSI spread actually looks like on each chip before any
+  //en: threshold is chosen. Three earlier attempts at a liveness test were built
+  //en: on assumptions and all three were wrong, so this time: measure first.
+  {
+    int lo = 0, hi = 0;
+    radioSampleRssi(16, &lo, &hi);
+    Serial.printf("[FK] rssi-probe min=%d max=%d spread=%d%s\r\n", lo, hi, hi - lo,
+                  (hi == lo) ? "  <== CONSTANT" : "");
+  }
+  return;
+#endif
+
+  if (radio_driver.isChipResponding()) { radio_dead_count = 0; return; }
 
   radio_dead_count++;
-  MESH_DEBUG_PRINTLN("radioWatchdog: implausible RSSI %d dBm (%d/3)", (int)rssi, (int)radio_dead_count);
-  Serial.printf("[FK] radio watchdog: implausible RSSI %d dBm (%d/3)\r\n",
-                (int)rssi, (int)radio_dead_count);
+  MESH_DEBUG_PRINTLN("radioWatchdog: radio not answering (%d/3)", (int)radio_dead_count);
+  Serial.printf("[FK] radio watchdog: chip not answering, rssi=%d dBm (%d/3)\r\n",
+                (int)radio_driver.getCurrentRSSI(), (int)radio_dead_count);
   if (radio_dead_count < 3) return;
 
   radio_dead_count = 0;

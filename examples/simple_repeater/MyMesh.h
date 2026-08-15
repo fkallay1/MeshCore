@@ -91,6 +91,8 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks {
   unsigned long next_radio_check = 0;
   uint8_t radio_dead_count = 0;
   void radioWatchdogLoop();
+  void radioSampleRssi(int n, int* out_min, int* out_max);
+  bool radioDiagCliCommand(char* command, char* reply);
 #endif
   bool _logging;
   NodePrefs _prefs;

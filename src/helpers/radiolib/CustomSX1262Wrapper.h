@@ -29,6 +29,23 @@ public:
   float getCurrentRSSI() override {
     return ((CustomSX1262 *)_radio)->getRSSI(false);
   }
+
+  //en: The default RSSI-plausibility test cannot work here: SX126x returns the
+  //en: instantaneous RSSI as a single byte, so it can only ever report 0 ..
+  //en: -127.5 dBm - a dead SPI bus reads 0x00 (-> 0 dBm) or 0xFF (-> -127.5 dBm)
+  //en: and both look like legal values. Read the identity register instead.
+  bool isChipResponding() override {
+    //en: register reads are only meaningful in standby - findChip() does its read
+    //en: right after a reset. Probing from Rx returns garbage and would report a
+    //en: perfectly healthy radio as dead. So drop to standby, read, re-arm Rx.
+    //en: Costs about a millisecond once per watchdog interval; skipped entirely
+    //en: while a packet is in flight so nothing in progress is lost.
+    if (isReceivingPacket()) return true;
+    _radio->standby();
+    bool ok = ((CustomSX1262 *)_radio)->chipResponds();
+    startRecv();
+    return ok;
+  }
   float getLastRSSI() const override { return ((CustomSX1262 *)_radio)->getRSSI(); }
   float getLastSNR() const override { return ((CustomSX1262 *)_radio)->getSNR(); }
 

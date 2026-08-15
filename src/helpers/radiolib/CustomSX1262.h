@@ -12,6 +12,20 @@ class CustomSX1262 : public SX1262 {
   public:
     CustomSX1262(Module *mod) : SX1262(mod) { }
 
+    //en: Liveness check for the radio watchdog. Reads the same identity register
+    //en: findChip() uses at startup and compares the first 6 characters, so a dead
+    //en: SPI bus (all-zeros or all-ones) fails while a live chip passes.
+    //en: NOTE: do NOT use SX126x::getStatus() for this - RadioLib calls
+    //en: SPIreadStream(..., &data, 0) with a length of ZERO, so it never writes to
+    //en: `data` and always returns 0x00, healthy chip or not.
+    //en: Unlike findChip() this does not reset the chip, so it is safe to call
+    //en: periodically while the radio is receiving.
+    bool chipResponds() {
+      char version[16] = { 0 };
+      readRegister(RADIOLIB_SX126X_REG_VERSION_STRING, reinterpret_cast<uint8_t*>(version), 16);
+      return strncmp(version, "SX1262", 6) == 0;
+    }
+
   #ifdef RP2040_PLATFORM
     bool std_init(SPIClassRP2040* spi = NULL)
   #else
