@@ -52,6 +52,9 @@ void RadioLibWrapper::begin() {
   // start average out some samples
   _num_floor_samples = 0;
   _floor_sample_sum = 0;
+#ifdef LORA_RADIO_WATCHDOG
+  _wd_rssi_min = 32767; _wd_rssi_max = -32768; _wd_samples = 0;
+#endif
 }
 
 uint32_t RadioLibWrapper::getRngSeed() {
@@ -124,6 +127,15 @@ void RadioLibWrapper::loop() {
   if (state == STATE_RX && _num_floor_samples < NUM_NOISE_FLOOR_SAMPLES) {
     if (!isReceivingPacket()) {
       int rssi = getCurrentRSSI();
+#ifdef LORA_RADIO_WATCHDOG
+      //en: record BEFORE the threshold filter below - that filter drops the upper
+      //en: half of the spread, and the spread is the whole point of this test.
+      //sk: zaznamenaj PRED prahovym filtrom nizsie - ten odreze hornu polovicu
+      //sk: rozptylu, a prave rozptyl je zmyslom tohto testu.
+      if (rssi < _wd_rssi_min) _wd_rssi_min = rssi;
+      if (rssi > _wd_rssi_max) _wd_rssi_max = rssi;
+      _wd_samples++;
+#endif
       if (rssi < _noise_floor + SAMPLING_THRESHOLD) {  // only consider samples below current floor + sampling THRESHOLD
         _num_floor_samples++;
         _floor_sample_sum += rssi;

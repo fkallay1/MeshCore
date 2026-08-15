@@ -21,6 +21,16 @@ protected:
   uint16_t _num_floor_samples;
   int32_t _floor_sample_sum;
   uint8_t _preamble_sf;
+#ifdef LORA_RADIO_WATCHDOG
+  //en: passive liveness stats, filled from the noise-floor sampler in loop() -
+  //en: that sampler already reads getCurrentRSSI() ~32x per second, so there is
+  //en: no reason for the watchdog to run its own blocking burst.
+  //sk: pasivna statistika zivota, plni ju vzorkovac noise-floor v loop() -
+  //sk: ten uz cita getCurrentRSSI() ~32x za sekundu, takze watchdog nema dovod
+  //sk: robit vlastnu blokujucu davku.
+  int16_t  _wd_rssi_min, _wd_rssi_max;
+  uint32_t _wd_samples;
+#endif
 
   void idle();
   void startRecv();
@@ -66,6 +76,20 @@ public:
   virtual int16_t performChannelScan();
 
   int getNoiseFloor() const override { return _noise_floor; }
+#ifdef LORA_RADIO_WATCHDOG
+  //en: read the accumulated window and start a fresh one. 'samples' is the more
+  //en: reliable signal of the two: it only advances while the chip is actually
+  //en: armed in Rx, so a stalled receiver shows up even on a dead-quiet channel.
+  //sk: precitaj nazbierane okno a zacni nove. 'samples' je spolahlivejsi z tych
+  //sk: dvoch: rastie len kym je cip naozaj v RX, takze zaseknuty prijimac sa
+  //sk: prejavi aj na uplne tichom kanali.
+  void takeRssiWindow(int* out_min, int* out_max, uint32_t* out_samples) {
+    *out_samples = _wd_samples;
+    *out_min = _wd_samples ? _wd_rssi_min : 0;
+    *out_max = _wd_samples ? _wd_rssi_max : 0;
+    _wd_rssi_min = 32767; _wd_rssi_max = -32768; _wd_samples = 0;
+  }
+#endif
   void triggerNoiseFloorCalibrate(int threshold) override;
   void setCADEnabled(bool enable) override { _cad_enabled = enable; }
   void resetAGC() override;

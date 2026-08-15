@@ -65,11 +65,20 @@ void setup() {
 #endif
 
 #ifdef DISPLAY_CLASS
-  if (display.begin()) {
-    display.startFrame();
-    display.setCursor(0, 0);
-    display.print("Please wait...");
-    display.endFrame();
+  {
+    bool disp_ok = display.begin();
+  #ifdef FK_DEBUG
+    //en: an I2C panel that does not ACK stays silent with no other symptom - say so
+    //sk: I2C panel, ktory neodpovie, ostane ticho bez ineho priznaku - vypis to
+    Serial.print("[FK] display.begin() -> ");
+    Serial.println(disp_ok ? "OK" : "FAILED (no I2C ACK - wiring/address/power?)");
+  #endif
+    if (disp_ok) {
+      display.startFrame();
+      display.setCursor(0, 0);
+      display.print("Please wait...");
+      display.endFrame();
+    }
   }
 #endif
 

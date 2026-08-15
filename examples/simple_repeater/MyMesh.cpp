@@ -1529,16 +1529,18 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
   single glitch cannot trigger a re-init.
 */
 /*
-  Take a burst of instantaneous RSSI readings and report the spread.
+  ACTIVE probe - on-demand only, used by 'fk rssi'/'fk hammer'/'fk reinit'.
 
-  This is the liveness signal we are evaluating. A live receiver cannot return a
-  constant: thermal noise plus the 0.5 dB resolution guarantee the value moves
-  between reads. An unresponsive SPI slave returns the same byte every time -
-  0x00, 0xFF, or on LR2021 the -255 dBm we measured with the supply cut.
+  The watchdog does NOT use this: RadioLibWrapper::loop() already reads
+  getCurrentRSSI() about 32 times a second for its noise floor (Dispatcher
+  re-arms the sampler every NOISE_FLOOR_CALIB_INTERVAL = 2 s, 64 samples a
+  round), so min/max is collected there for free - see takeRssiWindow(). A
+  blocking burst would add nothing but ~n ms of stalled loop.
 
-  Unlike everything tried before it, this needs no traffic (so a 47-hour advert
-  interval does not matter), no mode changes and no register writes - the noise
-  floor sampler already reads RSSI this way, continuously.
+  It stays for the bench, where it is genuinely useful: it answers immediately
+  instead of after a 30 s window, and it reads the chip directly, so it still
+  reports something when the receiver is NOT armed in Rx and the passive
+  sampler is therefore collecting nothing at all.
 */
 void MyMesh::radioSampleRssi(int n, int* out_min, int* out_max) {
   int lo = 9999, hi = -9999;
@@ -1554,7 +1556,10 @@ void MyMesh::radioSampleRssi(int n, int* out_min, int* out_max) {
 #ifdef LORA_RADIO_DIAG_CLI
 /*
   Bench diagnostics, radio-agnostic (works on SX126x and LR2021 alike):
-    fk rssi [n]    - n RSSI samples (default 32), report min/max/spread
+    fk rssi [n]    - ACTIVE burst of n RSSI samples (default 32), min/max/spread
+    fk win         - read the PASSIVE window the watchdog uses (and reset it).
+                     n=0 means the receiver was never armed in Rx since the last
+                     read - which is what the watchdog treats as dead.
     fk hammer [n]  - n rapid standby+startReceive cycles. This is what wedged an
                      SX1262 hard enough that RadioLib's 1 ms reset pulse could not
                      recover it - only sitting in the bootloader did. Use it to
@@ -1573,6 +1578,19 @@ bool MyMesh::radioDiagCliCommand(char* command, char* reply) {
     radioSampleRssi(n, &lo, &hi);
     sprintf(reply, "rssi n=%d min=%d max=%d spread=%d %s", n, lo, hi, hi - lo,
             (hi == lo) ? "CONSTANT -> chip not measuring" : "varying -> alive");
+    return true;
+  }
+
+  if (memcmp(arg, "win", 3) == 0) {
+    //en: NOTE: this consumes the window, so the watchdog check right after it
+    //en: sees only what accumulated since. At ~32 samples/s that refills in well
+    //en: under a second, so it cannot cause a false 'dead' verdict in practice.
+    int lo = 0, hi = 0;
+    uint32_t n = 0;
+    radio_driver.takeRssiWindow(&lo, &hi, &n);
+    sprintf(reply, "win n=%lu min=%d max=%d spread=%d %s", (unsigned long)n, lo, hi,
+            n ? (hi - lo) : -1,
+            (n == 0) ? "NO SAMPLES -> not armed in Rx" : (hi == lo) ? "CONSTANT -> chip not measuring" : "varying -> alive");
     return true;
   }
 
@@ -1612,26 +1630,46 @@ void MyMesh::radioWatchdogLoop() {
   if (!millisHasNowPassed(next_radio_check)) return;
   next_radio_check = futureMillis(LORA_RADIO_WATCHDOG);
 
+  //en: Read the window the noise-floor sampler filled since the last check and
+  //en: start a fresh one. This costs no SPI traffic of its own, which also means
+  //en: it cannot repeat the mistake of the earlier attempts: the standby ->
+  //en: register read -> re-arm Rx sequence they used is exactly what wedged an
+  //en: SX1262 hard enough that only a power cycle recovered it.
+  //sk: Precitaj okno, ktore od minulej kontroly naplnil vzorkovac noise-floor, a
+  //sk: zacni nove. Nestoji to ziadnu vlastnu SPI komunikaciu, takze to ani
+  //sk: nemoze zopakovat chybu skorsich pokusov: sekvencia standby -> citanie
+  //sk: registra -> znovu do RX bola prave to, co zaseklo SX1262 tak, ze pomohol
+  //sk: az power cycle.
+  int lo = 0, hi = 0;
+  uint32_t samples = 0;
+  radio_driver.takeRssiWindow(&lo, &hi, &samples);
+  int spread = samples ? (hi - lo) : -1;
+
+  //en: Two independent failure signatures:
+  //en:  samples == 0 - the sampler never ran, so the receiver was not armed in Rx
+  //en:                 for the whole window. Holds even on a dead-quiet channel.
+  //en:  spread  == 0 - it ran, but every read returned the same byte. A live
+  //en:                 receiver cannot do that: thermal noise plus the 0.5 dB
+  //en:                 step guarantee movement. A dead SPI slave reads 0x00 or
+  //en:                 0xFF forever (and LR2021 gave -255 dBm with its supply cut).
+  bool dead = (samples == 0) || (spread == 0);
+
 #ifdef LORA_RADIO_DIAG_ONLY
-  //en: OBSERVATION MODE - measure and report, never act. Used to find out what a
-  //en: healthy radio's RSSI spread actually looks like on each chip before any
-  //en: threshold is chosen. Three earlier attempts at a liveness test were built
-  //en: on assumptions and all three were wrong, so this time: measure first.
-  {
-    int lo = 0, hi = 0;
-    radioSampleRssi(16, &lo, &hi);
-    Serial.printf("[FK] rssi-probe min=%d max=%d spread=%d%s\r\n", lo, hi, hi - lo,
-                  (hi == lo) ? "  <== CONSTANT" : "");
-  }
+  //en: OBSERVATION MODE - measure and report, never act. Used to learn what a
+  //en: healthy radio actually looks like on each chip before trusting the rule.
+  Serial.printf("[FK] rssi-window n=%lu min=%d max=%d spread=%d%s\r\n",
+                (unsigned long)samples, lo, hi, spread,
+                dead ? ((samples == 0) ? "  <== NO SAMPLES" : "  <== CONSTANT") : "");
   return;
 #endif
 
-  if (radio_driver.isChipResponding()) { radio_dead_count = 0; return; }
+  if (!dead) { radio_dead_count = 0; return; }
 
   radio_dead_count++;
   MESH_DEBUG_PRINTLN("radioWatchdog: radio not answering (%d/3)", (int)radio_dead_count);
-  Serial.printf("[FK] radio watchdog: chip not answering, rssi=%d dBm (%d/3)\r\n",
-                (int)radio_driver.getCurrentRSSI(), (int)radio_dead_count);
+  Serial.printf("[FK] radio watchdog: %s (n=%lu min=%d max=%d) (%d/3)\r\n",
+                (samples == 0) ? "receiver never armed in Rx" : "RSSI constant - chip not measuring",
+                (unsigned long)samples, lo, hi, (int)radio_dead_count);
   if (radio_dead_count < 3) return;
 
   radio_dead_count = 0;
