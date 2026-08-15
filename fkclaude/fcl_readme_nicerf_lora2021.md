@@ -80,30 +80,72 @@ Rovnaká konvencia ako ostatné výkonné dosky v MeshCore (RAK3401 „1W" a spo
 
 ### Nameraná krivka (2026-08-15, XIAO + modul, offset +8)
 
-| `set tx` | výstup | paVal | datasheet @5 V | merané | pomer |
-|---|---|---|---|---|---|
-| 15 | ~23 dBm | 17 | ~312 mA | 359 mA | 1,15× |
-| 16 | ~24 | 19 | ~336 | 392 | 1,17× |
-| 17 | ~25 | 21 | ~368 | 427 | 1,16× |
-| 18 | ~26 | 24 | ~416 | 491 | 1,18× |
-| 19 | ~27 | 27 | ~468 | 560 | 1,20× |
-| 20 | ~28 | 30 | ~522 | 635 | 1,22× |
-| 21 | ~29 | 35 | ~605 | 780 | 1,29× |
-| 22 | ~30 | 44 | ~724 | 950 | 1,31× |
+Merané celkovo na napájaní. **Odber samotného XIAO je 9,5 mA** (odmerané
+odpojením VCC modulu), preto stĺpec „modul" = merané − 9,5 mA. Datasheetové
+prúdy platia pre modul samotný pri 5 V.
 
-**Rastúci pomer = prepad napájania**, nie odber XIAO (ten je konštanta a pomer by
-klesal). Datasheetové prúdy sú pri 5 V; jeho tabuľka napätie/výkon dáva pri 4,0 V
-už len 28,2 dBm @626 mA a pri 3,3 V 26,2 dBm @540 mA. Pomer 1,15–1,31 sedí na
-VCC okolo 4,3–4,5 V pod záťažou. **Merať napätie priamo na pine 1 modulu počas
-TX** — ak tam pri ~1 A nie je aspoň 4,5 V, horné stupne aj tak nedávajú, čo majú.
+| `set tx` | výstup | paVal | datasheet | merané | modul | pomer |
+|---|---|---|---|---|---|---|
+| 6 | ~14 dBm | −4 | ~186 mA | 204 mA | 194,5 | 1,05 |
+| 7 | ~15 | −1 | — | 212 | 202,5 | — |
+| 8 | ~16 | 1 | ~197 | 218 | 208,5 | 1,06 |
+| 9 | ~17 | 3 | — | 227 | 217,5 | — |
+| 10 | ~18 | 5 | ~213 | 236 | 226,5 | 1,06 |
+| 11 | ~19 | 7 | ~221 | 250 | 240,5 | 1,09 |
+| 12 | ~20 | 10 | ~243 | 273 | 263,5 | 1,08 |
+| 13 | ~21 | 12 | ~265 | 292 | 282,5 | 1,07 |
+| 14 | ~22 | 14 | ~277 | 315 | 305,5 | **1,10** |
+| 15 | ~23 | 17 | ~312 | 345 | 335,5 | 1,08 |
+| 17 | ~25 | 21 | ~368 | 427 | 417,5 | 1,13 |
+| 19 | ~27 | 27 | ~468 | 560 | 550,5 | 1,18 |
+| 21 | ~29 | 35 | ~605 | 780 | 770,5 | 1,27 |
+| 22 | ~30 | 44 | ~724 | 950 | 940,5 | **1,30** |
 
-**Prevádzkové optimum je `set tx 18–19`** (~26–27 dBm, 0,49–0,56 A). Z 19 na 22
-je +70 % prúdu za asi +2 dB. Navyše 27 dBm ERP je presne strop pásma
-869,4–869,65 pri 10 % duty. `set tx 22` (0,95 A) je laboratórna hodnota — je to
-dvojnásobok toho, čo garantuje USB2.
+**Do ~0,35 A je zhoda s datasheetom výborná (5–10 %)** — zvyšok vysvetlí kľudový
+odber LDO modulu a to, že VCC nie je presne 5 V ako pri ich meraní.
 
-Krivka je hladká a monotónna, čo je zároveň dobrá správa o prispôsobení antény
-(pri zlom matchi býva odber rozhádzaný).
+**Nad ~0,5 A pomer rastie na 1,18–1,30** a to už je konzistentné s prepadom
+napájania: pri takom prúde je úbytok na kábloch a USB ceste výrazný, a
+datasheetová tabuľka napätie/výkon dáva pri 4,0 V už len 28,2 dBm @626 mA
+a pri 3,3 V 26,2 dBm @540 mA. Ak by sa niekedy jazdilo na hornom konci
+ciferníka, **zmerať VCC priamo na pine 1 modulu počas TX** (krátka špička →
+treba ADC delič alebo niekoľkosekundovú CW nosnú). Pri `tx ≤ 15` netreba.
+
+**Prevádzkové optimum:** `set tx 6` (~14 dBm) pre bežné 868 subpásma,
+`set tx 19` (~27 dBm) je strop pásma 869,4–869,65 pri 10 % duty. Z 19 na 22
+je +70 % prúdu za asi +2 dB — nemá zmysel. `tx 22` (0,95 A) je laboratórna
+hodnota, dvojnásobok toho, čo garantuje USB2.
+
+Krivka je hladká a monotónna cez 10 bodov, čo je dobrá správa aj o stabilite PA,
+aj o prispôsobení 17 cm antény (pri zlom matchi býva odber rozhádzaný).
+
+**Overenie posunu +8:** rovnaký `paVal` dáva rovnaký prúd pred aj po zmene
+offsetu — `tx 14`→`tx 6` (0,200/0,204 A), `18`→`10` (0,230/0,236),
+`20`→`12` (0,268/0,273), `22`→`14` (0,310/0,315). Rozdiel konštantných 4–6 mA
+naprieč rozsahom, čiže **posun je čisté prečíslovanie, fyzika identická**.
+
+### RX boosted gain — na LR2021 doskách vypnutý, zapnúť ručne
+
+`rx_boosted_gain` má v prefs default **0** a repeater ho na 1 prepína len
+v bloku `#if defined(USE_SX1262) || defined(USE_SX1268)` (`MyMesh.cpp:1128`),
+do ktorého LR2021 nespadá. Žiadny LR2021 variant nedefinuje ani
+`LR2021_RX_BOOSTED_GAIN`. **Takže všetky SX1262 repeatre ho majú zapnutý
+a LR2021 dosky nie** — vrátane upstream `meshtracker_x1` a `meshnology_w12`.
+Vyzerá to na prehliadnutie, nie zámer; kandidát na upstream.
+
+Zapnutie za behu (uloží sa do prefs, prežije reštart): `set radio.rxgain on`
+
+**Cena odmeraná 2026-08-15: 20 mA → 18–18,5 mA po vypnutí, čiže ~1,5–2 mA.**
+Prínos sa na stole nedá zmerať (susedia dorážajú na −43 až −68 dBm, čo je
+45–70 dB nad hranicou šumu; RSSI aj `nf` ostali identické) — prejaví sa až na
+slabých linkách, typicky 1–3 dB citlivosti. Ten prúdový rozdiel je zároveň
+jediný dôkaz, že sa boost naozaj aplikoval.
+
+⚠️ Pri natrvalo do variantu **pozor na semantiku**: `LR2021::setRxBoostedGainMode()`
+berie **úroveň 0–7**, nie bool, a `CustomLR2021::std_init()` posiela hodnotu
+definu priamo ako úroveň. Takže `-D LR2021_RX_BOOSTED_GAIN=1` = úroveň 1;
+ekvivalent CLI zapnutia je **`=7`** (wrapper posiela `LR2021_RX_BOOST_LEVEL`,
+default 7).
 
 **Prečo nie čisto RAK štýlom** (stock tabuľka RadioLibu, číslo = budenie čipu):
 RAK-ov SKY66122 pridáva ~8 dB, tento PA ~16 dB pri nízkom budení a saturuje sa
@@ -256,19 +298,193 @@ Známa vrtochovitosť je ošetrená v `RadioLibWrappers.cpp`: so zapnutými side
 detektormi vracal LR2021 `-706` pri `startReceive()` po hardvérovom CAD, preto sa
 tam volá `standby()` navyše.
 
+## PRAM (firmvérový patch čipu) — preskúmané 2026-08-15, zatiaľ NEROBÍME
+
+LR2021 má **patch RAM**: Semtech dodáva binárnu záplatu, ktorú hostiteľ nahráva do
+čipu. **Je volatilná** — stratí sa pri resete a pri studenom štarte, prežije len
+spánok s retenciou. ZephCore to v 1.17.1 pridal, MeshCore nie.
+
+**My to nerobíme a čip beží nezáplatovaný.** RadioLib API má (`activatePram()`,
+`checkPramLoaded()`, `getPramVersion()`, správne konštanty), ale **sám ho nikdy
+nevolá**, blob nedodáva, a tie metódy sú **privátne** (za `#if !RADIOLIB_GODMODE`),
+takže ich `CustomLR2021` ani nemá ako zavolať.
+
+### Mechanizmus (Semtech `lr20xx_patch.c`, Clear BSD)
+
+1. zápis blobu na `0x801000` po blokoch 32 slov (`write_regmem32`)
+2. príkaz `0x012D` = enable PRAM
+3. kontrola magic slova na `0x800FF8`, očakáva sa `0x600DB002`;
+   typ a verzia na `0x800FFC`
+
+Čitateľné je len `{ is_pram_loaded, pram_type, pram_version }` — PRAM **nie je**
+zdroj informácií o čipe, je to kódová pamäť. Sériové číslo LR2021 nemá vôbec.
+
+**Blob aj loader máme lokálne** v NiceRF demo balíku
+(`lr20xx_driver/inc/lr20xx_pram_lr2021.h`, `src/lr20xx_pram_load.c`,
+`src/lr20xx_patch.c`), driver **v2.0.2**. NiceRF ho vo svojom demo nahráva ako
+**prvý krok** inicializácie (`lr2021.c:92`). Veľkosť **406 slov = 1 624 B**
+(ZephCore uvádza 2 240 B flashu aj s loaderom, +80 nA v retenčnom spánku).
+Max. veľkosť PRAM nie je v našich materiáloch nikde uvedená.
+
+**Verzia drivera je aktuálna — netreba nič sťahovať** (overené 2026-08-15):
+NiceRF demo aj ZephCore majú zhodne **v2.0.2** a PRAM blob je **bajt na bajt
+identický** (406 slov, sha256 prefix `88d560ee582f3515`). Oficiálny
+`Lora-net/usp` má paradoxne staršiu v1.3.4 (11/2025); samostatný
+`lr20xx_driver` repozitár neexistuje (Lora-net ho má len pre sx126x, llcc68,
+lr1110, lr1121). **Chýba nám len novšia revízia datasheetu** — pýtať od NiceRF.
+
+### Čo patch opravuje
+
+README drivera v2.0.2 enumeruje: 4× Bluetooth LE (Coded PHY access address,
+frequency drift, 2 Mbps preamble, blocking), 3× RTToF (PLL frequency step, RSSI
+computation, extended mode stuck) a **DCDC (SIMO) impact on sensitivity** pre
+sub-GHz FSK/FLRC/OOK/**LoRa**/Z-Wave.
+
+**Ani jedno sa nás netýka** — BLE ani ranging nepoužívame a DC-DC nemáme
+(viď nižšie). Ale: v2.0.2 v tom istom vydaní **zmazal** workaround funkcie pre
+BLE, RTToF a DC-DC, lebo ich patch nahradil.
+
+### Datasheet Rev 2.1 — doslovné znenie (STIAHNUTÉ 2026-08-15)
+
+Náš pôvodný **Rev 1.1 (10/14/25) je zastaraný** — o PRAM v ňom nie je nič
+(§22.3 je „RTToF PLL Frequency Step Truncation"). Aktuálny je
+**LR20xx Datasheet Rev 2.1 (13/04/26, 243 strán, LR2021/LR2022/LR2012)**,
+zmenový záznam uvádza *„Added Section 22.3 Firmware Patch RAM (PRAM)"*:
+
+> While not strictly required, using the chip without the PRAM can create
+> performance issues and unexpected bugs. **The use of the PRAM is therefore
+> highly recommended.**
+>
+> - The PRAM is lost after a reset or a cold start.
+> - The PRAM is preserved during a sleep with retention.
+> - The sleep current with retention will increase by **80 nA** when the PRAM
+>   is loaded.
+
+§22 úvod: *„Most of the workarounds are implemented in the Firmware Patch RAM,
+loaded directly by the drivers during initialization."* — teda širšie než
+enumerovaný zoznam nižšie, a vysvetľuje, prečo v Rev 2.1 zmizli BLE workaroundy
+zo zoznamu funkcií.
+
+§22.3.1 predpisuje nahrávať **po resete a po prebudení z deep sleep („cold
+sleep")**, presne v poradí `GetVersion` → `WriteRegMem32` od `0x801000` →
+opcode `0x012D` s bajtom `0x00`; §22.3.2 kontrola `0x800FF8` == `0x600DB002`,
+verzia z `0x800FFC` ako `((val >> 8) & 0xffff)`.
+
+### Ako to robí ZephCore (vzor, ak sa do toho pustíme)
+
+Nahráva **len v resetových cestách**, nie pri každom boote: obraz prežije spánok
+s retenciou, a ich driver iný spánok nepoužíva. Postup v `lr20xx_load_pram()`:
+`get_version` → kontrola **0x01/0x18** (existujú dva obrazy, druhý pre
+LR2012/LR2022) → `load_pram` → `enable_pram` → **spätné čítanie magic slova**.
+Zlyhanie je len `LOG_WRN`, init nepadne. Volá sa z `lr20xx_hardware_reset()`,
+čiže hneď po resete a **pred** konfiguráciou (rovnako ako NiceRF demo).
+
+**Náš problém s poradím:** RadioLib `begin()` je monolit a `findChip()` čip
+resetuje (až 10×), takže patch by šiel až **po** `std_init()`, teda po
+konfigurácii. Či to čipu prekáža, treba overiť na železe. Plus by bolo treba
+`-D RADIOLIB_GODMODE=1` kvôli prístupu k privátnym metódam.
+
+**Pozor:** MeshCore `resetAGC()` robí `_radio->sleep()`. Ak by to bol spánok bez
+retencie, patch sa stratí. U nás zatiaľ nehrozí (`agc_reset=0`, viď
+[[agc_keep_standard]]), ale pri zapnutí AGC resetu to overiť.
+
+## DC-DC (SIMO) — prečo ho nemáme a nepotrebujeme
+
+SIMO (Single Inductor Multiple Output) je spínaný menič, ktorým si čip vyrába
+vnútorné napájacie vetvy účinnejšie než lineárnym regulátorom — nižší odber,
+hlavne v RX a pri nižších TX výkonoch. Datasheet: *„The LR2021 uses an internal
+SIMO converter and voltage regulation system to supply VR_PA."*
+
+Podmienka (§3.6): **externá cievka 2,2 µH**, DCR max 0,5 Ω, Isat min 200 mA,
+rezonančná frekvencia min 20 MHz, na pinoch **VDCC1/VDCC2** (~1,55 V, max 20 mA).
+
+### Či ho modul podporuje — NEVIEME (otvorené)
+
+⚠️ **Skoršie tvrdenie „VDCC1/VDCC2 nie sú vyvedené, takže SIMO sa nedá zapnúť"
+bolo NESPRÁVNE.** Stálo na parafráze fóra, nie na dokumente, a bolo aj vecne
+mimo: cievka nepatrí na VDCC, ale na piny **LXA/LXB**. VDCC1↔VDCC2 a
+VPAX1↔VPAX2 sú len externé prepojky, ktoré potrebujú **oba** režimy.
+
+LXA/LXB sú vnútri modulu, von nevedú, a NiceRF vnútornú schému nezverejňuje —
+bloková schéma v ich datasheete (str. 4) ukazuje len `VCC → LDO → 3,3 V` a FEM,
+nie okolie čipu. **Z dokumentov sa teda nedá zistiť, či tam cievka je.**
+
+Indície, že **je**:
+- ich demo kód nastavuje `LR20XX_SYSTEM_REG_MODE_DCDC`,
+- modul udáva RX prúd **<8 mA**, čip má v SIMO **5,7 mA** (v LDO by bol vyšší),
+- datasheet čipu: *„All performance given with SIMO used to power the chip"*.
+
+**Zistiť sa to dá testom** (nepotrebuje prepájanie): `standby()` →
+`setRegMode(SIMO_NORMAL=0x02)` → či čip ďalej beží + zmerať RX prúd. Potrebuje
+`-D RADIOLIB_GODMODE=1` (`setRegMode` je privátna) a príkaz je platný **len
+v Standby RC**. Riziko nízke (bez cievky niet indukčnosti na zákmit, menič len
+nevytvorí napätia), ale je to nedeklarovaná konfigurácia.
+
+### Čo hovorí datasheet Rev 2.1 (§23.1)
+
+> The DC-DC configuration is **strongly recommended for battery-operated
+> applications** as it reduces power consumption by **up to 50 %** compared to
+> LDO mode, as its efficiency exceeds 85 %. … PA_LF operation at +22 dBm
+> requires a supply voltage greater than 2.2 V when running on the SIMO.
+
+Cievka podľa §3.6: **2,2 µH**, DCR max 0,5 Ω, Isat min 200 mA, rezonančná
+frekvencia min 20 MHz.
+
+**Default je LDO** — `SetRegMode` má `0x00: SIMO_OFF … (Default)`, a náš firmware
+`setRegMode()` nevolá vôbec. Takže dnes beží čip v LDO režime.
+
+Pozor na súvislosť s PRAM: driver README uvádza *„DCDC (SIMO) impact on
+sensitivity"* pre sub-GHz LoRa ako limitáciu, ktorú **opravuje práve PRAM**
+(a datasheet čipu inde píše *„The sensitivity is increased in LDO mode"*).
+Čiže **ak sa pôjde do DC-DC kvôli batérii, PRAM prestáva byť voliteľná.**
+
+### Dva stupne napájania — nezamieňať
+
+```
+VCC → LDO modulu (riadi CE) → 3,3 V → VBAT čipu → [LDO regulátory | SIMO] → VDCC/VPAX
+      ↑ vypnutie = modul bez napájania      ↑ toto prepína SetRegMode
+```
+
+Sub-GHz PA aj 2,4 GHz FEM visia **priamo na VCC**, nie na tom 3,3 V rozvode —
+cez LDO tečie len čip. Preto `vbat` hlási ~3,3 V bez ohľadu na to, čo je na VCC.
+
+**„Vypnúť LDO a nechať bežať DC-DC" nie je možný stav** — SIMO je *za* tým LDO
+a bez VBAT nemá z čoho vyrábať. A parazitné napájanie cez ESD diódy zo SPI pinov
+nie je náhrada: prúd je o dva rády mimo (GPIO nRF52840 dá 2–15 mA, rádio
+potrebuje 5,7–8 mA v RX a stovky mA v TX), napätie kolíše s dátami, a je to
+prevádzka mimo medzných hodnôt (datasheet tab. 3-1: *„Stresses above the values
+listed below may cause permanent device failure"*) s rizikom latch-up.
+NiceRF preto pri CE dole žiada stiahnuť aj NSS a RESET.
+
 ## Neoverené / otvorené
 
-- Celé je to zatiaľ **len skompilované, nie odskúšané na železe.**
-- PA tabuľka — interpolovaná, treba premerať.
+- **Má modul cievku pre SIMO?** Test opísaný vyššie, alebo otázka na NiceRF.
+  Rozhoduje o tom, či sa dá pri batérii ušetriť až 50 % spotreby.
+- **PA tabuľka je interpolovaná, nie meraná** wattmetrom. Nepriamo overená
+  prúdom (zhoda 5–10 % do 0,35 A), ale absolútny výkon nikto nemeral.
+- **Prepad VCC nad ~0,5 A** — nemeraný, treba ADC delič alebo CW nosnú.
+  Pri `tx ≤ 15` netreba riešiť.
+- **PRAM sa nenahráva** — rozhodnutie odložené, viď sekciu vyššie.
 - DIO7 riešime ako RF-switch pin HIGH vo všetkých režimoch (demo používa
   `GPIO_HIGH` funkciu). Ekvivalentné by to malo byť, ale netestované.
+- **CE (pin 5) nie je zapojený**, drží ho interný pull-up. Pre batériu ho
+  pripojiť na voľný pin — **D5 je voľný** (D1–D4, D8–D10 zabraté rádiom, D6/D7
+  deklarované ako I2C, D0 = PIN_BUTTON1). Pri CE dole musia ísť dole aj NSS
+  a RESET, inak tečie cez ESD diódy.
 - ProMicro variant: stačí `variants/promicro_nicerf2021f33/` rovnakým strihom
   (target.h/.cpp + ini, board trieda požičaná z `variants/promicro`).
 
 ## Zdroje
 
-- Datasheet Rev 1.2 — <https://www.nicerf.com/lora-module/lora2021f33-2g4.html>
-- NiceRF demo kód V1.1 (`LoRa/Core/Src/lr2021.c` — DIO mapa, TCXO, PA cfg)
+- **LR20xx datasheet Rev 2.1** (13/04/26, aktuálny) —
+  <https://mm.digikey.com/Volume0/opasdata/d220001/medias/docus/8924/600_62785538.LR20xxDatasheet_V2_1.pdf>
+- Modul LoRa2021F33-2G4 datasheet Rev 1.2 —
+  <https://www.nicerf.com/lora-module/lora2021f33-2g4.html>
+- NiceRF demo kód V1.1, driver **v2.0.2** (`LoRa/Core/Src/lr2021.c` — DIO mapa,
+  TCXO, PA cfg; `Drivers/lr20xx_driver/README.md` — zoznam limitácií;
+  `inc/lr20xx_pram_lr2021.h` — PRAM blob). **Je to najnovšia verzia** — ZephCore
+  má tú istú a blob je bajt na bajt identický; `Lora-net/usp` má staršiu v1.3.4.
+- ZephCore (vzor pre PRAM) — <https://github.com/liquidraver/ZephCore>
 - RadioLib diskusia o tomto module: <https://github.com/jgromes/RadioLib/discussions/1772>
 - MeshCore issue #2740 (LR2021 + ESP32-C3, tiež IRQ na DIO9):
   <https://github.com/meshcore-dev/MeshCore/issues/2740>
