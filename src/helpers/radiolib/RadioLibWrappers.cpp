@@ -63,6 +63,27 @@ uint32_t RadioLibWrapper::getIsrEvents() const { return isr_event_count; }
 #endif
 
 void RadioLibWrapper::setTxPower(int8_t dbm) {
+#if defined(USE_LR2021)
+  //en: LR2021 only: setOutputPower() writes PA config + TxParams, which are
+  //en: standby-only commands. This wrapper deliberately keeps state == STATE_RX
+  //en: after readData ("LR2021 stays in Rx", see recvRaw), so unlike the SX126x
+  //en: path nothing ever calls startReceive() again on its own. Writing PA config
+  //en: from Rx could therefore leave the receiver down for good - a 'set tx' while
+  //en: listening made the radio deaf until reboot. Drop to standby first and let
+  //en: checkRecv() re-arm Rx, the same way resetAGC() and applySideDetectorConfig()
+  //en: already do. Dispatcher's stuck-radio check cannot catch this: it reads
+  //en: isInRecvMode(), which is our own state flag, not the chip.
+  //sk: Len LR2021: setOutputPower() zapisuje PA config a TxParams, čo sú príkazy
+  //sk: platné len v standby. Tento wrapper po readData zámerne drží
+  //sk: state == STATE_RX („LR2021 stays in Rx", viď recvRaw), takže na rozdiel od
+  //sk: SX126x cesty už nikto sám od seba nezavolá startReceive(). Zápis PA configu
+  //sk: počas Rx tak mohol zhodiť prijímač natrvalo - „set tx" počas počúvania
+  //sk: spravil z rádia hluchú dosku až do rebootu. Najprv teda standby a RX nech
+  //sk: znova nahodí checkRecv(), rovnako ako to už robí resetAGC() aj
+  //sk: applySideDetectorConfig(). Kontrola zaseknutého rádia v Dispatcheri to
+  //sk: nezachytí: číta isInRecvMode(), čo je náš vlastný príznak, nie stav čipu.
+  idle();
+#endif
   _radio->setOutputPower(dbm);
 }
 
