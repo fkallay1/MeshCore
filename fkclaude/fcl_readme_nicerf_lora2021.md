@@ -58,10 +58,14 @@ Modul berie **<800 mA @868 MHz/1 W** a **<1200 mA @433 MHz/2 W** (pri 5 V).
 XIAO to zo svojho 3V3 regulátora nedá. Vlastný zdroj + poriadny bulk kondenzátor,
 zem spoločná. Pri 3,3 V dá modul 26,2 dBm @868 pri 540 mA.
 
-Pozn.: NiceRF demo nastavuje `LR20XX_SYSTEM_REG_MODE_DCDC`, ale v RadioLib
-diskusii #1772 zistili, že **VDCC1/VDCC2 nie sú na module vôbec zapojené** a NiceRF
-potvrdil, že modul podporuje LDO režim. RadioLib `setRegMode()` sám od seba nevolá,
-takže čip ostáva vo východzom režime — netreba nič robiť.
+Modul má **vlastný LDO** (VCC → 3,3 V pre čip, riadi ho pin CE), zatiaľ čo
+**sub-GHz PA aj 2,4 GHz FEM visia priamo na VCC**. Cez ten LDO tečie len čip,
+preto `vbat` hlási ~3,3 V bez ohľadu na to, čo je na VCC.
+
+Pozn.: NiceRF demo nastavuje `LR20XX_SYSTEM_REG_MODE_DCDC` a **je to správne** —
+odmerali sme, že modul cievku pre SIMO má (viď sekciu DC-DC). Skoršie tvrdenie
+z RadioLib diskusie #1772, že „VDCC1/VDCC2 nie sú zapojené", bolo zavádzajúce:
+cievka patrí na **LXA/LXB**, VDCC/VPAX sú len prepojky potrebné v oboch režimoch.
 
 ## Ciferník výkonu (`set tx`)
 
