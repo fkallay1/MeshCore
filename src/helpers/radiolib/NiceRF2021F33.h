@@ -154,6 +154,79 @@ template <class T> static inline void nicerf2021f33_post_init(T& radio) {
   radio.setRfSwitchTable(nicerf2021f33_rfswitch_dios, nicerf2021f33_rfswitch_table);
 }
 
+/* ---------------------------------------------------------------------------
+   Firmware Patch RAM (PRAM) and SIMO regulator - both need RADIOLIB_GODMODE,
+   because setRegMode()/writeRegMem32()/activatePram() are private in RadioLib.
+
+   DS Rev 2.1 s22.3: the PRAM is lost on reset and cold start, preserved by a
+   sleep with retention, and costs +80 nA of retention sleep current. Semtech:
+   "using the chip without the PRAM can create performance issues and unexpected
+   bugs. The use of the PRAM is therefore highly recommended."
+
+   Note the ordering problem: LR2021::begin() calls findChip(), which resets the
+   chip (up to 10 times), so the patch cannot be loaded before std_init(). We
+   load it afterwards, which differs from Semtech's own sequence (they load it
+   right after reset, before configuration). Whether that matters is exactly
+   what the test commands are for.
+   --------------------------------------------------------------------------- */
+#if defined(RADIOLIB_GODMODE)
+
+//en: DS Rev 2.1 s22.3.1/s22.3.2 - same values RadioLib keeps in LR2021_registers.h,
+//en: redefined here so this header does not depend on a RadioLib internal include
+#define NICERF2021F33_PRAM_BASE          (0x801000UL)
+#define NICERF2021F33_PRAM_ADDR_LOADED   (0x800FF8UL)
+#define NICERF2021F33_PRAM_ADDR_VERSION  (0x800FFCUL)
+#define NICERF2021F33_PRAM_LOADED_MAGIC  (0x600DB002UL)
+
+#ifdef LR2021_PRAM_UPD
+#include "lr20xx_pram_lr2021.h"
+
+//en: write the image at 0x801000 in 32-word blocks, then activate (opcode 0x012D)
+template <class T> static inline int16_t nicerf2021f33_pram_load(T& radio) {
+  const uint32_t blocks = lr2021_pram_size / 32u;
+  for (uint32_t b = 0; b < blocks; b++) {
+    int16_t st = radio.writeRegMem32(NICERF2021F33_PRAM_BASE + b * 32u * 4u,
+                                     &lr2021_pram[b * 32u], 32u);
+    if (st != RADIOLIB_ERR_NONE) return st;
+  }
+  const uint32_t rest = lr2021_pram_size - blocks * 32u;
+  if (rest > 0) {
+    int16_t st = radio.writeRegMem32(NICERF2021F33_PRAM_BASE + blocks * 32u * 4u,
+                                     &lr2021_pram[blocks * 32u], rest);
+    if (st != RADIOLIB_ERR_NONE) return st;
+  }
+  return radio.activatePram();
+}
+#endif  // LR2021_PRAM_UPD
+
+//en: DS s22.3.2 - magic at 0x800FF8 must read 0x600DB002, version at 0x800FFC
+template <class T> static inline void nicerf2021f33_pram_status(T& radio, bool* loaded, uint16_t* ver) {
+  uint32_t magic = 0, raw = 0;
+  radio.readRegMem32(NICERF2021F33_PRAM_ADDR_LOADED, &magic, 1);
+  radio.readRegMem32(NICERF2021F33_PRAM_ADDR_VERSION, &raw, 1);
+  if (loaded) *loaded = (magic == NICERF2021F33_PRAM_LOADED_MAGIC);
+  if (ver)    *ver    = (uint16_t)((raw >> 8) & 0xFFFF);
+}
+
+/*
+   SIMO (DC-DC) on/off. DS s23.1: DC-DC is "strongly recommended for
+   battery-operated applications", up to 50% less consumption, but it needs an
+   external 2.2 uH inductor on LXA/LXB (s3.6) which we cannot confirm is fitted
+   on this module. Default after reset is SIMO_OFF (LDO). The command is only
+   valid in Standby RC, hence the standby() first.
+   Beware: DS lists "DCDC (SIMO) impact on sensitivity" for sub-GHz LoRa as a
+   limitation fixed by the PRAM - so DC-DC without the PRAM is a bad trade.
+*/
+template <class T> static inline int16_t nicerf2021f33_set_simo(T& radio, bool on) {
+  radio.standby();
+  //en: ramp times kept at the RadioLib default resolution; only simo_usage changes
+  const uint8_t ramps[4] = { 0, 0, 0, 0 };
+  return radio.setRegMode(on ? RADIOLIB_LR2021_REG_MODE_SIMO_NORMAL
+                             : RADIOLIB_LR2021_REG_MODE_SIMO_OFF, ramps);
+}
+
+#endif  // RADIOLIB_GODMODE
+
 /*
    Everything the chip can tell us about itself. The LR2021 has no UID / serial
    number command - GetVersion (0x0101) is the only identification there is, so
@@ -173,6 +246,11 @@ template <class T> static inline void nicerf2021f33_report(T& radio) {
 
   Serial.printf("[LR2021] NiceRF LoRa2021F33-2G4  fw=%u.%u  vbat=%umV  temp=%.1fC  errors=0x%04X\r\n",
                 (unsigned)major, (unsigned)minor, (unsigned)vbat_mv, temp, (unsigned)errors);
+#if defined(RADIOLIB_GODMODE)
+  bool pram_ok = false; uint16_t pram_ver = 0;
+  nicerf2021f33_pram_status(radio, &pram_ok, &pram_ver);
+  Serial.printf("[LR2021] pram: loaded=%s version=0x%04X\r\n", pram_ok ? "YES" : "no", (unsigned)pram_ver);
+#endif
   Serial.printf("[LR2021] irq=DIO%d  tcxo=%.1fV  freq=%.3fMHz  band=%s  rfsw=DIO5/DIO6%s\r\n",
                 (int)NICERF2021F33_IRQ_DIO, (double)NICERF2021F33_TCXO_VOLTAGE,
                 (double)LORA_FREQ, (LORA_FREQ > 1500.0f) ? "HF(2G4)" : "LF(sub-GHz)",

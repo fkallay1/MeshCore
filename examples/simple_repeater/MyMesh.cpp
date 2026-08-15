@@ -1491,6 +1491,10 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
   } else if (fotaHandleCliCommand(command, reply)) {
     //en: FOTA CLI ('fota …' / legacy 'ota …') — nrffota/FotaMyMesh.cpp
 #endif
+#ifdef FK_NICERF2021F33_TEST
+  } else if (nicerfTestCliCommand(command, reply)) {
+    //en: bench test CLI ('fk …') for the NiceRF LR2021 module — variant target.cpp
+#endif
   } else{
     _cli.handleCommand(sender_timestamp, command, reply);  // common CLI commands
   }

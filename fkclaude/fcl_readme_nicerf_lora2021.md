@@ -298,16 +298,64 @@ Známa vrtochovitosť je ošetrená v `RadioLibWrappers.cpp`: so zapnutými side
 detektormi vracal LR2021 `-706` pri `startReceive()` po hardvérovom CAD, preto sa
 tam volá `standby()` navyše.
 
-## PRAM (firmvérový patch čipu) — preskúmané 2026-08-15, zatiaľ NEROBÍME
+## Testovacie CLI (`fk …`) — flag `FK_NICERF2021F33_TEST`
+
+Aby sa dal modul skúšať bez neustáleho preflashovania. Vyžaduje aj
+`-D RADIOLIB_GODMODE=1` (RadioLib má `setRegMode`, `writeRegMem32`,
+`activatePram` a spol. privátne). **Nikdy nenechať zapnuté v ostrom builde.**
+
+| príkaz | čo robí |
+|---|---|
+| `fk info` | identita čipu, VBAT, teplota, chyby, stav PRAM |
+| `fk simo on\|off` | prepne vnútorný regulátor čipu na DC-DC / LDO |
+| `fk ce on\|off` | vypne/zapne celý modul cez jeho LDO enable (pin CE) |
+| `fk pram` | stav PRAM (magic + verzia) |
+| `fk pram load` | (znova) nahrá patch, ak je build s `LR2021_PRAM_UPD` |
+
+⚠️ **`getVbat()` a `getTemp()` sú platné LEN v standby.** Merané počas príjmu
+vracajú 2 mV a 0,0 °C. Objavené tvrdo: boot report (beží pred nahodením RX)
+čítal správne, neskorší dotaz nie — a chvíľu to vyzeralo ako pokazený čip.
+Preto `fk info` aj `fk simo` merajú v standby a až potom vrátia RX.
+
+### Test CE — parazitné napájanie modul neudrží
+
+```
+fk ce off -> ce=LOW  | getVersion rc=0 fw=0.1  (no valid answer)
+fk ce on  -> ce=HIGH | getVersion rc=0 fw=1.24 (chip answers)
+```
+
+Pri CE dole čip **neodpovedá** — vracia nezmysel. Čiže prúd tečúci cez ESD
+diódy zo SPI pinov ho neudrží funkčný a CE je skutočný vypínač. (Ten včerajší
+jav, keď čip bez VCC raz odpovedal na `getVersion`, bol hraničný a nereprodukovateľný.)
+Pozor: NiceRF žiada pri CE dole stiahnuť aj NSS a RESET, inak tečie leakage.
+
+## PRAM (firmvérový patch čipu) — ✅ OVERENÉ NA HW 2026-08-15
 
 LR2021 má **patch RAM**: Semtech dodáva binárnu záplatu, ktorú hostiteľ nahráva do
 čipu. **Je volatilná** — stratí sa pri resete a pri studenom štarte, prežije len
 spánok s retenciou. ZephCore to v 1.17.1 pridal, MeshCore nie.
 
-**My to nerobíme a čip beží nezáplatovaný.** RadioLib API má (`activatePram()`,
+**Upstream to nerobí a čip beží nezáplatovaný.** RadioLib API má (`activatePram()`,
 `checkPramLoaded()`, `getPramVersion()`, správne konštanty), ale **sám ho nikdy
 nevolá**, blob nedodáva, a tie metódy sú **privátne** (za `#if !RADIOLIB_GODMODE`),
-takže ich `CustomLR2021` ani nemá ako zavolať.
+takže ich `CustomLR2021` ani nemá ako zavolať. Platí to aj pre upstream
+`meshtracker_x1` a `meshnology_w12`. Overené na HW: bez `LR2021_PRAM_UPD`
+hlási boot report `pram: loaded=no`.
+
+**U nás to už funguje** (`-D LR2021_PRAM_UPD=1`, blob v
+`src/helpers/radiolib/lr20xx_pram_lr2021.h`, 560 slov = **2240 B**):
+
+```
+[LR2021] pram: loaded=YES version=0x0313
+```
+
+Magic slovo `0x600DB002` sa prečíta späť, čiže čip patch prijal. Rádio beží
+ďalej normálne a **odber sa nezmenil** (viď meraciu maticu v sekcii DC-DC).
+
+⚠️ **Otvorené:** s nahratou PRAM hlási `vbat` **2454 mV** namiesto 3311 mV, a to
+aj pri vypnutom SIMO. Nevieme, ktorá hodnota je pravdivá — modul dodáva 3,3 V,
+takže 3311 vyzerá správnejšie, ale patch mohol opraviť kalibráciu merania.
+Neinterpretovať, kým to niekto neoverí voltmetrom.
 
 ### Mechanizmus (Semtech `lr20xx_patch.c`, Clear BSD)
 
@@ -398,7 +446,40 @@ SIMO converter and voltage regulation system to supply VR_PA."*
 Podmienka (§3.6): **externá cievka 2,2 µH**, DCR max 0,5 Ω, Isat min 200 mA,
 rezonančná frekvencia min 20 MHz, na pinoch **VDCC1/VDCC2** (~1,55 V, max 20 mA).
 
-### Či ho modul podporuje — NEVIEME (otvorené)
+### ✅ ODMERANÉ 2026-08-15: modul cievku MÁ, DC-DC funguje
+
+Všetko s **rovnakým** stavom ostatných nastavení (RX boost zapnutý, `tx=15`,
+SF7/BW62,5). Odber samotného XIAO je 9,5 mA.
+
+| konfigurácia | celkom | modul (−9,5 mA) |
+|---|---|---|
+| LDO, bez PRAM | 20,0 mA | ~10,5 |
+| LDO, s PRAM | 20,5 mA | ~11,0 |
+| SIMO, bez PRAM | 15,5–16 mA | ~6,25 |
+| **SIMO, s PRAM** | **16,0 mA** | **~6,5** |
+
+**SIMO ušetrí 4,5 mA** (20,5 → 16,0), na module je to pokles ~11 → ~6,5 mA,
+teda **~41 %**. Datasheet sľubuje „až 50 %", takže sedíme.
+
+Keby cievka chýbala, prúd by klesnúť nemohol — menič spínajúci do prázdna by ho
+naopak zvýšil. **Tým je otázka zodpovedaná bez čakania na NiceRF.**
+
+Vysvetľuje to aj ich špecifikáciu „RX <8 mA": to je hodnota **so SIMO** (ich demo
+ho zapína). V LDO režime má modul ~11 mA a ich číslo by nesplnil.
+
+**PRAM nič nestojí** — 20,0 vs 20,5 mA v LDO a 15,75 vs 16,0 v SIMO, oboje
+v rozptyle merania. Datasheetových „+80 nA" sa týka retenčného spánku.
+
+**Príjem sa nezhoršil**: `nf=-112/-113`, RSSI −38/−55/−69, SNR 12,8–14,2,
+`rxerr=0`, `miss=0` — identické s LDO režimom. (Pozor: silné signály nezistia
+stratu 1–3 dB citlivosti, to by ukázala až slabá linka.)
+
+**Zapnutie natrvalo:** `-D NICERF2021F33_SIMO=1` (zapína sa pri každom
+`radio_init()`, lebo **čip sa resetuje do LDO**). Zapínať **spolu s
+`LR2021_PRAM_UPD`** — datasheet uvádza „DCDC (SIMO) impact on sensitivity" pre
+sub-GHz LoRa ako vec, ktorú patch opravuje.
+
+### Pôvodná analýza (prečo sme to museli merať)
 
 ⚠️ **Skoršie tvrdenie „VDCC1/VDCC2 nie sú vyvedené, takže SIMO sa nedá zapnúť"
 bolo NESPRÁVNE.** Stálo na parafráze fóra, nie na dokumente, a bolo aj vecne
@@ -458,8 +539,14 @@ NiceRF preto pri CE dole žiada stiahnuť aj NSS a RESET.
 
 ## Neoverené / otvorené
 
-- **Má modul cievku pre SIMO?** Test opísaný vyššie, alebo otázka na NiceRF.
-  Rozhoduje o tom, či sa dá pri batérii ušetriť až 50 % spotreby.
+- ~~Má modul cievku pre SIMO?~~ **VYRIEŠENÉ — má, DC-DC ušetrí ~41 %.**
+- **`vbat` s PRAM hlási 2454 mV namiesto 3311 mV** — ktorá hodnota platí, nevieme.
+- **RadioLib `setRegMode()` posiela 5 argumentových bajtov**, kým datasheet
+  Rev 2.1 (tab. 6-26) definuje **jediný** (`simo_usage`). Čip tie štyri navyše
+  zjavne ignoruje (SIMO preukázateľne funguje a prúd klesol podľa datasheetu),
+  ale je to rozpor — overiť proti najnovšej vetve RadioLibu a prípadne nahlásiť.
+- **Sensitivity v SIMO režime** — na silných signáloch sa strata 1–3 dB nedá
+  zmerať. Overiť na slabej linke (5 km alebo 200 km uzol).
 - **PA tabuľka je interpolovaná, nie meraná** wattmetrom. Nepriamo overená
   prúdom (zhoda 5–10 % do 0,35 A), ale absolútny výkon nikto nemeral.
 - **Prepad VCC nad ~0,5 A** — nemeraný, treba ADC delič alebo CW nosnú.
