@@ -290,6 +290,13 @@ plný chronologický záznam: [docs/conv_claude_20260615.md](docs/conv_claude_20
   okamžité RSSI, noise floor, `agc_reset_interval`. **Read-only — nemení config rádia.**
 - `onGroupDataRecv()` len buffruje, ťažké CustomLFS I/O sa robí vo `fotaLoop()` po re-arme rádia.
 
+⚠️ **`FK_DEBUG_MAXPATH` vie potichu skryť väčšinu prevádzky.** Filter je
+`if (path_count > FK_DEBUG_MAXPATH + (dir[0]=='T' ? 1 : 0)) return;`, ale
+`_fota_raw_rx++` beží **pred** ním. Príznak: počítadlá `rawrx`/`rxpkts` v AALIVE
+rastú, no v logu nepribúda ani jeden `RX RAW` riadok. Default je 64 (bez
+filtrovania); ProMicro FOTA env mal 2026-08-16 nastavené `=4`, čím nezobrazoval
+prakticky nič — prevádzka na tom uzle chodí cez 9–13 hopov. Odstránené.
+
 Postup testu (fire-and-forget, príjem niekedy potrebuje pár cyklov kvôli strate paketov):
 ```bash
 PENV=~/.platformio/penv/Scripts/python.exe

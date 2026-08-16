@@ -257,6 +257,18 @@ len to nie je odskúšané na železe.
 `custom_fota_device` je nutné — hook odvodzuje meno zariadenia z `PIOENV.split("_")[0]`,
 čo by dalo `xiao` a miešalo by sa to s archívom SX1262 XIAO.
 
+⚠️ **Kam patria naše flagy.** V zdieľanom bloku `[Xiao_nrf52_nicerf2021f33]` smie
+byť len **definícia hardvéru** (piny, TCXO, PA tabuľka, `MAX_LORA_TX_POWER`).
+Všetko ostatné — `LORA_RADIO_WATCHDOG`, `LORA_RADIO_DIAG_ONLY`,
+`LORA_RADIO_DIAG_CLI`, `RADIOLIB_GODMODE`, `FK_NICERF2021F33_TEST`,
+`LR2021_PRAM_UPD`, `NICERF2021F33_SIMO` — patrí **iba do FOTA envu**, aby
+`..._repeater` ostal de facto štandardný repeater bez našich zmien. Do 2026-08-16
+to bolo v zdieľanom bloku a pretekalo do oboch. ProMicro to mal správne od
+začiatku (flagy sú v `[env:ProMicro_repeater_fota]`).
+
+⚠️ Testuje sa na **`_fota` enve**. Ten bez FOTA nemá `FK_DEBUG` ani `FOTA_DEBUG`,
+takže nevypisuje `AALIVE` ani `RX RAW` — doska sa potom tvári zaseknuto, hoci beží.
+
 ## Iné modulácie (LR-FHSS, FLRC, GFSK, OOK)
 
 Modul aj RadioLib ich vedia (`beginLRFHSS()`, `beginFLRC()`, `beginGFSK()`,
@@ -418,6 +430,64 @@ sa tvári, že príkaz odoslal, ale uzol ho nikdy nespracuje.
 vracajú 2 mV a 0,0 °C. Objavené tvrdo: boot report (beží pred nahodením RX)
 čítal správne, neskorší dotaz nie — a chvíľu to vyzeralo ako pokazený čip.
 Preto `fk info` aj `fk simo` merajú v standby a až potom vrátia RX.
+
+⚠️ **`n` v okne nie je konštanta 960.** Vzorkovač zvýši `_num_floor_samples` len
+keď vzorka prejde prahom `rssi < _noise_floor + 14`. Ak čítania ostanú nad ním,
+kalibrácia sa nikdy nedopočíta do 64, číta na každej iterácii loopu a `n`
+vyskočí — namerané `n=92950 min=-112 max=0`. Veľké `n` teda znamená „noise floor
+nekonverguje" (rušný kanál alebo RSSI trvalo vysoko), nie chybu. Pravidlo na
+detekciu (`n==0` alebo `spread==0`) tým dotknuté nie je.
+
+### Boot diagnostika pri zlyhaní `radio_init()` — flag `FK_DEBUG`
+
+Watchdog rieši rádio, ktoré odumrie **po** úspešnej inicializácii. Keď
+`radio_init()` neuspeje už pri štarte, `main.cpp` sa zastaví a watchdog sa
+nikdy nespustí. Pre tento prípad je v `main.cpp` samostatná diagnostika:
+
+```
+[FK] display.begin() -> OK
+ERROR: radio init failed: -2                     ← RADIOLIB_ERR_CHIP_NOT_FOUND
+[FK] radio-diag: POWER_EN=21 high, BUSY=0
+[FK] radio-diag: after reset pulse BUSY=0
+[FK] radio-diag: version reg = FF FF FF ... (16x)  "................"
+[FK] radio-diag: MISO pu=1 pd=0 -> FLOATING - nothing on the other end
+[FK] radio-diag: BUSY pu=0 pd=0 -> driven LOW by the module
+[FK] radio-diag: DIO1 pu=0 pd=0 -> driven LOW by the module
+```
+
+Kľúč je **pull test**: linka, ktorá sleduje pull-up aj pull-down, nie je na
+druhom konci pripojená; linku, ktorú sa nedá prebiť, modul aktívne budí, takže
+**má napájanie**. Nenapájaný modul by cez ESD diódy sťahoval dole všetky tri
+rovnako — asymetria teda ukazuje priamo na konkrétny vodič. Takto sa 2026-08-16
+našiel prerušený MISO na testovacom ProMicre (P0.15).
+
+Surových 16 bajtov verziového registra sa číta priamo cez SPI, mimo RadioLibu:
+samé `FF` = MISO nikto nebudí, samé `00` = MISO drží dole, zmes = modul
+odpovedá, ale zle (SCLK/MOSI alebo iný čip).
+
+⚠️ Chybový kód z `std_init()` sa vypíše **iba raz pri boote**. Terminál
+pripojený neskôr uvidí už len opakovanú halt hlášku, takže port treba otvoriť
+hneď po flashi (`FK_SERIAL_WAIT_DTR` na to dáva okno).
+
+⚠️ **Regresiu vylučuj nasadením starých buildov**, nie úvahou — `.uf2` sa
+generuje **len** do `test_nrf-fota/builds/`, nie do `.pio/build/`. Pri tomto
+náleze zlyhali `#391`, `#437` aj `#444` identicky, čím padla hypotéza, že to
+spôsobil posledný build.
+
+### Parazitné napájanie cez J-Link — NEUZAVRETÉ
+
+Testovacia doska s trvalo pripojeným J-Linkom: pri „odpojení napájania" sa
+odpája len USB, J-Link ostáva zapojený a napájaný. Hypotéza je, že drží
+SWDIO/SWCLK na svojej úrovni a cez ESD diódy nRF52840 tečie prúd do 3V3 vetvy,
+takže rail neklesne na nulu. SSD1306 (`PIN_OLED_RESET=-1`) spolieha výlučne na
+power-on-reset, takže by ostal zaseknutý z brown-outu a prestal odpovedať na
+I2C — čo sedí na pozorovanie, že displej nabehol až po odpojení úplne všetkého.
+
+**A/B test 2026-08-16 nerozhodol:** rovnaká binárka, 30 s bez USB, séria s
+J-Linkom 3 cykly, bez neho 5 cyklov — **8 power-cyklov, 0 zlyhaní v oboch**.
+Ani `fk hammer` 6000× to nezreprodukoval. Rozhodne až priame meranie:
+multimetrom 3V3 pin proti GND pri odpojenom USB a pripojenom J-Linku. Ak tam
+nie je ~0 V, parazitné napájanie existuje. Dovtedy to netvrdiť ako príčinu.
 
 ### Test CE — parazitné napájanie modul neudrží
 
