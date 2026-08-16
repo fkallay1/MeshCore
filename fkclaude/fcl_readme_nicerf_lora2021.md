@@ -314,13 +314,45 @@ neplatí. A aj keby, len nastaví `ERR_EVENT_STARTRX_TIMEOUT`, ktorý sa nikde
 nevypisuje (uvidíš ho jedine cez `stats-radio`) a nespustí žiadnu obnovu.
 Je to tá istá slepota, ktorá stojí za chybou `setTxPower` (upstream PR 3218).
 
-**Detekcia:** neodpovedajúci SPI čip vracia z `getCurrentRSSI()` fyzikálne
-nemožnú hodnotu. Namerané na module bez napájania: **−255 dBm** (a v
-`stats-radio` −169 dBm s `noise_floor` na klampe −120). Reálny šum sa nikdy
-nepriblíži k −150, takže je to bezpečná hranica pre **ktorékoľvek** rádio —
-`getCurrentRSSI()` je vo wrapperi čisto virtuálna a implementuje ju každé.
+**Detekcia — pasívne RSSI okno (aktuálne riešenie od 2026-08-16).**
 
-Tri nezmyselné čítania za sebou (pri 30 s intervale ~90 s) spustia obnovu.
+Pôvodný nápad — prah „−150 dBm je fyzikálne nemožné" — funguje na LR2021
+(bez napájania vracia −255 dBm), ale **nie na SX126x**: ten vracia okamžité RSSI
+ako jediný bajt, teda vie vyjadriť len 0 … −127,5 dBm. Mŕtva SPI zbernica číta
+`0x00` (→ 0 dBm) alebo `0xFF` (→ −127,5 dBm) a **obe vyzerajú ako legálne
+hodnoty**. Dva ďalšie pokusy (`getStatus()`, čítanie verzie registra) boli tiež
+slepé uličky — a ten posledný sa dokonca ukázal ako aktívne škodlivý, viď nižšie.
+
+Čo funguje: nie absolútna hodnota, ale **rozptyl**. Živý prijímač nemôže vracať
+konštantu — tepelný šum plus krok 0,5 dB zaručia, že sa hodnota medzi čítaniami
+hýbe. A tie čítania sa už aj tak dejú: `RadioLibWrapper::loop()` volá
+`getCurrentRSSI()` ~32× za sekundu pre svoj noise floor (`Dispatcher::loop()`
+re-armuje kalibráciu každé 2 s, 64 vzoriek na kolo). Takže sa min/max zbiera
+priamo tam a watchdog okno len prečíta a vynuluje cez `takeRssiWindow()`:
+
+* **~960 vzoriek na 30 s okno** namiesto vlastnej blokujúcej dávky
+* **nulová réžia** a žiadna vlastná SPI komunikácia
+* nepotrebuje prevádzku, prepínanie režimov ani zápis do registrov
+
+Dva nezávislé príznaky poruchy:
+
+| príznak | význam |
+|---|---|
+| `samples == 0` | vzorkovač vôbec nebežal → prijímač nebol celé okno v RX |
+| `spread == 0`  | bežal, ale číta stále ten istý bajt → čip nemeria |
+
+Namerané zdravé hodnoty (2026-08-16): ProMicro/SX1262 `n=960 spread=4–6`,
+XIAO/LR2021 `n=960 spread=6`. Okná nad 960 znamenajú prevádzku (kalibrácia sa
+po prijme re-armuje častejšie) a majú vysoké `max` (−27…−59).
+
+Tri zlé kontroly za sebou (pri 30 s intervale ~90 s) spustia obnovu. Prvá
+kontrola po boote sa preskakuje — vtedy vzorkovač ešte nemá dáta a `n=0` by
+neprávom pripísalo čierny bod rádiu, ktoré sa len rozbieha.
+
+> **Pozor: `isChipResponding()` na SX1262 nepoužívať.** `fk hammer` ho zavolal
+> 6000× a vrátil **0 ok**, pričom rádio v tej istej chvíli normálne prijímalo
+> pakety. Práve tento test spôsoboval re-init slučky na testovacom uzle.
+> Watchdog ho už nevolá vôbec.
 
 **Obnova musí spraviť viac než `radio_init()`** — to sme zistili tvrdo, prvá
 verzia sa „obnovila", ale neprijímala:
@@ -340,9 +372,18 @@ Overené na HW (build #431, `fk ce off`):
 ```
 …a hneď po ňom 21 prijatých paketov, `rxerr=0`, `nf=-111`.
 
-Celé je to v `examples/simple_repeater/MyMesh.cpp` (`radioWatchdogLoop()`),
-**jadro MeshCore zostáva nedotknuté**. Funguje na každej doske, lebo
-`radio_init()` má každý variant. Kandidát na upstream.
+Rozhodovanie a obnova sú v `examples/simple_repeater/MyMesh.cpp`
+(`radioWatchdogLoop()`). Zber vzoriek si však vyžiadal **zásah do jadra** —
+`src/helpers/radiolib/RadioLibWrappers.{h,cpp}`, dva riadky min/max vo
+vzorkovači noise-floor plus `takeRssiWindow()`. Celé je to pod
+`#ifdef LORA_RADIO_WATCHDOG`, takže bez toho flagu je diff voči upstreamu
+prázdny a merge nebolí. Funguje na každej doske, lebo `radio_init()` má každý
+variant. Kandidát na upstream.
+
+**Režim merania:** `LORA_RADIO_DIAG_ONLY=1` = meraj a hlás, nikdy nezasahuj.
+Nechať zapnutý, kým sa zasahovacia vetva neoverí proti skutočnej poruche —
+tri predchádzajúce pokusy o detekciu stáli na predpokladoch a všetky tri boli
+zlé, takže tu platí: najprv merať, potom veriť.
 
 ## Testovacie CLI (`fk …`) — flag `FK_NICERF2021F33_TEST`
 
@@ -357,6 +398,21 @@ Aby sa dal modul skúšať bez neustáleho preflashovania. Vyžaduje aj
 | `fk ce on\|off` | vypne/zapne celý modul cez jeho LDO enable (pin CE) |
 | `fk pram` | stav PRAM (magic + verzia) |
 | `fk pram load` | (znova) nahrá patch, ak je build s `LR2021_PRAM_UPD` |
+
+### Diagnostika rádia — flag `LORA_RADIO_DIAG_CLI` (nezávislý od typu rádia)
+
+Tieto fungujú na SX126x aj LR2021 a nepotrebujú `RADIOLIB_GODMODE`.
+
+| príkaz | čo robí |
+|---|---|
+| `fk win` | prečíta **pasívne** okno, ktoré používa watchdog (a vynuluje ho); `n=0` = prijímač nebol v RX |
+| `fk rssi [n]` | **aktívna** dávka n vzoriek (default 32) — odpovie hneď a číta čip priamo, takže povie niečo aj keď rádio v RX nie je a pasívny vzorkovač nezbiera nič |
+| `fk hammer [n]` | n rýchlych cyklov `standby → čítanie registra → späť do RX`; touto sekvenciou sa kedysi SX1262 zasekol tak, že pomohol až power cycle |
+| `fk reinit` | ručne spustí celú obnovu |
+
+⚠️ **Sériové CLI vyžaduje riadok zakončený `\r`, nie `\n`.** Terminál, ktorý
+posiela LF (napr. .NET `SerialPort.WriteLine`, ktorý má default `NewLine = "\n"`),
+sa tvári, že príkaz odoslal, ale uzol ho nikdy nespracuje.
 
 ⚠️ **`getVbat()` a `getTemp()` sú platné LEN v standby.** Merané počas príjmu
 vracajú 2 mV a 0,0 °C. Objavené tvrdo: boot report (beží pred nahodením RX)
