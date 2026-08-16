@@ -1630,6 +1630,15 @@ void MyMesh::radioWatchdogLoop() {
   if (!millisHasNowPassed(next_radio_check)) return;
   next_radio_check = futureMillis(LORA_RADIO_WATCHDOG);
 
+  //en: The first call lands on the first loop() after boot, when the sampler has
+  //en: had no chance to collect anything yet - that reads as 'no samples' and
+  //en: would score a strike against a radio that is merely still starting up.
+  //en: Arm here and start judging one full window later.
+  //sk: Prve volanie padne na prvy loop() po boote, ked vzorkovac este nemal sancu
+  //sk: nic nazbierat - to sa cita ako 'ziadne vzorky' a pripisalo by cierny bod
+  //sk: radiu, ktore sa len rozbieha. Tu sa len naarmuj a posudzuj o cele okno neskor.
+  if (!radio_wd_armed) { radio_wd_armed = true; return; }
+
   //en: Read the window the noise-floor sampler filled since the last check and
   //en: start a fresh one. This costs no SPI traffic of its own, which also means
   //en: it cannot repeat the mistake of the earlier attempts: the standby ->

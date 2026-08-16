@@ -89,6 +89,7 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks {
   unsigned long next_local_advert, next_flood_advert;
 #ifdef LORA_RADIO_WATCHDOG
   unsigned long next_radio_check = 0;
+  bool radio_wd_armed = false;   //en: skip the very first check - see radioWatchdogLoop()
   uint8_t radio_dead_count = 0;
   void radioWatchdogLoop();
   void radioSampleRssi(int n, int* out_min, int* out_max);
