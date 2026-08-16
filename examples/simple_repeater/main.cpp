@@ -91,6 +91,69 @@ void setup() {
     //sk: Tiché halt() vyzerá na termináli presne ako mŕtva doska a jednorazovú
     //sk: hlášku z std_init() nikto nestihne. Opakuj ju, nech je dôvod vidieť
     //sk: kedykoľvek sa pripojíš.
+    //en: 'chip not found' (-2) only says the version register did not read back
+    //en: 'SX1262'. Show WHY: the BUSY line and the raw bytes separate an unpowered
+    //en: module from a broken signal line, which the error code alone cannot.
+    //sk: 'chip not found' (-2) hovori len tolko, ze z verzioveho registra sa
+    //sk: nevratilo 'SX1262'. Ukaz PRECO: linka BUSY a surove bajty odlisia
+    //sk: nenapajany modul od preruseneho signalu, co samotny kod chyby nevie.
+#if defined(SX126X_POWER_EN) && defined(P_LORA_BUSY) && defined(P_LORA_RESET) && defined(P_LORA_NSS)
+    {
+      pinMode(SX126X_POWER_EN, OUTPUT); digitalWrite(SX126X_POWER_EN, HIGH);
+      pinMode(P_LORA_BUSY, INPUT);
+      delay(20);
+      Serial.printf("[FK] radio-diag: POWER_EN=%d high, BUSY=%d (1 = chip not ready: unpowered, in reset, or no TCXO)\r\n",
+                    SX126X_POWER_EN, digitalRead(P_LORA_BUSY));
+
+      pinMode(P_LORA_RESET, OUTPUT);
+      digitalWrite(P_LORA_RESET, LOW);  delay(2);
+      digitalWrite(P_LORA_RESET, HIGH); delay(20);
+      Serial.printf("[FK] radio-diag: after reset pulse BUSY=%d\r\n", digitalRead(P_LORA_BUSY));
+
+      //en: raw READ_REGISTER(0x1D) of the version string at 0x0320, bypassing RadioLib
+      uint8_t buf[16];
+      pinMode(P_LORA_NSS, OUTPUT); digitalWrite(P_LORA_NSS, HIGH);
+      SPI.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE0));
+      digitalWrite(P_LORA_NSS, LOW);
+      SPI.transfer(0x1D); SPI.transfer(0x03); SPI.transfer(0x20); SPI.transfer(0x00);
+      for (int i = 0; i < 16; i++) buf[i] = SPI.transfer(0x00);
+      digitalWrite(P_LORA_NSS, HIGH);
+      SPI.endTransaction();
+
+      Serial.print("[FK] radio-diag: version reg =");
+      bool all00 = true, allff = true;
+      for (int i = 0; i < 16; i++) {
+        Serial.printf(" %02X", buf[i]);
+        if (buf[i] != 0x00) all00 = false;
+        if (buf[i] != 0xFF) allff = false;
+      }
+      Serial.print("  \"");
+      for (int i = 0; i < 16; i++) Serial.print((buf[i] >= 32 && buf[i] < 127) ? (char)buf[i] : '.');
+      Serial.println("\"");
+      Serial.print("[FK] radio-diag: ");
+      if (all00)      Serial.println("all 00 -> MISO stuck low: module unpowered, or MISO/GND wiring");
+      else if (allff) Serial.println("all FF -> MISO floating high: module unpowered, or MISO/NSS not connected");
+      else            Serial.println("garbage -> module answers but wrong: check SCLK/MOSI, or wrong chip");
+
+      //en: A wire that is not connected follows whatever pull we apply; a line the
+      //en: module really drives does not. This separates a broken dupont (or an
+      //en: unpowered module) from a module that is powered but silent.
+      //sk: Nepripojeny vodic sleduje pull, ktory nastavime; linku, ktoru modul
+      //sk: naozaj budi, to nepohne. Takto sa odlisi prerusene prepojenie (alebo
+      //sk: nenapajany modul) od modulu, ktory napajanie ma, ale mlci.
+      const uint8_t probe_pins[3] = { P_LORA_MISO, P_LORA_BUSY, P_LORA_DIO_1 };
+      const char*   probe_name[3] = { "MISO", "BUSY", "DIO1" };
+      for (int i = 0; i < 3; i++) {
+        pinMode(probe_pins[i], INPUT_PULLUP);   delay(2); int up = digitalRead(probe_pins[i]);
+        pinMode(probe_pins[i], INPUT_PULLDOWN); delay(2); int dn = digitalRead(probe_pins[i]);
+        pinMode(probe_pins[i], INPUT);
+        Serial.printf("[FK] radio-diag: %s pu=%d pd=%d -> %s\r\n", probe_name[i], up, dn,
+                      (up != dn) ? "FLOATING - nothing on the other end (broken wire / module unpowered)"
+                                 : (up ? "driven HIGH by the module" : "driven LOW by the module"));
+      }
+    }
+#endif
+
     while (1) {
       Serial.println("[FK] Radio init FAILED - halted (check the radio module: VCC, SPI wiring, IRQ pin)");
       delay(2000);
