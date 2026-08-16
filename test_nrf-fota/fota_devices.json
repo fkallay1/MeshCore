@@ -28,7 +28,7 @@
     "xiao-nicerf": {
       "role": "target",
       "transport": "com",
-      "port": "COM19",
+      "port": "COM21",
       "kind": "xiao-nicerf"
     },
     "xiao-5km": {
