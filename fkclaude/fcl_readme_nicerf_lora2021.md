@@ -505,7 +505,7 @@ diódy zo SPI pinov ho neudrží funkčný a CE je skutočný vypínač. (Ten v�
 jav, keď čip bez VCC raz odpovedal na `getVersion`, bol hraničný a nereprodukovateľný.)
 Pozor: NiceRF žiada pri CE dole stiahnuť aj NSS a RESET, inak tečie leakage.
 
-## PRAM (firmvérový patch čipu) — ✅ OVERENÉ NA HW 2026-08-15
+## PRAM (firmvérový patch čipu) — OVERENÉ NA HW 2026-08-15
 
 LR2021 má **patch RAM**: Semtech dodáva binárnu záplatu, ktorú hostiteľ nahráva do
 čipu. **Je volatilná** — stratí sa pri resete a pri studenom štarte, prežije len
@@ -528,7 +528,7 @@ hlási boot report `pram: loaded=no`.
 Magic slovo `0x600DB002` sa prečíta späť, čiže čip patch prijal. Rádio beží
 ďalej normálne a **odber sa nezmenil** (viď meraciu maticu v sekcii DC-DC).
 
-### ⚠️ Nevysvetlená vlastnosť merania VBAT
+### Nevysvetlená vlastnosť merania VBAT
 
 Overené A/B na jednom builde a v jednom behu (2026-08-15):
 
@@ -638,7 +638,7 @@ SIMO converter and voltage regulation system to supply VR_PA."*
 Podmienka (§3.6): **externá cievka 2,2 µH**, DCR max 0,5 Ω, Isat min 200 mA,
 rezonančná frekvencia min 20 MHz, na pinoch **VDCC1/VDCC2** (~1,55 V, max 20 mA).
 
-### ✅ ODMERANÉ 2026-08-15: modul cievku MÁ, DC-DC funguje
+### ODMERANÉ 2026-08-15: modul cievku MÁ, DC-DC funguje
 
 Všetko s **rovnakým** stavom ostatných nastavení (RX boost zapnutý, `tx=15`,
 SF7/BW62,5). Odber samotného XIAO je 9,5 mA.

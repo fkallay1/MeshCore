@@ -28,7 +28,7 @@ sám podčiarkne ako neplatný odkaz.
 - **Upstream PR #3218** — chyba `setTxPower` na LR2021 odoslaná; PR bez zmienky o AI
   - ↳ [docs/lr2021-txpower-pr-description.md](docs/lr2021-txpower-pr-description.md) · [fcl_readme_nicerf_lora2021.md § Chyba v RadioLib](fcl_readme_nicerf_lora2021.md#chyba-v-radiolib-ktorú-header-obchádza)
 - **PRAM patch pre LR2021** — 2240 B sa nahráva a verifikuje pri štarte
-  - ↳ [fcl_readme_nicerf_lora2021.md § PRAM](fcl_readme_nicerf_lora2021.md#pram-firmvérový-patch-čipu---overené-na-hw-2026-08-15)
+  - ↳ [fcl_readme_nicerf_lora2021.md § PRAM](fcl_readme_nicerf_lora2021.md#pram-firmvérový-patch-čipu--overené-na-hw-2026-08-15)
 - **DC-DC / SIMO** — cievka na module je osadená, spotreba v RX klesla o ~41 %
   - ↳ [fcl_readme_nicerf_lora2021.md § DC-DC (SIMO)](fcl_readme_nicerf_lora2021.md#dc-dc-simo--prečo-ho-nemáme-a-nepotrebujeme)
 - **CE pin** — funguje ako skutočný vypínač modulu, parazitné napájanie ho neudrží

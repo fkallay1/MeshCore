@@ -47,7 +47,7 @@ Kremík SX1302/SX1303 to zvládne (Semtech to deklaruje), ale treba neverejný
 firmware/HAL build, ktorý Semtech dáva výrobcom brán. **Neoverené, či ho pre
 WM1302 vôbec vieme získať** — to je jediná otvorená otázka LR-FHSS vetvy.
 
-### ⚠️ Pozor na vymyslené konfigurácie
+### Pozor na vymyslené konfigurácie
 
 LLM (Gemini) vygeneroval „funkčný" `global_conf.json` so sekciou `lrfhss_conf`
 (`operating_mode`, `grid: 3900`, `nb_channel: 35`). **Sekcia neexistuje** a
