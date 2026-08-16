@@ -11,7 +11,7 @@ sám podčiarkne ako neplatný odkaz.
 
 ---
 
-## 45 Merge upstream 1.17.1; Novy variant xiao_nrf42_nicerf2021f33; Riesenie WatchDog radia; Nove cli prikazy fk xxx, pre testovanie
+## 45 Merge upstream 1.17.1; Novy variant xiao_nrf42_nicerf2021f33; Riesenie WatchDog radia; Nove cli prikazy fk xxx, pre testovanie, Repozitar na GB so zalohou globlaneho .claude
 
 *(2026-08-15 → 2026-08-17, vetva `features/nrf-fota`)*
 
@@ -61,7 +61,18 @@ sám podčiarkne ako neplatný odkaz.
   - ↳ [fcl_readme_nicerf_lora2021.md § Boot diagnostika](fcl_readme_nicerf_lora2021.md#boot-diagnostika-pri-zlyhaní-radio_init--flag-fk_debug)
 - **`/auto-mode-setup`** — vysvetlené čo mení a prečo sa bije s `CLAUDE.md`; nič sa neaplikovalo
   - ↳ bez projektovej dokumentácie — vec CLI, nie repozitára
+- **Priebežné summary zo sessions** — vznikol tento súbor + globálny skill, ktorý ho dopĺňa na konci každej session
+  - ↳ bez projektovej dokumentácie — skill je v `~/.claude/skills/session-summary/`, formát popísaný v hlavičke tohto súboru
+- **Odkazy cez kotvy z nadpisov** — nahradili čísla riadkov, prežijú posunutie dokumentu a VS Code neplatné sám podčiarkne
+  - ↳ bez projektovej dokumentácie — pravidlo v globálnom `~/.claude/CLAUDE.md`
+- **Formát nadpisov v `fcl_*`** — žiadne emoji, cieľ odkazu dostane vlastný nadpis; odstránené emoji zo 4 nadpisov
+  - ↳ bez projektovej dokumentácie — pravidlo v globálnom `~/.claude/CLAUDE.md`, platí aj pre session z iného repa
+- **Záloha `~/.claude` do súkromného repa `fk.claude`** — `git init` priamo v ňom, whitelist `.gitignore`, `SessionEnd` hook commituje len svoj projekt
+  - ↳ bez projektovej dokumentácie — README priamo v repozitári `fk.claude`
+- **Lokálne povolenia projektov neboli nikde zálohované** — sedia v gitignorovanom `.claude/settings.local.json` (MeshCore ich má 33), nie v globálnom `settings.json`
+  - ↳ bez projektovej dokumentácie — `project-settings/` + `tools/fk_claude_restore.ps1` v repe `fk.claude`
 
 **Otvorené na ďalej:** watchdog ostáva v `LORA_RADIO_DIAG_ONLY` (zasahovacia vetva
 neoverená proti skutočnej poruche) · parazitné napájanie cez J-Link čaká na meranie
-multimetrom · krížový test adverts medzi ProMicro a nicerf nebol dokončený.
+multimetrom · krížový test adverts medzi ProMicro a nicerf nebol dokončený ·
+transkripty v zálohe rastú (~8 MB za session), časom zvážiť politiku orezávania.
