@@ -290,7 +290,9 @@ plný chronologický záznam: [docs/conv_claude_20260615.md](docs/conv_claude_20
   okamžité RSSI, noise floor, `agc_reset_interval`. **Read-only — nemení config rádia.**
 - `onGroupDataRecv()` len buffruje, ťažké CustomLFS I/O sa robí vo `fotaLoop()` po re-arme rádia.
 
-⚠️ **`FK_DEBUG_MAXPATH` vie potichu skryť väčšinu prevádzky.** Filter je
+#### FK_DEBUG_MAXPATH môže skryť prevádzku
+
+⚠️ Filter je
 `if (path_count > FK_DEBUG_MAXPATH + (dir[0]=='T' ? 1 : 0)) return;`, ale
 `_fota_raw_rx++` beží **pred** ním. Príznak: počítadlá `rawrx`/`rxpkts` v AALIVE
 rastú, no v logu nepribúda ani jeden `RX RAW` riadok. Default je 64 (bez

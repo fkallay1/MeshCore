@@ -257,7 +257,9 @@ len to nie je odskúšané na železe.
 `custom_fota_device` je nutné — hook odvodzuje meno zariadenia z `PIOENV.split("_")[0]`,
 čo by dalo `xiao` a miešalo by sa to s archívom SX1262 XIAO.
 
-⚠️ **Kam patria naše flagy.** V zdieľanom bloku `[Xiao_nrf52_nicerf2021f33]` smie
+### Kam patria naše flagy
+
+⚠️ V zdieľanom bloku `[Xiao_nrf52_nicerf2021f33]` smie
 byť len **definícia hardvéru** (piny, TCXO, PA tabuľka, `MAX_LORA_TX_POWER`).
 Všetko ostatné — `LORA_RADIO_WATCHDOG`, `LORA_RADIO_DIAG_ONLY`,
 `LORA_RADIO_DIAG_CLI`, `RADIOLIB_GODMODE`, `FK_NICERF2021F33_TEST`,
@@ -431,7 +433,9 @@ vracajú 2 mV a 0,0 °C. Objavené tvrdo: boot report (beží pred nahodením RX
 čítal správne, neskorší dotaz nie — a chvíľu to vyzeralo ako pokazený čip.
 Preto `fk info` aj `fk simo` merajú v standby a až potom vrátia RX.
 
-⚠️ **`n` v okne nie je konštanta 960.** Vzorkovač zvýši `_num_floor_samples` len
+### Metrika n nie je konštanta
+
+⚠️ Vzorkovač zvýši `_num_floor_samples` len
 keď vzorka prejde prahom `rssi < _noise_floor + 14`. Ak čítania ostanú nad ním,
 kalibrácia sa nikdy nedopočíta do 64, číta na každej iterácii loopu a `n`
 vyskočí — namerané `n=92950 min=-112 max=0`. Veľké `n` teda znamená „noise floor
