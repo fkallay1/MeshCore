@@ -71,8 +71,17 @@ sám podčiarkne ako neplatný odkaz.
   - ↳ bez projektovej dokumentácie — README priamo v repozitári `fk.claude`
 - **Lokálne povolenia projektov neboli nikde zálohované** — sedia v gitignorovanom `.claude/settings.local.json` (MeshCore ich má 33), nie v globálnom `settings.json`
   - ↳ bez projektovej dokumentácie — `project-settings/` + `tools/fk_claude_restore.ps1` v repe `fk.claude`
+- **Claude Code maže transkripty po 30 dňoch** — `cleanupPeriodDays`, bez akéhokoľvek upozornenia; vypnuté nastavením na 3650
+  - ↳ bez projektovej dokumentácie — README v repe `fk.claude`, sekcia o mazaní transkriptov
+- **Záchrana zmazaných sessions** — zo starej konfigurácie na `C:`, z 7z celozálohy a z dvoch `.claude_bkp`; MeshCore 6 → 43, meshcore-open 0 → 7
+  - ↳ bez projektovej dokumentácie — README v repe `fk.claude`, tabuľka zdrojov
+- **Undelete nemá zmysel** — `D:` je NVMe SSD s TRIM, po zmazaní vracia radič nuly; rozhoduje sa v okamihu mazania, nie neskoršími zápismi
+  - ↳ bez projektovej dokumentácie — README v repe `fk.claude`
+- **Pamäť je jedna na projekt, nie na session** — viaže sa na absolútnu cestu, nie na git repo; archívna pamäť sa preto nikdy nekopíruje späť
+  - ↳ bez projektovej dokumentácie — README v repe `fk.claude`, sekcia o pamäti
 
 **Otvorené na ďalej:** watchdog ostáva v `LORA_RADIO_DIAG_ONLY` (zasahovacia vetva
 neoverená proti skutočnej poruche) · parazitné napájanie cez J-Link čaká na meranie
 multimetrom · krížový test adverts medzi ProMicro a nicerf nebol dokončený ·
+obdobie 4. 7. – 15. 8. sa zachrániť nedalo, ostali len zadania z `history.jsonl` ·
 transkripty v zálohe rastú (~8 MB za session), časom zvážiť politiku orezávania.
