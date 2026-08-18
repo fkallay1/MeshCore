@@ -79,9 +79,21 @@ sám podčiarkne ako neplatný odkaz.
   - ↳ bez projektovej dokumentácie — README v repe `fk.claude`
 - **Pamäť je jedna na projekt, nie na session** — viaže sa na absolútnu cestu, nie na git repo; archívna pamäť sa preto nikdy nekopíruje späť
   - ↳ bez projektovej dokumentácie — README v repe `fk.claude`, sekcia o pamäti
+- **Obnova zmazaných sessions z webu** — sessions pripojené cez Remote Control majú transkript na serveri; zo 6 lokálnych je 58
+  - ↳ bez projektovej dokumentácie — `~/.claude/docs/session-recovery.md` + skill `/session-recovery`
+- **`claude --teleport` na tieto sessions nefunguje** — pýta sa endpointu `teleport-events`, ktorý vracia prázdno; obsah je na `events` (odmerané)
+  - ↳ bez projektovej dokumentácie — `~/.claude/docs/session-recovery.md`
+- **Remote Control synchronizuje jednosmerne** — lokál → web; prázdny stub s `bridge-session` sa pripojí, ale históriu nestiahne
+  - ↳ bez projektovej dokumentácie — `~/.claude/docs/session-recovery.md`
+- **Nástroje na obnovu** — `fk_session_list.py` (čo chýba) a `fk_session_fetch.py` (stiahne a skonvertuje vrátane prepojenia)
+  - ↳ bez projektovej dokumentácie — `~/.claude/tools/` v repe `fk.claude`
+- **Párovanie len cez `cse_` ID** — moja chyba: zhoda názvu dávala falošné „máme"; jedna session mohla byť bridgnutá viackrát, každá epizóda má vlastný výrez
+  - ↳ bez projektovej dokumentácie — `~/.claude/docs/session-recovery.md`
 
 **Otvorené na ďalej:** watchdog ostáva v `LORA_RADIO_DIAG_ONLY` (zasahovacia vetva
 neoverená proti skutočnej poruche) · parazitné napájanie cez J-Link čaká na meranie
 multimetrom · krížový test adverts medzi ProMicro a nicerf nebol dokončený ·
-obdobie 4. 7. – 15. 8. sa zachrániť nedalo, ostali len zadania z `history.jsonl` ·
-transkripty v zálohe rastú (~8 MB za session), časom zvážiť politiku orezávania.
+sessions, ktoré nikdy neboli na webe, sa obnoviť nedajú — ostávajú len zadania
+z `history.jsonl` · transkripty v zálohe rastú (~8 MB za session), časom zvážiť
+politiku orezávania · zvážiť `/bug` na teleport (číta z `teleport-events`, ktorý
+pre Remote Control zrkadlá vracia prázdno).
