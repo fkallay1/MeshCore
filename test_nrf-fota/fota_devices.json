@@ -29,6 +29,7 @@
       "role": "target",
       "transport": "com",
       "port": "COM21",
+      "hub_port": 7421,
       "kind": "xiao-nicerf"
     },
     "xiao-5km": {
