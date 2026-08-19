@@ -639,6 +639,17 @@ v príjme" znamená čip zaneprázdnený. Overilo by sa tak, že sa `fk info`
 odmeria niekoľkokrát za sebou: ak hodnota preskakuje medzi 2454 a 3312, je to
 ono; ak drží 2454, je to skutočne vlastnosť merania.
 
+**Druhý kandidát, 2026-08-20:** RadioLib medzitým opravil `getVbat()`/`getTemp()` —
+commit `3e8ada071` *„[LR2021] Fix bit width configuration for Vbat and temperature
+measurement"*. Pole rozlíšenia sa počítalo ako `OFFSET + resolution` namiesto
+`resolution - OFFSET`, čiže naše `getVbat(13, ...)` posielalo čipu **nesprávnu
+šírku ADC**. V našom pinnutom RadioLibe (`6d89348`) to ešte nie je.
+
+Pozor, tá oprava **sama rozdiel boot vs. po-RX nevysvetľuje** — obe volania
+používajú rovnaké rozlíšenie 13, takže by boli pokazené rovnako. Sú to teda dva
+nezávislé kandidáti a najlacnejšie sa otestujú naraz: **bumpnuť RadioLib a znova
+odmerať.**
+
 ### Mechanizmus (Semtech `lr20xx_patch.c`, Clear BSD)
 
 1. zápis blobu na `0x801000` po blokoch 32 slov (`write_regmem32`)
