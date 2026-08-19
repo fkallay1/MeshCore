@@ -9,6 +9,7 @@ class CustomLR2021 : public LR2021 {
   uint32_t _activityAt = 0;
   bool _headerSeen = false;
   bool _rx_boosted = false;
+  uint32_t _stale_pktlen_reads = 0;
 
   public:
     CustomLR2021(Module *mod) : LR2021(mod) { irqDioNum = LR2021_IRQ_DIO; }
@@ -74,6 +75,52 @@ class CustomLR2021 : public LR2021 {
       // include the PREAMBLE_DETECTED irq bit in reported flags
       return LR2021::startReceive(RADIOLIB_LR2021_RX_TIMEOUT_INF, RADIOLIB_IRQ_RX_DEFAULT_FLAGS | (1UL << RADIOLIB_LR2021_IRQ_PREAMBLE_DETECTED), RADIOLIB_IRQ_RX_DEFAULT_MASK, 0);
     }
+
+    //en: Guard against a stale SPI response corrupting the received length.
+    //en: A "get" on this chip family is two transactions (LRxxxx::SPIcommand): send
+    //en: the opcode, then read the answer. Module::SPItransferStream() waits 1 us and
+    //en: then polls BUSY - if BUSY has not risen yet the wait is skipped and the read
+    //en: comes too early. The chip then answers with its default [stat 2B][irq 4B]
+    //en: stream, and getRxPktLength() blindly parses the first two payload bytes, i.e.
+    //en: irq[31:16]. With RX_DONE (bit 18) set that is exactly 4, so a 50 or 133 byte
+    //en: frame was reported as len=4; readData() read 4 bytes, its clearRxFifo() threw
+    //en: the rest away and tryParsePacket() rejected the frame - a silent loss. Worse,
+    //en: irq[31:16] can also be a plausible length (12 with TX_DONE, 68 with CRC_ERROR),
+    //en: which passes unnoticed as a garbage packet.
+    //en: The Rx FIFO is still intact here (readData() runs later), so re-reading the
+    //en: length recovers the frame. getIrqStatus() cannot suffer the same race - it IS
+    //en: that default stream (see LRxxxx::getIrqStatus) - which makes irq[31:16] an
+    //en: exact fingerprint of a stale answer. A genuine frame whose length happens to
+    //en: match only costs a few extra reads and is returned unchanged.
+    //sk: Ochrana pred zastaralou SPI odpovedou, ktorá pokazí prijatú dĺžku.
+    //sk: Čítanie ("get") je na tejto rodine čipov dvojtransakčné (LRxxxx::SPIcommand):
+    //sk: pošli opcode, potom prečítaj odpoveď. Module::SPItransferStream() počká 1 us a
+    //sk: potom poluje na BUSY - ak BUSY ešte nestúplo, čakanie sa preskočí a čítanie
+    //sk: príde priskoro. Čip vtedy odpovie svojím default streamom [stat 2B][irq 4B] a
+    //sk: getRxPktLength() slepo rozparsuje prvé dva bajty, teda irq[31:16]. S nastaveným
+    //sk: RX_DONE (bit 18) je to presne 4, takže 50 alebo 133 bajtový rámec sa ohlásil ako
+    //sk: len=4; readData() prečítal 4 bajty, jeho clearRxFifo() zvyšok zahodil a
+    //sk: tryParsePacket() rámec odmietol - tichá strata. Horšie, irq[31:16] môže dať aj
+    //sk: hodnovernú dĺžku (12 s TX_DONE, 68 s CRC_ERROR) a prejde nepovšimnuté ako smeť.
+    //sk: Rx FIFO je tu ešte celé (readData() beží až potom), takže opakované čítanie
+    //sk: dĺžky rámec zachráni. getIrqStatus() tou istou pretekou trpieť nemôže - ono samo
+    //sk: JE ten default stream (viď LRxxxx::getIrqStatus) - a preto je irq[31:16] presný
+    //sk: odtlačok zastaralej odpovede. Skutočný rámec, ktorého dĺžka sa náhodou zhoduje,
+    //sk: stojí len pár čítaní navyše a vráti sa nezmenený.
+    size_t getPacketLength(bool update = true) override {
+      size_t len = 0;
+      for (int i = 0; i < 4; i++) {
+        uint16_t stale = (uint16_t)(getIrqStatus() >> 16);
+        len = LR2021::getPacketLength(update);
+        if (len != stale) break;      // answer belongs to our command
+        _stale_pktlen_reads++;
+      }
+      return len;
+    }
+
+    //en: how many stale answers had to be re-read (0 = the race never hit)
+    //sk: koľko zastaralých odpovedí sa muselo prečítať znova (0 = preteka nenastala)
+    uint32_t getStalePktLenReads() const { return _stale_pktlen_reads; }
 
     bool isReceiving() {
       uint32_t irq = getIrqStatus();
