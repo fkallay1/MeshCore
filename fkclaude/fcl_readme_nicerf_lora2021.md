@@ -223,6 +223,89 @@ nezapne (v diskusii #1772 si takto niekto pravdepodobne spálil LF PA).
 
 Náš header to drží: `{DIO5, DIO6, NC, NC, NC}`, pri 2,4 GHz `{DIO5, DIO6, DIO7, DIO8, NC}`.
 
+## Zastaralá SPI odpoveď — komolená dĺžka paketu
+
+Zistené 2026-08-20 z RAW logu (build #445). V zhlukoch, kde to isté refloodne
+niekoľko repeaterov naraz, sa občas vypísalo:
+
+```
+[FOTA] RX RAW #47097 len=4 type=8(PATH) route=1 hdr=0x21 path[13] first=214D5591 rssi=-24
+```
+
+Rovnaký rámec videla ProMicro (SX1262) v tom istom čase ako `len=50`. A vždy
+presne **4**, či mal rámec 50, 126, 133 alebo 38 bajtov.
+
+**Nie je to chyba výpisu.** `len` prichádza z `recvRaw()` → `getPacketLength()`,
+a hex dump sa zastaví na tých istých 4 bajtoch (tlačí `min(len,8)`). Prvé 4 bajty
+sú pritom správne — chybná je len dĺžka.
+
+### Mechanizmus
+
+Čítanie („get") je na rodine LR11x0/LR2021 **dvojtransakčné**
+(`LRxxxx::SPIcommand`, `LR_common.cpp`): pošli opcode, potom prečítaj odpoveď.
+`Module::SPItransferStream()` po CS-high počká `delayMicroseconds(1)` a potom
+poluje na BUSY-low. Ak BUSY do tej mikrosekundy ešte nestúplo, čakanie sa
+preskočí a odpoveď sa číta priskoro.
+
+Čip vtedy pošle svoj **default stream `[stat 2B][irq 4B]`** a RadioLib prvé dva
+bajty payloadu slepo rozparsuje ako dĺžku, teda `irq[31:16]`:
+
+```
+RADIOLIB_LR2021_IRQ_RX_DONE = 1<<18  →  irq = 0x0004_0000
+horná polovica, MSB-first             →  {0x00, 0x04}  →  len = 4
+```
+
+Že predčasné čítanie vracia `stat+irq`, nie je domnienka — **RadioLib na tom
+stavia**: `LRxxxx::getIrqStatus()` číta IRQ presne takto, s komentárom *„there is
+no dedicated get IRQ command, the IRQ bits are sent after the status bytes"*.
+Kontrola status bajtu (`Module.cpp`) to zachytiť nemôže: status je v poriadku,
+chybný je len obsah za ním.
+
+### Prečo to bolelo
+
+`readData()` prečítal 4 bajty a hneď zavolal `clearRxFifo()` — zvyšok paketu
+nezvratne zahodený, `tryParsePacket()` rámec odmietol („partial or corrupt
+packet"). **Tichá strata:** do `rxerr` sa to nepočíta (readData vrátil OK), len
+do `rawrx`. A horšie — `irq[31:16]` môže dať aj **hodnovernú** dĺžku (12 s
+TX_DONE, 68 s CRC_ERROR), ktorá v logu nevyzerá podozrivo a prejde ako smeť.
+
+### Fix (`CustomLR2021::getPacketLength()`)
+
+V momente čítania dĺžky je Rx FIFO **ešte celé** — `readData()` beží až potom —
+takže opakované čítanie rámec zachráni. Override porovná prečítanú dĺžku
+s `irq[31:16]` a pri zhode ju prečíta znova (max 4×).
+
+`getIrqStatus()` tou istou pretekou trpieť nemôže, ono samo **JE** ten default
+stream, takže `irq[31:16]` je presný odtlačok zlej odpovede. Skutočný rámec,
+ktorého dĺžka sa náhodou zhoduje, stojí len pár čítaní navyše a vráti sa
+nezmenený.
+
+Používa len public API, takže to platí aj pre envy bez `RADIOLIB_GODMODE`
+(overené buildom `meshnology_w12_repeater`). `readData()` si dĺžku berie cez tú
+istú virtuálnu metódu, takže jedno miesto opraví obe cesty.
+
+### Ako to sledovať
+
+Počítadlo je v `AALIVE` ako `spifix=` (za `#ifdef USE_LR2021`, teda len na
+LR2021 doskách):
+
+```
+[FOTA]   AALIVE build #454  freq=869.618 sf=7 rawrx=... spifix=0 isr=... nf=-117
+```
+
+Trvalá `0` = preteka nenastáva. Každý inkrement = rámec, ktorý by inak zmizol.
+Je to časovacia lotéria — pri redšej premávke sa nemusí ukázať hodiny, prehráva
+najmä v hustých reflood dávkach, keď je čip zaneprázdnený.
+
+### Kde je koreň
+
+V upstream RadioLibe 7.7.1 (pinnutý upstreamom MeshCore na `6d89348`), nie
+v našom kóde — celá LR2021 podpora v MeshCore je od `taco`
+(`7cc16366`, `696a82d7`, `36e77671`, `ce62c8b5`), naše je len tento variant
+a `NiceRF2021F33.h`. Chýba tam validácia, že prečítaná odpoveď patrí
+k odoslanému príkazu; náš override je **lokálny obchvat, nie oprava koreňa**.
+Kandidát na hlásenie do jgromes/RadioLib — trafí každého s LR2021.
+
 ## Zapnutie 2,4 GHz (zatiaľ NEROBIŤ)
 
 V `variants/xiao_nrf52_nicerf2021f33/platformio.ini` odkomentovať:
@@ -548,6 +631,13 @@ Teplota aj chybové príznaky sú pritom v oboch prípadoch v poriadku, takže *
 nie je pokazené** — je to vlastnosť merania, nie porucha.
 
 **Praktické pravidlo: verte boot hodnote (3312 mV), `fk info` brať orientačne.**
+
+**Hypotéza (NEOVERENÉ), 2026-08-20:** môže za tým byť tá istá preteka ako
+v [Zastaralá SPI odpoveď — komolená dĺžka paketu](#zastaralá-spi-odpoveď--komolená-dĺžka-paketu)
+— `getVbat()` je rovnako dvojtransakčné čítanie, a „rádio predtým bežalo
+v príjme" znamená čip zaneprázdnený. Overilo by sa tak, že sa `fk info`
+odmeria niekoľkokrát za sebou: ak hodnota preskakuje medzi 2454 a 3312, je to
+ono; ak drží 2454, je to skutočne vlastnosť merania.
 
 ### Mechanizmus (Semtech `lr20xx_patch.c`, Clear BSD)
 
