@@ -112,7 +112,11 @@ class CustomLR2021 : public LR2021 {
       for (int i = 0; i < 4; i++) {
         uint16_t stale = (uint16_t)(getIrqStatus() >> 16);
         len = LR2021::getPacketLength(update);
-        if (len != stale) break;      // answer belongs to our command
+        //en: stale == 0 means there is nothing to confuse the length with, so a zero
+        //en: length is a genuine "no packet" answer - do not waste reads on it.
+        //sk: stale == 0 znamena, ze dlzku nie je s cim zamenit, teda nulova dlzka je
+        //sk: skutocne "ziadny paket" - necitaj to znova zbytocne.
+        if (stale == 0 || len != stale) break;
         _stale_pktlen_reads++;
       }
       return len;

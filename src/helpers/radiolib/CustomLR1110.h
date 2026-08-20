@@ -15,6 +15,37 @@ class CustomLR1110 : public LR1110 {
 
     size_t getPacketLength(bool update) override {
       size_t len = LR1110::getPacketLength(update);
+      //en: Guard against a stale SPI reply being parsed as the received length.
+      //en: A "get" is two transactions (LRxxxx::SPIcommand): send the opcode, then read
+      //en: the reply. Module::SPItransferStream() waits 1 us and then polls BUSY, so if
+      //en: BUSY has not risen yet the wait is skipped and the reply is read too early.
+      //en: The chip answers with its default [stat 2B][irq 4B] stream instead, and
+      //en: getRxBufferStatus() takes the length from the first payload byte, i.e.
+      //en: irq[31:24] - zero for every RX-relevant flag, since those all live in the
+      //en: two low bytes. The Rx buffer is still intact at this point (readData() runs
+      //en: later), so reading the length again recovers the packet instead of dropping
+      //en: it. getIrqStatus() cannot be hit by the same race: it IS that default stream
+      //en: (see LRxxxx::getIrqStatus), which makes irq[31:24] an exact fingerprint.
+      //en: RX_DONE has to be checked too, because a zero sentinel is also the honest
+      //en: answer when no packet is waiting.
+      //sk: Ochrana pred tym, aby sa zastarala SPI odpoved rozparsovala ako dlzka.
+      //sk: Citanie ("get") je dvojtransakcne (LRxxxx::SPIcommand): posli opcode, potom
+      //sk: precitaj odpoved. Module::SPItransferStream() pocka 1 us a potom poluje na
+      //sk: BUSY, takze ak BUSY nestuplo, cakanie sa preskoci a odpoved sa cita priskoro.
+      //sk: Cip vtedy posle svoj default stream [stat 2B][irq 4B] a getRxBufferStatus()
+      //sk: vezme dlzku z prveho bajtu payloadu, teda irq[31:24] - nula pre kazdy RX
+      //sk: priznak, lebo tie vsetky sedia v dvoch dolnych bajtoch. Rx buffer je v tomto
+      //sk: momente jeste cely (readData() bezi az potom), takze opakovane citanie dlzky
+      //sk: paket zachrani namiesto zahodenia. getIrqStatus() tou istou pretekou trpiet
+      //sk: nemoze - ono samo JE ten default stream (vid LRxxxx::getIrqStatus), preto je
+      //sk: irq[31:24] presny odtlacok. RX_DONE treba overit tiez, lebo nulovy sentinel
+      //sk: je aj cestna odpoved vtedy, ked ziadny paket neceka.
+      uint32_t irq = getIrqStatus();
+      for (int i = 0; i < 3 && len == (size_t)(irq >> 24)
+                            && (irq & RADIOLIB_LR11X0_IRQ_RX_DONE); i++) {
+        len = LR1110::getPacketLength(update);
+        irq = getIrqStatus();
+      }
       if (len == 0 && getIrqStatus() & RADIOLIB_LR11X0_IRQ_HEADER_ERR) {
         // we've just received a corrupted packet
         // this may have triggered a bug causing subsequent packets to be shifted
