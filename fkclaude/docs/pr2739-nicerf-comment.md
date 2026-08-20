@@ -1,6 +1,8 @@
 # Komentár k upstream PR 2739 (NiceRF LoRa2021 + ESP32-C3)
 
-**NEODOSLANÉ.** Cieľ: `meshcore-dev/MeshCore`, PR 2739 od `c03rad0r`.
+**ODOSLANÉ 2026-08-20:** https://github.com/meshcore-dev/MeshCore/pull/2739#issuecomment-5360197318
+
+Cieľ bol: `meshcore-dev/MeshCore`, PR 2739 od `c03rad0r`.
 
 Príkaz (telo = len časť za posledným nadpisom Body; `rindex`, nie `index`):
 
