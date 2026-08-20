@@ -91,6 +91,32 @@ trusted only when the status says the reply is ours. The Rx FIFO is still intact
 point, so re-reading recovers the frame; if it never settles, the plain library read is
 used so this can never end up worse.
 
+Keeping the status byte is the only part that needs care. Setting the status width to 0
+tells the transfer layer there is nothing to strip, so the whole reply lands in our own
+buffer:
+
+```cpp
+mod->SPIwriteStream(RADIOLIB_LR2021_CMD_GET_RX_PKT_LENGTH, NULL, 0, wait, false);
+mod->spiConfig.widths[RADIOLIB_MODULE_SPI_WIDTH_STATUS] = Module::BITS_0;
+mod->spiConfig.widths[RADIOLIB_MODULE_SPI_WIDTH_CMD]    = Module::BITS_0;
+mod->SPIreadStream(RADIOLIB_LRXXXX_CMD_NOP, buff, sizeof(buff), wait, false);
+// buff[0..1] = status word, buff[2..3] = the length
+```
+
+The guard itself is then just the status test:
+
+```cpp
+size_t getPacketLength(bool update = true) override {
+  uint8_t  stat = 0;
+  uint16_t val  = 0;
+  for (int i = 0; i < 3; i++) {
+    readRxPktLenWithStatus(true, &stat, &val);
+    if ((stat & 0x0E) == RADIOLIB_LRXXXX_STAT_1_CMD_DAT) return val;
+  }
+  return LR2021::getPacketLength(update);   // never worse than the plain read
+}
+```
+
 An earlier version of this compared the returned length against `irq[31:16]` instead,
 which needs no status byte. That turned out to misfire: 68 is both a common frame length
 here and what `irq[31:16]` reads when RX_DONE and CRC_ERROR are set together, so it
