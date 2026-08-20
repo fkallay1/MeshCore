@@ -297,6 +297,37 @@ Trvalá `0` = preteka nenastáva. Každý inkrement = rámec, ktorý by inak zmi
 Je to časovacia lotéria — pri redšej premávke sa nemusí ukázať hodiny, prehráva
 najmä v hustých reflood dávkach, keď je čip zaneprázdnený.
 
+### Odmerané na železe — `fk stale`
+
+Build #459, štyri behy po ôsmich čítaniach. `fkRawPktLen()` v `CustomLR2021`
+prečíta `GetRxPktLength` dvoma transakciami tak ako driver, ale podrží si status
+slovo a vie **úmyselne preskočiť čakanie na BUSY** — čím sa chyba vyrobí na
+požiadanie. Šírka statusu sa nastaví na 0, takže oba status bajty ostanú vidieť
+(rovnako ako číta default stream `LRxxxx::getIrqStatus`).
+
+```
+nowait  stat=04  cmd=2 (CMD_OK)   val=0    <- horná polovica IRQ slova
+wait    stat=06  cmd=3 (CMD_DAT)  val=50   <- skutočná dĺžka posledného paketu
+```
+
+**32 z 32** predčasných čítaní vrátilo status stream a **všetky** hlásili
+`CMD_OK`; všetky poriadne čítania hlásili `CMD_DAT` a správnu dĺžku. Z toho
+vyplývajú dve veci:
+
+1. **Mechanizmus je dokázaný.** Preskočené čakanie na BUSY spoľahlivo vyrobí tú
+   chybu — a je to zároveň deterministický recept na reprodukciu, takže sa už
+   nemusí čakať, kým sa to v éteri stane samo.
+2. **Navrhovaná oprava v RadioLibe funguje.** Pole command status v `stat1` má
+   štyri hodnoty a `LRxxxx::SPIparseStatus()` odmieta len `CMD_FAIL` a `CMD_PERR`
+   — `CMD_OK` („successfully processed") a `CMD_DAT` („successfully processed,
+   data is being transmitted") berie rovnako ako úspech. Pri čítacej transakcii
+   je pritom `CMD_DAT` jediná správna hodnota, takže kontrola na ňu by zachytila
+   všetkých 32 prípadov. Nič to nespomalí a pokryje to **všetky** `get` príkazy,
+   nielen dĺžku.
+
+Fingerprint bol v teste 0, lebo IRQ slovo už vyčistil predchádzajúci `readData()`.
+Pri živej chybe je `RX_DONE` ešte nastavený a odtiaľ pochádza hodnota 4.
+
 ### Kde je koreň
 
 V upstream RadioLibe 7.7.1 (pinnutý upstreamom MeshCore na `6d89348`), nie
@@ -495,6 +526,7 @@ Aby sa dal modul skúšať bez neustáleho preflashovania. Vyžaduje aj
 | `fk ce on\|off` | vypne/zapne celý modul cez jeho LDO enable (pin CE) |
 | `fk pram` | stav PRAM (magic + verzia) |
 | `fk pram load` | (znova) nahrá patch, ak je build s `LR2021_PRAM_UPD` |
+| `fk stale` | A/B test pretečenej SPI odpovede — flag `FK_LR2021_SPI_DIAG` |
 
 ### Diagnostika rádia — flag `LORA_RADIO_DIAG_CLI` (nezávislý od typu rádia)
 
