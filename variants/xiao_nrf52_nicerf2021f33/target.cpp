@@ -111,6 +111,39 @@ bool nicerfTestCliCommand(char* command, char* reply) {
     return true;
   }
 
+#if defined(RADIOLIB_GODMODE) && defined(FK_LR2021_SPI_DIAG)
+  //en: 'fk stale' - A/B test of the two-transaction read behind every "get" command.
+  //en: Eight reads with the BUSY wait deliberately skipped, then one proper read as a
+  //en: reference. fp = top half of the IRQ word, which is what a stale reply returns
+  //en: instead of the length. Prints per-read detail over Serial.
+  //sk: 'fk stale' - A/B test dvojtransakcneho citania, ktore stoji za kazdym "get"
+  //sk: prikazom. Osem citani s umyselne preskocenym cakanim na BUSY, potom jedno
+  //sk: poriadne ako referencia. fp = horna polovica IRQ slova, teda to, co zastarala
+  //sk: odpoved vrati namiesto dlzky. Detail kazdeho citania ide na Serial.
+  if (memcmp(arg, "stale", 5) == 0) {
+    uint32_t irq = radio.getIrqStatus();
+    uint16_t fp  = (uint16_t)(irq >> 16);
+    uint8_t  st  = 0;
+    uint16_t v   = 0;
+    int nStale = 0, nDat = 0, nOk = 0;
+    Serial.printf("[FK] stale test: irq=%08lX fp=%u\n", (unsigned long)irq, (unsigned)fp);
+    for (int i = 0; i < 8; i++) {
+      radio.fkRawPktLen(false, &st, &v);
+      uint8_t cs = (st >> 1) & 3;
+      if (cs == 3) nDat++; else if (cs == 2) nOk++;
+      if (v == fp) nStale++;
+      Serial.printf("[FK]   nowait #%d stat=%02X cmd=%u val=%u%s\n",
+                    i, (unsigned)st, (unsigned)cs, (unsigned)v, v == fp ? "  <- fp" : "");
+    }
+    radio.fkRawPktLen(true, &st, &v);
+    Serial.printf("[FK]   wait     stat=%02X cmd=%u val=%u\n",
+                  (unsigned)st, (unsigned)((st >> 1) & 3), (unsigned)v);
+    sprintf(reply, "fp=%u | nowait: fp-hits=%d/8 DAT=%d OK=%d | wait: cmd=%u len=%u",
+            (unsigned)fp, nStale, nDat, nOk, (unsigned)((st >> 1) & 3), (unsigned)v);
+    return true;
+  }
+#endif
+
 #if defined(RADIOLIB_GODMODE)
   if (memcmp(arg, "simo ", 5) == 0) {
     bool on = (memcmp(arg + 5, "on", 2) == 0);

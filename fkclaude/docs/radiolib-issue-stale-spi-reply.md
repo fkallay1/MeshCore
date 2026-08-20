@@ -61,23 +61,39 @@ the read follows.
 
 **To Reproduce**
 
-It is a timing race, so a plain example sketch does not show it reliably - it needs the
-chip to be busy, in practice a second node transmitting back to back. What does make it
-visible without any special hardware is instrumenting the length read itself, since a
-stale reply has an exact fingerprint:
+The race itself is timing dependent, but it can be provoked deterministically by doing
+what the driver does and skipping the BUSY wait on purpose. Setting the status width to
+0 keeps both status bytes visible, the same way `LRxxxx::getIrqStatus()` reads the
+default stream:
 
 ```c++
-// LR2021: a length equal to the top half of the IRQ word is a stale reply
-uint16_t fingerprint = (uint16_t)(radio.getIrqStatus() >> 16);
-size_t len = radio.getPacketLength();
-if (len == fingerprint && fingerprint != 0) {
-  Serial.print(F("stale reply, len="));
-  Serial.println(len);          // 4 when only RX_DONE is set
-}
+// two transactions, BUSY wait deliberately skipped
+mod->SPIwriteStream(RADIOLIB_LR2021_CMD_GET_RX_PKT_LENGTH, NULL, 0, false, false);
+mod->spiConfig.widths[RADIOLIB_MODULE_SPI_WIDTH_STATUS] = Module::BITS_0;
+mod->spiConfig.widths[RADIOLIB_MODULE_SPI_WIDTH_CMD]    = Module::BITS_0;
+uint8_t buff[4] = { 0 };
+mod->SPIreadStream(RADIOLIB_LRXXXX_CMD_NOP, buff, sizeof(buff), false, false);
+// buff[0..1] = status word, buff[2..3] = the reply - or the top half of the IRQ word
 ```
 
-Reading the length again at that point returns the correct value, which confirms both
-that the Rx buffer still holds the packet and that the first read was simply too early.
+Measured on the board, eight reads with the wait skipped followed by one proper read,
+repeated four times. `cmd` is the command status field of stat1, bits 3:1:
+
+```
+nowait  stat=04  cmd=2 (CMD_OK)   val=0    <- top half of the IRQ word, not the length
+nowait  stat=04  cmd=2 (CMD_OK)   val=0
+...   32 reads, all identical
+wait    stat=06  cmd=3 (CMD_DAT)  val=50   <- the real length of the last packet
+```
+
+So 32 out of 32 early reads returned the status stream, and every one of them reported
+`CMD_OK`; the properly waited reads reported `CMD_DAT` and the correct length. The
+fingerprint is 0 in this bench test because the IRQ word had already been cleared by
+the preceding `readData()`. In the live failure the RX_DONE flag is still pending, which
+is where the value 4 comes from.
+
+Reading the length again after a stale reply returns the correct value, which also
+confirms that the Rx buffer still holds the packet at that point.
 
 **Expected behavior**
 
@@ -87,9 +103,9 @@ the requested data without any indication.
 
 **Possible directions**
 
-The chip already reports whether a reply is on its way. The command status field in
-stat1 has four values, and `LRxxxx::SPIparseStatus()` currently only rejects two of
-them:
+The chip already reports whether a reply is on its way, and the measurement above shows
+it discriminates cleanly. The command status field in stat1 has four values, and
+`LRxxxx::SPIparseStatus()` currently only rejects two of them:
 
 ```c++
 if((in & 0b00001110) == RADIOLIB_LRXXXX_STAT_1_CMD_PERR) { ... }
@@ -98,22 +114,28 @@ else if((in & 0b00001110) == RADIOLIB_LRXXXX_STAT_1_CMD_FAIL) { ... }
 
 `CMD_OK` ("successfully processed") and `CMD_DAT` ("successfully processed, data is
 being transmitted") are both accepted as success. On the read transaction of a get
-command, `CMD_DAT` is the only correct one - `CMD_OK` means there is no reply to
-collect, which is exactly the case where the default status stream is returned
-instead. Checking for it on the second transaction would catch this without any
-timing changes, and would cover every get command rather than just the length.
+command, `CMD_DAT` is the only correct one - and a stale reply reported `CMD_OK` in all
+32 measured cases. Checking for it would catch this without any timing change, and
+would cover every get command rather than just the length.
 
 The callback only receives the status byte, so it cannot tell a read from a write on
-its own; it would need either a flag in the SPI config saying a data reply is
-expected, or a separate check in the read branch of `LRxxxx::SPIcommand()`.
+its own; it would need either a flag in the SPI config saying a data reply is expected,
+or a separate check in the read branch of `LRxxxx::SPIcommand()`.
 
-If the status turns out not to discriminate reliably in this state, the alternative is
-in the handshake itself: wait for BUSY to actually rise before waiting for it to fall,
-bounded by a short timeout for the case where the command has already completed by the
-time we start sampling.
+An alternative, or an addition, is the handshake itself: wait for BUSY to actually rise
+before waiting for it to fall, bounded by a short timeout for the case where the command
+has already completed by the time sampling starts.
 
 Either way it would be good if the failure were visible to the caller, rather than
 arriving as data that looks legitimate.
+
+And if touching the transport is not wanted at all, the length read alone can be made
+safe from the outside, because that one has a fingerprint to test against: compare the
+value returned against the top bytes of the IRQ word and, when they match, read it
+again. That is what the application this was found in does now, and it recovers the
+frames. It is a workaround rather than a fix - it costs an extra status read per packet
+and it does nothing for the other get commands, which have no fingerprint - but it is
+cheap and it needs no driver change.
 
 **Additional info**
 

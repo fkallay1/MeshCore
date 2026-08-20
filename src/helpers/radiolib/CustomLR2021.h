@@ -126,6 +126,39 @@ class CustomLR2021 : public LR2021 {
     //sk: koľko zastaralých odpovedí sa muselo prečítať znova (0 = preteka nenastala)
     uint32_t getStalePktLenReads() const { return _stale_pktlen_reads; }
 
+#ifdef FK_LR2021_SPI_DIAG
+    //en: Diagnostics for the stale-reply race (see getPacketLength above). Reads
+    //en: GetRxPktLength the way LRxxxx::SPIcommand does - two transactions - but keeps
+    //en: the status word, and can deliberately skip the BUSY wait to provoke the early
+    //en: read. Both status bytes stay visible by setting the status width to 0, exactly
+    //en: how LRxxxx::getIrqStatus reads the default stream.
+    //en: stat bits 3:1 = command status: 0 FAIL, 1 PERR, 2 OK, 3 DAT ("data is being
+    //en: transmitted"). If a stale reply reports OK rather than DAT, the driver could
+    //en: reject it from the status alone - which is the fix proposed upstream.
+    //sk: Diagnostika pretecenej odpovede (viď getPacketLength vyššie). Číta
+    //sk: GetRxPktLength tak, ako to robí LRxxxx::SPIcommand - dvoma transakciami - ale
+    //sk: podrží si status slovo a vie úmyselne preskočiť čakanie na BUSY, aby predčasné
+    //sk: čítanie vyprovokovalo. Oba status bajty ostanú viditeľné tým, že sa šírka
+    //sk: statusu nastaví na 0 - presne ako číta default stream LRxxxx::getIrqStatus.
+    //sk: stat bity 3:1 = command status: 0 FAIL, 1 PERR, 2 OK, 3 DAT ("data is being
+    //sk: transmitted"). Ak zastaralá odpoveď hlási OK a nie DAT, driver ju vie odmietnuť
+    //sk: už zo statusu - a to je oprava navrhnutá upstreamu.
+    int16_t fkRawPktLen(bool wait, uint8_t* stat, uint16_t* val) {
+      int16_t st = mod->SPIwriteStream(RADIOLIB_LR2021_CMD_GET_RX_PKT_LENGTH, NULL, 0, wait, false);
+      Module::BitWidth_t sw = mod->spiConfig.widths[RADIOLIB_MODULE_SPI_WIDTH_STATUS];
+      Module::BitWidth_t cw = mod->spiConfig.widths[RADIOLIB_MODULE_SPI_WIDTH_CMD];
+      mod->spiConfig.widths[RADIOLIB_MODULE_SPI_WIDTH_STATUS] = Module::BITS_0;
+      mod->spiConfig.widths[RADIOLIB_MODULE_SPI_WIDTH_CMD]    = Module::BITS_0;
+      uint8_t buff[4] = { 0 };
+      st = mod->SPIreadStream(RADIOLIB_LRXXXX_CMD_NOP, buff, sizeof(buff), wait, false);
+      mod->spiConfig.widths[RADIOLIB_MODULE_SPI_WIDTH_STATUS] = sw;
+      mod->spiConfig.widths[RADIOLIB_MODULE_SPI_WIDTH_CMD]    = cw;
+      if (stat) *stat = buff[0];
+      if (val)  *val  = ((uint16_t)buff[2] << 8) | (uint16_t)buff[3];
+      return st;
+    }
+#endif
+
     bool isReceiving() {
       uint32_t irq = getIrqStatus();
       bool preamble = irq & RADIOLIB_LR2021_IRQ_PREAMBLE_DETECTED;  // bit 5
