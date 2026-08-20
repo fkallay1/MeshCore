@@ -21,7 +21,7 @@ protected:
   uint16_t _num_floor_samples;
   int32_t _floor_sample_sum;
   uint8_t _preamble_sf;
-#ifdef FK_RADIO_WATCHDOG
+#ifdef FKPR_RADIO_WATCHDOG
   //en: passive liveness stats, filled from the noise-floor sampler in loop() -
   //en: that sampler already reads getCurrentRSSI() ~32x per second, so there is
   //en: no reason for the watchdog to run its own blocking burst.
@@ -76,7 +76,7 @@ public:
   virtual int16_t performChannelScan();
 
   int getNoiseFloor() const override { return _noise_floor; }
-#ifdef FK_RADIO_WATCHDOG
+#ifdef FKPR_RADIO_WATCHDOG
   //en: read the accumulated window and start a fresh one. 'samples' is the more
   //en: reliable signal of the two: it only advances while the chip is actually
   //en: armed in Rx, so a stalled receiver shows up even on a dead-quiet channel.

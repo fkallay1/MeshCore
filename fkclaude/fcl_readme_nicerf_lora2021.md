@@ -382,7 +382,7 @@ len to nie je odskúšané na železe.
 
 ⚠️ V zdieľanom bloku `[Xiao_nrf52_nicerf_lora2021f33]` smie
 byť len **definícia hardvéru** (piny, TCXO, PA tabuľka, `MAX_LORA_TX_POWER`).
-Všetko ostatné — `FK_RADIO_WATCHDOG`, `FK_RADIO_DIAG_ONLY`,
+Všetko ostatné — `FKPR_RADIO_WATCHDOG`, `FK_RADIO_DIAG_ONLY`,
 `FK_RADIO_DIAG_CLI`, `RADIOLIB_GODMODE`, `FK_NICERF_LORA2021F33_TEST`,
 `LR2021_PRAM_UPD`, `NICERF_LORA2021F33_SIMO` — patrí **iba do FOTA envu**, aby
 `..._repeater` ostal de facto štandardný repeater bez našich zmien. Do 2026-08-16
@@ -437,7 +437,7 @@ Známa vrtochovitosť je ošetrená v `RadioLibWrappers.cpp`: so zapnutými side
 detektormi vracal LR2021 `-706` pri `startReceive()` po hardvérovom CAD, preto sa
 tam volá `standby()` navyše.
 
-## Watchdog rádia — flag `FK_RADIO_WATCHDOG` (nezávislý od typu rádia)
+## Watchdog rádia — flag `FKPR_RADIO_WATCHDOG` (nezávislý od typu rádia)
 
 **Problém:** keď rádio ticho odumrie, MeshCore to nezistí. Uzol beží ďalej,
 vypisuje heartbeaty a nepreposiela nič, kým ho niekto fyzicky nereštartuje.
@@ -511,7 +511,7 @@ Rozhodovanie a obnova sú v `examples/simple_repeater/MyMesh.cpp`
 (`radioWatchdogLoop()`). Zber vzoriek si však vyžiadal **zásah do jadra** —
 `src/helpers/radiolib/RadioLibWrappers.{h,cpp}`, dva riadky min/max vo
 vzorkovači noise-floor plus `takeRssiWindow()`. Celé je to pod
-`#ifdef FK_RADIO_WATCHDOG`, takže bez toho flagu je diff voči upstreamu
+`#ifdef FKPR_RADIO_WATCHDOG`, takže bez toho flagu je diff voči upstreamu
 prázdny a merge nebolí. Funguje na každej doske, lebo `radio_init()` má každý
 variant. Kandidát na upstream.
 

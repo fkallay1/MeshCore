@@ -38,9 +38,9 @@ sám podčiarkne ako neplatný odkaz.
 - **FOTA balíčky 1.16 → aktuál** — veľkosti sa zmestili (patch 31–37 kB, extraSafe pod 32 kB)
   - ↳ [fcl_readme_fota_extrasafe.md § Aktuálne riešenie](fcl_readme_fota_extrasafe.md#3-aktuálne-riešenie-build--265-commit-na-featuresnrf-fota)
 - **Watchdog rádia** — tri pokusy o detekciu boli mylné, funguje až pasívne RSSI okno z noise-floor vzorkovača
-  - ↳ [fcl_readme_nicerf_lora2021.md § Watchdog rádia](fcl_readme_nicerf_lora2021.md#watchdog-rádia--flag-fk_radio_watchdog-nezávislý-od-typu-rádia)
+  - ↳ [fcl_readme_nicerf_lora2021.md § Watchdog rádia](fcl_readme_nicerf_lora2021.md#watchdog-rádia--flag-fkpr_radio_watchdog-nezávislý-od-typu-rádia)
 - **`isChipResponding()` na SX1262** — vadné, 0 z 6000; watchdog ho už nepoužíva
-  - ↳ [fcl_readme_nicerf_lora2021.md § Watchdog rádia](fcl_readme_nicerf_lora2021.md#watchdog-rádia--flag-fk_radio_watchdog-nezávislý-od-typu-rádia)
+  - ↳ [fcl_readme_nicerf_lora2021.md § Watchdog rádia](fcl_readme_nicerf_lora2021.md#watchdog-rádia--flag-fkpr_radio_watchdog-nezávislý-od-typu-rádia)
 - **Metrika `n`** — nie je konštanta 960, pri nekonvergujúcom floore vyskočí (`n=92950`)
   - ↳ [fcl_readme_nicerf_lora2021.md § Metrika n nie je konštanta](fcl_readme_nicerf_lora2021.md#metrika-n-nie-je-konštanta)
 - **Nové CLI `fk win`** — prečíta pasívne okno na požiadanie; sériové CLI vyžaduje `\r`, nie `\n`

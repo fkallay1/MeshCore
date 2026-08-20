@@ -1504,7 +1504,7 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
   }
 }
 
-#ifdef FK_RADIO_WATCHDOG
+#ifdef FKPR_RADIO_WATCHDOG
 /*
   Detect a radio that has stopped answering, and re-initialise it.
 
@@ -1628,7 +1628,7 @@ bool MyMesh::radioDiagCliCommand(char* command, char* reply) {
 
 void MyMesh::radioWatchdogLoop() {
   if (!millisHasNowPassed(next_radio_check)) return;
-  next_radio_check = futureMillis(FK_RADIO_WATCHDOG);
+  next_radio_check = futureMillis(FKPR_RADIO_WATCHDOG);
 
   //en: The first call lands on the first loop() after boot, when the sampler has
   //en: had no chance to collect anything yet - that reads as 'no samples' and
@@ -1715,7 +1715,7 @@ void MyMesh::loop() {
 
   mesh::Mesh::loop();
 
-#ifdef FK_RADIO_WATCHDOG
+#ifdef FKPR_RADIO_WATCHDOG
   radioWatchdogLoop();
 #endif
 

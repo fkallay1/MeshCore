@@ -52,7 +52,7 @@ void RadioLibWrapper::begin() {
   // start average out some samples
   _num_floor_samples = 0;
   _floor_sample_sum = 0;
-#ifdef FK_RADIO_WATCHDOG
+#ifdef FKPR_RADIO_WATCHDOG
   _wd_rssi_min = 32767; _wd_rssi_max = -32768; _wd_samples = 0;
 #endif
 }
@@ -127,7 +127,7 @@ void RadioLibWrapper::loop() {
   if (state == STATE_RX && _num_floor_samples < NUM_NOISE_FLOOR_SAMPLES) {
     if (!isReceivingPacket()) {
       int rssi = getCurrentRSSI();
-#ifdef FK_RADIO_WATCHDOG
+#ifdef FKPR_RADIO_WATCHDOG
       //en: record BEFORE the threshold filter below - that filter drops the upper
       //en: half of the spread, and the spread is the whole point of this test.
       //sk: zaznamenaj PRED prahovym filtrom nizsie - ten odreze hornu polovicu

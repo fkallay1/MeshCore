@@ -87,7 +87,7 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks {
   uint32_t last_millis;
   uint64_t uptime_millis;
   unsigned long next_local_advert, next_flood_advert;
-#ifdef FK_RADIO_WATCHDOG
+#ifdef FKPR_RADIO_WATCHDOG
   unsigned long next_radio_check = 0;
   bool radio_wd_armed = false;   //en: skip the very first check - see radioWatchdogLoop()
   uint8_t radio_dead_count = 0;
