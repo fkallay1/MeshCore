@@ -10,6 +10,7 @@ class CustomLR2021 : public LR2021 {
   bool _headerSeen = false;
   bool _rx_boosted = false;
   uint32_t _stale_pktlen_reads = 0;
+  float _tcxo_used = 0.0f;
 
   public:
     CustomLR2021(Module *mod) : LR2021(mod) { irqDioNum = LR2021_IRQ_DIO; }
@@ -56,6 +57,7 @@ class CustomLR2021 : public LR2021 {
         return false;  // fail
       }
     
+      _tcxo_used = tcxo;   //en: which value the chip actually accepted (see the retry above)
       setCRC(2);
       explicitHeader();
 
@@ -69,6 +71,16 @@ class CustomLR2021 : public LR2021 {
     
     float getFreqMHz() const { return freqMHz; }
 
+    //en: TCXO voltage that begin() succeeded with. std_init() retries with 0.0f when the
+    //en: configured value returns -706/-707, so the two can differ - and a module with a
+    //en: plain crystal only accepts 0.0f. Worth printing at boot: otherwise a silently
+    //en: fallen-back board looks identical to one that never needed a TCXO.
+    //sk: Napatie TCXO, s ktorym begin() preslo. std_init() pri -706/-707 skusi znova s
+    //sk: 0.0f, takze sa to moze lisit - a modul s obycajnym krystalom vezme len 0.0f.
+    //sk: Vyplati sa to vypisat pri boote: inak doska, ktora ticho spadla na fallback,
+    //sk: vyzera rovnako ako tá, ktora TCXO nikdy nepotrebovala.
+    float getTcxoUsed() const { return _tcxo_used; }
+
     bool getRxBoostedGainMode() const { return _rx_boosted; }
 
     int16_t startReceive() override {
@@ -76,78 +88,23 @@ class CustomLR2021 : public LR2021 {
       return LR2021::startReceive(RADIOLIB_LR2021_RX_TIMEOUT_INF, RADIOLIB_IRQ_RX_DEFAULT_FLAGS | (1UL << RADIOLIB_LR2021_IRQ_PREAMBLE_DETECTED), RADIOLIB_IRQ_RX_DEFAULT_MASK, 0);
     }
 
-    //en: Guard against a stale SPI response corrupting the received length.
-    //en: A "get" on this chip family is two transactions (LRxxxx::SPIcommand): send
-    //en: the opcode, then read the answer. Module::SPItransferStream() waits 1 us and
-    //en: then polls BUSY - if BUSY has not risen yet the wait is skipped and the read
-    //en: comes too early. The chip then answers with its default [stat 2B][irq 4B]
-    //en: stream, and getRxPktLength() blindly parses the first two payload bytes, i.e.
-    //en: irq[31:16]. With RX_DONE (bit 18) set that is exactly 4, so a 50 or 133 byte
-    //en: frame was reported as len=4; readData() read 4 bytes, its clearRxFifo() threw
-    //en: the rest away and tryParsePacket() rejected the frame - a silent loss. Worse,
-    //en: irq[31:16] can also be a plausible length (12 with TX_DONE, 68 with CRC_ERROR),
-    //en: which passes unnoticed as a garbage packet.
-    //en: The Rx FIFO is still intact here (readData() runs later), so re-reading the
-    //en: length recovers the frame. getIrqStatus() cannot suffer the same race - it IS
-    //en: that default stream (see LRxxxx::getIrqStatus) - which makes irq[31:16] an
-    //en: exact fingerprint of a stale answer. A genuine frame whose length happens to
-    //en: match only costs a few extra reads and is returned unchanged.
-    //sk: Ochrana pred zastaralou SPI odpovedou, ktorá pokazí prijatú dĺžku.
-    //sk: Čítanie ("get") je na tejto rodine čipov dvojtransakčné (LRxxxx::SPIcommand):
-    //sk: pošli opcode, potom prečítaj odpoveď. Module::SPItransferStream() počká 1 us a
-    //sk: potom poluje na BUSY - ak BUSY ešte nestúplo, čakanie sa preskočí a čítanie
-    //sk: príde priskoro. Čip vtedy odpovie svojím default streamom [stat 2B][irq 4B] a
-    //sk: getRxPktLength() slepo rozparsuje prvé dva bajty, teda irq[31:16]. S nastaveným
-    //sk: RX_DONE (bit 18) je to presne 4, takže 50 alebo 133 bajtový rámec sa ohlásil ako
-    //sk: len=4; readData() prečítal 4 bajty, jeho clearRxFifo() zvyšok zahodil a
-    //sk: tryParsePacket() rámec odmietol - tichá strata. Horšie, irq[31:16] môže dať aj
-    //sk: hodnovernú dĺžku (12 s TX_DONE, 68 s CRC_ERROR) a prejde nepovšimnuté ako smeť.
-    //sk: Rx FIFO je tu ešte celé (readData() beží až potom), takže opakované čítanie
-    //sk: dĺžky rámec zachráni. getIrqStatus() tou istou pretekou trpieť nemôže - ono samo
-    //sk: JE ten default stream (viď LRxxxx::getIrqStatus) - a preto je irq[31:16] presný
-    //sk: odtlačok zastaralej odpovede. Skutočný rámec, ktorého dĺžka sa náhodou zhoduje,
-    //sk: stojí len pár čítaní navyše a vráti sa nezmenený.
-    size_t getPacketLength(bool update = true) override {
-#ifdef FK_LR2021_SPI_DIAG
-      return fkDiagPktLen(update);
-#else
-      size_t len = 0;
-      for (int i = 0; i < 4; i++) {
-        uint16_t stale = (uint16_t)(getIrqStatus() >> 16);
-        len = LR2021::getPacketLength(update);
-        //en: stale == 0 means there is nothing to confuse the length with, so a zero
-        //en: length is a genuine "no packet" answer - do not waste reads on it.
-        //sk: stale == 0 znamena, ze dlzku nie je s cim zamenit, teda nulova dlzka je
-        //sk: skutocne "ziadny paket" - necitaj to znova zbytocne.
-        if (stale == 0 || len != stale) break;
-        _stale_pktlen_reads++;
-      }
-      return len;
-#endif
-    }
-
-    //en: how many stale answers had to be re-read (0 = the race never hit)
-    //sk: koľko zastaralých odpovedí sa muselo prečítať znova (0 = preteka nenastala)
-    uint32_t getStalePktLenReads() const { return _stale_pktlen_reads; }
-
-#ifdef FK_LR2021_SPI_DIAG
-    //en: Diagnostics for the stale-reply race (see getPacketLength above). Reads
-    //en: GetRxPktLength the way LRxxxx::SPIcommand does - two transactions - but keeps
-    //en: the status word, and can deliberately skip the BUSY wait to provoke the early
-    //en: read. Both status bytes stay visible by setting the status width to 0, exactly
-    //en: how LRxxxx::getIrqStatus reads the default stream.
-    //en: stat bits 3:1 = command status: 0 FAIL, 1 PERR, 2 OK, 3 DAT ("data is being
-    //en: transmitted"). If a stale reply reports OK rather than DAT, the driver could
-    //en: reject it from the status alone - which is the fix proposed upstream.
-    //sk: Diagnostika pretecenej odpovede (viď getPacketLength vyššie). Číta
-    //sk: GetRxPktLength tak, ako to robí LRxxxx::SPIcommand - dvoma transakciami - ale
-    //sk: podrží si status slovo a vie úmyselne preskočiť čakanie na BUSY, aby predčasné
-    //sk: čítanie vyprovokovalo. Oba status bajty ostanú viditeľné tým, že sa šírka
-    //sk: statusu nastaví na 0 - presne ako číta default stream LRxxxx::getIrqStatus.
-    //sk: stat bity 3:1 = command status: 0 FAIL, 1 PERR, 2 OK, 3 DAT ("data is being
-    //sk: transmitted"). Ak zastaralá odpoveď hlási OK a nie DAT, driver ju vie odmietnuť
-    //sk: už zo statusu - a to je oprava navrhnutá upstreamu.
-    int16_t fkRawPktLen(bool wait, uint8_t* stat, uint16_t* val) {
+    //en: Read the received length ourselves, keeping the status word.
+    //en: A "get" on this family is two SPI transactions (LRxxxx::SPIcommand): send the
+    //en: opcode, then read the reply. SPItransferStream() waits 1 us before polling
+    //en: BUSY, so when BUSY has not risen yet the reply is read too early and the chip
+    //en: answers with its default [stat 2B][irq 4B] stream instead. RadioLib strips the
+    //en: status and hands the rest back as data, so getRxPktLength() returns irq[31:16]
+    //en: - exactly 4 with RX_DONE set. Setting the status width to 0 keeps both status
+    //en: bytes in our own buffer, the same trick LRxxxx::getIrqStatus uses.
+    //sk: Precitaj prijatu dlzku sami a podrz si status slovo.
+    //sk: Citanie ("get") je na tejto rodine dvojtransakcne (LRxxxx::SPIcommand): posli
+    //sk: opcode, potom precitaj odpoved. SPItransferStream() pocka 1 us nez zacne polovat
+    //sk: BUSY, takze ak BUSY nestuplo, odpoved sa cita priskoro a cip posle svoj default
+    //sk: stream [stat 2B][irq 4B]. RadioLib status odstrihne a zvysok vrati ako data,
+    //sk: takze getRxPktLength() vrati irq[31:16] - s nastavenym RX_DONE presne 4. Sirka
+    //sk: statusu na 0 nam oba status bajty ponecha, rovnaky trik pouziva
+    //sk: LRxxxx::getIrqStatus.
+    int16_t readRxPktLenWithStatus(bool wait, uint8_t* stat, uint16_t* val) {
       int16_t st = mod->SPIwriteStream(RADIOLIB_LR2021_CMD_GET_RX_PKT_LENGTH, NULL, 0, wait, false);
       Module::BitWidth_t sw = mod->spiConfig.widths[RADIOLIB_MODULE_SPI_WIDTH_STATUS];
       Module::BitWidth_t cw = mod->spiConfig.widths[RADIOLIB_MODULE_SPI_WIDTH_CMD];
@@ -161,7 +118,51 @@ class CustomLR2021 : public LR2021 {
       if (val)  *val  = ((uint16_t)buff[2] << 8) | (uint16_t)buff[3];
       return st;
     }
+
+    //en: Trust the length only when the chip says the reply is ours. The command status
+    //en: field of stat1 has four values and CMD_DAT means "successfully processed, data
+    //en: is being transmitted" - the only correct one for the read half of a get. A
+    //en: reply produced by the race reports CMD_OK instead, i.e. "nothing to collect",
+    //en: which is exactly the case where the status stream comes back. The Rx FIFO is
+    //en: still intact at this point (readData() runs later), so re-reading recovers the
+    //en: frame instead of losing it.
+    //en: Measured on hardware: with the BUSY wait skipped on purpose in the live RX
+    //en: path, 11 of 11 bogus reads reported CMD_OK and every frame was recovered; on
+    //en: genuine frames whose length happened to equal irq[31:16] the status correctly
+    //en: reported CMD_DAT. Judging by that value alone - as an earlier version did -
+    //en: therefore misfires on real frames, which is why the status decides here.
+    //sk: Dlzke ver len vtedy, ked cip povie, ze odpoved je nasa. Pole command status v
+    //sk: stat1 ma styri hodnoty a CMD_DAT znamena "successfully processed, data is being
+    //sk: transmitted" - jedina spravna pre citaciu polovicu get prikazu. Odpoved z
+    //sk: pretecenia hlasi CMD_OK, teda "nic na vyzdvihnutie", a to je presne pripad, kedy
+    //sk: sa vrati status stream. Rx FIFO je v tom momente jeste cele (readData() bezi az
+    //sk: potom), takze opakovane citanie ramec zachrani namiesto straty.
+    //sk: Odmerane na zeleze: s umyselne preskocenym cakanim na BUSY v zivej RX ceste
+    //sk: hlasilo 11 z 11 chybnych citani CMD_OK a kazdy ramec sa zachranil; na
+    //sk: hodnovernych ramcoch, ktorych dlzka sa nahodou rovnala irq[31:16], status
+    //sk: spravne hlasil CMD_DAT. Rozhodovat len podla tej hodnoty - ako to robila
+    //sk: predosla verzia - teda strieľa aj na dobrych ramcoch, a preto tu rozhoduje status.
+    size_t getPacketLength(bool update = true) override {
+#ifdef FK_LR2021_SPI_DIAG
+      return fkDiagPktLen(update);
+#else
+      uint8_t  stat = 0;
+      uint16_t val  = 0;
+      for (int i = 0; i < 3; i++) {
+        readRxPktLenWithStatus(true, &stat, &val);
+        if ((stat & 0x0E) == RADIOLIB_LRXXXX_STAT_1_CMD_DAT) return val;
+        _stale_pktlen_reads++;
+      }
+      //en: never end up worse than the plain library read
+      //sk: nikdy neskonci horsie nez holym kniznicnym citanim
+      return LR2021::getPacketLength(update);
 #endif
+    }
+
+    //en: how many stale answers had to be re-read (0 = the race never hit)
+    //sk: koľko zastaralých odpovedí sa muselo prečítať znova (0 = preteka nenastala)
+    uint32_t getStalePktLenReads() const { return _stale_pktlen_reads; }
+
 
 #ifdef FK_LR2021_SPI_DIAG
     //en: Ring buffer of guard events. NOTHING is printed from here - this sits in the
@@ -177,6 +178,7 @@ class CustomLR2021 : public LR2021 {
       uint8_t  stat;    //en: stat1 of the read that produced 'first'
       uint8_t  tries;   //en: how many reads it took
       uint8_t  rule;    //en: bit0 = CMD_DAT rule fired, bit1 = fingerprint rule fired
+      uint8_t  inj;     //en: 1 = the BUSY wait was skipped on purpose
     };
     static const uint8_t FK_SPI_EVENTS = 8;
     FkSpiEvent _ev[FK_SPI_EVENTS];
@@ -199,14 +201,39 @@ class CustomLR2021 : public LR2021 {
     //sk:    realnu 68 od zastaralej 68, takze moze vystrelit aj na dobrom ramci.
     //sk: V kazdom pripade sa nakoniec spadne na kniznicne citanie, aby sme na tom
     //sk: nikdy neboli horsie.
+    //en: Experiment switches, settable at runtime from the CLI so the board does not
+    //en: have to be reflashed between runs.
+    //en:  _fk_inject  = skip the BUSY wait on every Nth length read (0 = off). Forces
+    //en:                the failure in the real RX path, which is the only way to see
+    //en:                whether the guard actually rescues a live frame.
+    //en:  _fk_pretype = call getPacketType() first, reproducing the library's two
+    //en:                back-to-back read commands. Tests whether that sequence is
+    //en:                what triggers the race in the first place.
+    //sk: Prepinace pokusu, nastavitelne za behu z CLI, aby sa doska nemusela medzi
+    //sk: behmi reflashovat.
+    //sk:  _fk_inject  = preskoc cakanie na BUSY pri kazdom n-tom citani dlzky (0 = vyp).
+    //sk:                Vynuti chybu v realnej RX ceste - inak sa neda zistit, ci guard
+    //sk:                zivy ramec naozaj zachrani.
+    //sk:  _fk_pretype = zavolaj najprv getPacketType(), cim sa napodobnia kniznicne dva
+    //sk:                citacie prikazy hned za sebou. Testuje, ci prave tato sekvencia
+    //sk:                pretecenie spusta.
+    uint16_t _fk_inject = 0, _fk_inject_cnt = 0;
+    bool _fk_pretype = false;
+
     size_t fkDiagPktLen(bool update) {
       uint8_t  stat0 = 0, stat = 0, tries = 0;
       uint16_t fp = 0, val = 0, first = 0;
       bool cmd_flagged = false, fp_flagged = false;
 
+      bool inject = false;
+      if (_fk_inject && ++_fk_inject_cnt >= _fk_inject) { _fk_inject_cnt = 0; inject = true; }
+#if RADIOLIB_GODMODE
+      if (_fk_pretype) { uint8_t t = 0; (void)getPacketType(&t); }
+#endif
+
       for (tries = 1; tries <= 4; tries++) {
         fp = (uint16_t)(getIrqStatus() >> 16);
-        fkRawPktLen(true, &stat, &val);
+        readRxPktLenWithStatus(inject && tries == 1 ? false : true, &stat, &val);
         if (tries == 1) { first = val; stat0 = stat; }
         if (fp != 0 && val == fp) fp_flagged = true;
         if (((stat >> 1) & 0x03) == 0x03) break;   //en: CMD_DAT -> reply belongs to us
@@ -223,6 +250,7 @@ class CustomLR2021 : public LR2021 {
         e.fp = fp; e.first = first; e.final = (uint16_t)len;
         e.stat = stat0; e.tries = tries > 4 ? 4 : tries;
         e.rule = (cmd_flagged ? 1 : 0) | (fp_flagged ? 2 : 0);
+        e.inj = inject ? 1 : 0;
         _ev_write = (uint8_t)((_ev_write + 1) % FK_SPI_EVENTS);
         if (_ev_count < FK_SPI_EVENTS) _ev_count++;
       }

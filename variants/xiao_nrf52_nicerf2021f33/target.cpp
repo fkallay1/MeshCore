@@ -40,6 +40,11 @@ bool radio_init() {
   nicerf2021f33_pre_init(radio);        // PA table must be set before begin() applies TX power
   if (!radio.std_init(&SPI)) return false;
   nicerf2021f33_post_init(radio);       // front-end RF switch: needs an initialised chip
+  //en: which TCXO voltage the chip took - 0.0 means the configured one was rejected and
+  //en: std_init() fell back, i.e. this module runs off a plain crystal.
+  //sk: ktore napatie TCXO cip vzal - 0.0 znamena, ze nastavene odmietol a std_init()
+  //sk: spadol na fallback, cize tento modul bezi na obycajnom krystale.
+  Serial.print("[LR2021] tcxo="); Serial.print(radio.getTcxoUsed(), 2); Serial.println(" V");
 
 #if defined(LR2021_PRAM_UPD) && defined(RADIOLIB_GODMODE)
   //en: load the firmware patch. Must come after std_init(), because begin() ->
@@ -112,6 +117,32 @@ bool nicerfTestCliCommand(char* command, char* reply) {
   }
 
 #if defined(RADIOLIB_GODMODE) && defined(FK_LR2021_SPI_DIAG)
+  //en: 'fk inject <n>' - skip the BUSY wait on every n-th length read (0 = off), and
+  //en: 'fk pretype on|off' - call getPacketType() before the length read, which is what
+  //en: the library path does. Both are experiment switches, see CustomLR2021.
+  //sk: 'fk inject <n>' - preskoc cakanie na BUSY pri kazdom n-tom citani dlzky (0 = vyp),
+  //sk: a 'fk pretype on|off' - zavolaj pred citanim dlzky getPacketType(), tak ako to
+  //sk: robi kniznicna cesta. Oboje su prepinace pokusu, vid CustomLR2021.
+  if (memcmp(arg, "inject", 6) == 0) {
+    const char* n = arg + 6;
+    while (*n == ' ') n++;
+    if (*n) radio._fk_inject = (uint16_t)atoi(n);
+    radio._fk_inject_cnt = 0;
+    sprintf(reply, "inject=%u (0 = vyp), pretype=%s",
+            (unsigned)radio._fk_inject, radio._fk_pretype ? "on" : "off");
+    return true;
+  }
+  if (memcmp(arg, "pretype", 7) == 0) {
+    const char* n = arg + 7;
+    while (*n == ' ') n++;
+    if (*n) radio._fk_pretype = (memcmp(n, "on", 2) == 0);
+    sprintf(reply, "pretype=%s, inject=%u",
+            radio._fk_pretype ? "on" : "off", (unsigned)radio._fk_inject);
+    return true;
+  }
+#endif
+
+#if defined(RADIOLIB_GODMODE) && defined(FK_LR2021_SPI_DIAG)
   //en: 'fk spifix' - dump the guard's ring buffer (see CustomLR2021::fkDiagPktLen).
   //en: rule tells which rule flagged the read: CMD = the status said the reply was not
   //en: ours (the fix proposed upstream), FP = the value equalled irq[31:16] (the
@@ -130,7 +161,8 @@ bool nicerfTestCliCommand(char* command, char* reply) {
       uint8_t i = (uint8_t)((radio._ev_write + CustomLR2021::FK_SPI_EVENTS - radio._ev_count + k)
                             % CustomLR2021::FK_SPI_EVENTS);
       const CustomLR2021::FkSpiEvent& e = radio._ev[i];
-      Serial.print("[FK]   fp=");     Serial.print(e.fp);
+      Serial.print(e.inj ? "[FK]  *fp=" : "[FK]   fp=");
+      Serial.print(e.fp);
       Serial.print(" first=");        Serial.print(e.first);
       Serial.print(" final=");        Serial.print(e.final);
       Serial.print(" stat=0x");       Serial.print(e.stat, HEX);
@@ -166,14 +198,14 @@ bool nicerfTestCliCommand(char* command, char* reply) {
     int nStale = 0, nDat = 0, nOk = 0;
     Serial.printf("[FK] stale test: irq=%08lX fp=%u\n", (unsigned long)irq, (unsigned)fp);
     for (int i = 0; i < 8; i++) {
-      radio.fkRawPktLen(false, &st, &v);
+      radio.readRxPktLenWithStatus(false, &st, &v);
       uint8_t cs = (st >> 1) & 3;
       if (cs == 3) nDat++; else if (cs == 2) nOk++;
       if (v == fp) nStale++;
       Serial.printf("[FK]   nowait #%d stat=%02X cmd=%u val=%u%s\n",
                     i, (unsigned)st, (unsigned)cs, (unsigned)v, v == fp ? "  <- fp" : "");
     }
-    radio.fkRawPktLen(true, &st, &v);
+    radio.readRxPktLenWithStatus(true, &st, &v);
     Serial.printf("[FK]   wait     stat=%02X cmd=%u val=%u\n",
                   (unsigned)st, (unsigned)((st >> 1) & 3), (unsigned)v);
     sprintf(reply, "fp=%u | nowait: fp-hits=%d/8 DAT=%d OK=%d | wait: cmd=%u len=%u",
