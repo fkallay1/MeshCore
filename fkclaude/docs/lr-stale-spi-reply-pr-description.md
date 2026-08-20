@@ -146,6 +146,16 @@ The same race also affects every other read on these chips - `getRSSI()`, `getSN
 because a wrong RSSI has no fingerprint to test against. A proper fix belongs in the
 driver's transport layer.
 
+That part has been reported to RadioLib as an issue, with the reproduction and the
+measurements above - not as a patch, since where the check belongs is a decision about
+the transport layer of the whole LR11x0/LR2021 family. If the driver starts rejecting a
+reply whose status is not `CMD_DAT`, every get command is covered at once and this guard
+becomes redundant. It would still be harmless - our own read never goes through
+`SPIcommand()` - so it can simply be dropped then, though not before the pinned RadioLib
+is bumped: the pin currently sits on a commit that predates any such fix, so a driver-side
+fix changes nothing here until then. Until that happens this guard is what actually keeps
+the frames.
+
 ### Affected boards
 
 LR2021: `meshtracker_x1`, `meshnology_w12`.
