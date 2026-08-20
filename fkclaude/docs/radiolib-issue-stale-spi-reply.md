@@ -1,5 +1,8 @@
 # RadioLib issue — zastaralá odpoveď na „get" príkaz
 
+**ODOSLANÉ 2026-08-20: https://github.com/jgromes/RadioLib/issues/1857** (open,
+autor fkallay1, bez štítkov). Telo nižšie je presne to, čo tam je.
+
 **Interné, NEKOPÍROVAŤ do issue.** Cieľ: repozitár `jgromes/RadioLib`, šablóna
 *Bug report*. Pod čiarou `---- TELO ----` je presne to, čo ide do issue.
 
