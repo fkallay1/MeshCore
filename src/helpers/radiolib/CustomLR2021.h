@@ -3,6 +3,14 @@
 #include <RadioLib.h>
 #include "MeshCore.h"
 
+//en: This class carries the stale-reply guard (see getPacketLength below), so the
+//en: heartbeat can print its counter without asking which chip is fitted.
+//sk: Tato trieda ma guard pretecenej odpovede (viď getPacketLength nizsie), takze
+//sk: heartbeat vie vypisat jeho pocitadlo bez toho, aby sa pytal na cip.
+#ifndef FK_RADIO_HAS_STALE_GUARD
+#define FK_RADIO_HAS_STALE_GUARD 1
+#endif
+
 class CustomLR2021 : public LR2021 {
   uint32_t _preambleMillis = 66;
   uint32_t _maxPayloadMillis = 3934;
@@ -176,6 +184,7 @@ class CustomLR2021 : public LR2021 {
       uint16_t first;   //en: value the first read returned
       uint16_t final;   //en: value finally used
       uint8_t  stat;    //en: stat1 of the read that produced 'first'
+      uint8_t  off;     //en: unused on LR2021 (no offset in the reply), kept so the CLI is shared
       uint8_t  tries;   //en: how many reads it took
       uint8_t  rule;    //en: bit0 = CMD_DAT rule fired, bit1 = fingerprint rule fired
       uint8_t  inj;     //en: 1 = the BUSY wait was skipped on purpose
@@ -248,7 +257,7 @@ class CustomLR2021 : public LR2021 {
         _ev_total++;
         FkSpiEvent& e = _ev[_ev_write];
         e.fp = fp; e.first = first; e.final = (uint16_t)len;
-        e.stat = stat0; e.tries = tries > 4 ? 4 : tries;
+        e.stat = stat0; e.off = 0; e.tries = tries > 4 ? 4 : tries;
         e.rule = (cmd_flagged ? 1 : 0) | (fp_flagged ? 2 : 0);
         e.inj = inject ? 1 : 0;
         _ev_write = (uint8_t)((_ev_write + 1) % FK_SPI_EVENTS);

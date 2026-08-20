@@ -357,6 +357,15 @@ def resolve_zip(cfg, dev, args):
     ki = kind_info(cfg, dev)
     if args.rebuild:
         pio_build(ki["env"])
+        #sk: --rebuild znamena "postav a TO flashni". Bez tohto sa slo dalej na
+        #sk: newest_build(), ktore vzalo najnovsi ARCHIVNY zip - a ked ich doska ma
+        #sk: (t1000e), flashol sa 100 buildov stary firmware namiesto prave
+        #sk: postaveneho. Na doskach bez zipov v builds/ (promicro, xiaonicerf) sa to
+        #sk: neprejavilo, lebo tam .pio vystup vypadol ako fallback.
+        pz = ROOT / ".pio" / "build" / ki["env"] / "firmware.zip"
+        if not pz.exists():
+            sys.exit(f"[CHYBA] {pz} po builde neexistuje")
+        return None, pz
     if ki.get("pio_zip"):
         # bez builds/ archívu (napr. companion) — flashuje sa priamo .pio výstup
         pz = ROOT / ".pio" / "build" / ki["env"] / "firmware.zip"

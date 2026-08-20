@@ -929,11 +929,11 @@ void MyMesh::fotaLoop() {
                      (unsigned long)_fota_raw_rx, (unsigned long)_fota_raw_tx,
                      (unsigned long)radio_driver.getPacketsRecv(),
                      (unsigned long)radio_driver.getPacketsRecvErrors());
-#ifdef USE_LR2021
-    //en: LR2021 only: stale SPI answers caught in CustomLR2021::getPacketLength().
+#ifdef FK_RADIO_HAS_STALE_GUARD
+    //en: Radios with the stale-reply guard: answers caught in getPacketLength().
     //en: Every one of these is a frame that would otherwise have been lost with a
     //en: bogus length (see the comment there). Steady 0 = the race is not happening.
-    //sk: Len LR2021: zachytené zastaralé SPI odpovede v CustomLR2021::getPacketLength().
+    //sk: Radia s guardom pretecenej odpovede: zachytene odpovede v getPacketLength().
     //sk: Každá z nich je rámec, ktorý by inak s chybnou dĺžkou zmizol (viď komentár tam).
     //sk: Trvalá 0 = preteka nenastáva.
     FOTA_DEBUG_PRINT(" spifix=%lu", (unsigned long)radio.getStalePktLenReads());

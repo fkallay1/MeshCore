@@ -3,49 +3,77 @@
 #include <RadioLib.h>
 #include "MeshCore.h"
 
+//en: This class carries the stale-reply guard, so the heartbeat can print its counter
+//en: without asking which chip is fitted. CustomLR2021 defines the same flag.
+//sk: Tato trieda ma guard pretecenej odpovede, takze heartbeat vie vypisat jeho
+//sk: pocitadlo bez toho, aby sa pytal, ktory cip je na doske. CustomLR2021 definuje
+//sk: ten isty flag.
+#ifndef FK_RADIO_HAS_STALE_GUARD
+#define FK_RADIO_HAS_STALE_GUARD 1
+#endif
+
 class CustomLR1110 : public LR1110 {
   uint32_t _preambleMillis = 66;
   uint32_t _maxPayloadMillis = 3934;
   uint32_t _activityAt = 0;
   bool _headerSeen = false;
   bool _rx_boosted = false;
+  uint32_t _stale_pktlen_reads = 0;
 
   public:
     CustomLR1110(Module *mod) : LR1110(mod) { }
 
+    //en: Read the receive buffer status ourselves, keeping the status word. Mirrors
+    //en: CustomLR2021::readRxPktLenWithStatus - see the reasoning there. The reply here
+    //en: is [stat 2B][len 1B][offset 1B], so a stale one yields irq[31:24] as the length
+    //en: and irq[23:16] as the offset; that offset is what shifts the payload.
+    //sk: Precitaj stav prijimacieho buffra sami a podrz si status slovo. Zrkadli to
+    //sk: CustomLR2021::readRxPktLenWithStatus - odovodnenie je tam. Odpoved ma tu tvar
+    //sk: [stat 2B][len 1B][offset 1B], takze zastarala da ako dlzku irq[31:24] a ako
+    //sk: offset irq[23:16]; prave ten offset posuva payload.
+    int16_t readRxPktLenWithStatus(bool wait, uint8_t* stat, uint16_t* val, uint8_t* off = NULL) {
+      int16_t st = mod->SPIwriteStream(RADIOLIB_LR11X0_CMD_GET_RX_BUFFER_STATUS, NULL, 0, wait, false);
+      Module::BitWidth_t sw = mod->spiConfig.widths[RADIOLIB_MODULE_SPI_WIDTH_STATUS];
+      Module::BitWidth_t cw = mod->spiConfig.widths[RADIOLIB_MODULE_SPI_WIDTH_CMD];
+      mod->spiConfig.widths[RADIOLIB_MODULE_SPI_WIDTH_STATUS] = Module::BITS_0;
+      mod->spiConfig.widths[RADIOLIB_MODULE_SPI_WIDTH_CMD]    = Module::BITS_0;
+      uint8_t buff[4] = { 0 };
+      st = mod->SPIreadStream(RADIOLIB_LRXXXX_CMD_NOP, buff, sizeof(buff), wait, false);
+      mod->spiConfig.widths[RADIOLIB_MODULE_SPI_WIDTH_STATUS] = sw;
+      mod->spiConfig.widths[RADIOLIB_MODULE_SPI_WIDTH_CMD]    = cw;
+      if (stat) *stat = buff[0];
+      if (val)  *val  = buff[2];
+      if (off)  *off  = buff[3];
+      return st;
+    }
+
+    //en: how many stale replies had to be read again (0 = the race never hit)
+    //sk: kolko zastaralych odpovedi sa muselo precitat znova (0 = preteka nenastala)
+    uint32_t getStalePktLenReads() const { return _stale_pktlen_reads; }
+
+    //en: Trust the length only when stat1 says CMD_DAT, i.e. that a reply really is
+    //en: being sent. Measured on LR2021 hardware: a stale reply always reported CMD_OK
+    //en: and a genuine one CMD_DAT, so the status decides rather than the value - the
+    //en: value alone cannot tell a real length from a coincidental one.
+    //sk: Dlzke ver len ked stat1 hlasi CMD_DAT, teda ze sa odpoved naozaj posiela.
+    //sk: Odmerane na LR2021: zastarala odpoved vzdy hlasila CMD_OK a skutocna CMD_DAT,
+    //sk: takze rozhoduje status a nie hodnota - tá sama nerozlisi skutocnu dlzku od
+    //sk: nahodnej zhody.
     size_t getPacketLength(bool update) override {
-      size_t len = LR1110::getPacketLength(update);
-      //en: Guard against a stale SPI reply being parsed as the received length.
-      //en: A "get" is two transactions (LRxxxx::SPIcommand): send the opcode, then read
-      //en: the reply. Module::SPItransferStream() waits 1 us and then polls BUSY, so if
-      //en: BUSY has not risen yet the wait is skipped and the reply is read too early.
-      //en: The chip answers with its default [stat 2B][irq 4B] stream instead, and
-      //en: getRxBufferStatus() takes the length from the first payload byte, i.e.
-      //en: irq[31:24] - zero for every RX-relevant flag, since those all live in the
-      //en: two low bytes. The Rx buffer is still intact at this point (readData() runs
-      //en: later), so reading the length again recovers the packet instead of dropping
-      //en: it. getIrqStatus() cannot be hit by the same race: it IS that default stream
-      //en: (see LRxxxx::getIrqStatus), which makes irq[31:24] an exact fingerprint.
-      //en: RX_DONE has to be checked too, because a zero sentinel is also the honest
-      //en: answer when no packet is waiting.
-      //sk: Ochrana pred tym, aby sa zastarala SPI odpoved rozparsovala ako dlzka.
-      //sk: Citanie ("get") je dvojtransakcne (LRxxxx::SPIcommand): posli opcode, potom
-      //sk: precitaj odpoved. Module::SPItransferStream() pocka 1 us a potom poluje na
-      //sk: BUSY, takze ak BUSY nestuplo, cakanie sa preskoci a odpoved sa cita priskoro.
-      //sk: Cip vtedy posle svoj default stream [stat 2B][irq 4B] a getRxBufferStatus()
-      //sk: vezme dlzku z prveho bajtu payloadu, teda irq[31:24] - nula pre kazdy RX
-      //sk: priznak, lebo tie vsetky sedia v dvoch dolnych bajtoch. Rx buffer je v tomto
-      //sk: momente jeste cely (readData() bezi az potom), takze opakovane citanie dlzky
-      //sk: paket zachrani namiesto zahodenia. getIrqStatus() tou istou pretekou trpiet
-      //sk: nemoze - ono samo JE ten default stream (vid LRxxxx::getIrqStatus), preto je
-      //sk: irq[31:24] presny odtlacok. RX_DONE treba overit tiez, lebo nulovy sentinel
-      //sk: je aj cestna odpoved vtedy, ked ziadny paket neceka.
-      uint32_t irq = getIrqStatus();
-      for (int i = 0; i < 3 && len == (size_t)(irq >> 24)
-                            && (irq & RADIOLIB_LR11X0_IRQ_RX_DONE); i++) {
-        len = LR1110::getPacketLength(update);
-        irq = getIrqStatus();
+#ifdef FK_RADIO_SPI_DIAG
+      size_t len = fkDiagPktLen(update);
+#else
+      uint8_t  stat = 0;
+      uint16_t val  = 0;
+      size_t   len  = 0;
+      for (int i = 0; i < 3; i++) {
+        readRxPktLenWithStatus(true, &stat, &val);
+        len = val;
+        if ((stat & 0x0E) == RADIOLIB_LRXXXX_STAT_1_CMD_DAT) break;
+        _stale_pktlen_reads++;
+        if (i == 2) len = LR1110::getPacketLength(update);   //en: fall back to the library read
       }
+#endif
       if (len == 0 && getIrqStatus() & RADIOLIB_LR11X0_IRQ_HEADER_ERR) {
         // we've just received a corrupted packet
         // this may have triggered a bug causing subsequent packets to be shifted
@@ -70,6 +98,66 @@ class CustomLR1110 : public LR1110 {
       // include the PREAMBLE_DETECTED irq bit in reported flags.
       return LR1110::startReceive(RADIOLIB_LR11X0_RX_TIMEOUT_INF, RADIOLIB_IRQ_RX_DEFAULT_FLAGS | (1UL << RADIOLIB_IRQ_PREAMBLE_DETECTED), RADIOLIB_IRQ_RX_DEFAULT_MASK, 0);
     }
+
+#ifdef FK_RADIO_SPI_DIAG
+    //en: Same diagnostic as CustomLR2021 - identical member names on purpose, so the
+    //en: shared 'fk stale|spifix|inject|pretype' CLI in MyMesh works for both chips.
+    //en: NOTHING is printed from here; we are in the RX hot path.
+    //sk: Ta ista diagnostika ako v CustomLR2021 - nazvy clenov su zamerne rovnake, aby
+    //sk: zdielane CLI 'fk stale|spifix|inject|pretype' v MyMesh fungovalo pre oba cipy.
+    //sk: Odtialto sa NIC netlaci, sme v horucej RX ceste.
+    struct FkSpiEvent {
+      uint16_t fp;      //en: fingerprint = irq[31:24] before the read
+      uint16_t first;   //en: value the first read returned
+      uint16_t final;   //en: value finally used
+      uint8_t  stat;    //en: stat1 of the read that produced 'first'
+      uint8_t  off;     //en: buffer offset the same read returned
+      uint8_t  tries;
+      uint8_t  rule;    //en: bit0 = CMD_DAT rule fired, bit1 = fingerprint rule fired
+      uint8_t  inj;     //en: 1 = the BUSY wait was skipped on purpose
+    };
+    static const uint8_t FK_SPI_EVENTS = 8;
+    FkSpiEvent _ev[FK_SPI_EVENTS];
+    uint8_t _ev_count = 0, _ev_write = 0, _ev_total = 0;
+    uint16_t _fk_inject = 0, _fk_inject_cnt = 0;
+    bool _fk_pretype = false;
+
+    size_t fkDiagPktLen(bool update) {
+      uint8_t  stat0 = 0, stat = 0, off = 0, off0 = 0, tries = 0;
+      uint16_t fp = 0, val = 0, first = 0;
+      bool cmd_flagged = false, fp_flagged = false;
+
+      bool inject = false;
+      if (_fk_inject && ++_fk_inject_cnt >= _fk_inject) { _fk_inject_cnt = 0; inject = true; }
+#if RADIOLIB_GODMODE
+      if (_fk_pretype) { uint8_t t = 0; (void)getPacketType(&t); }
+#endif
+      for (tries = 1; tries <= 4; tries++) {
+        fp = (uint16_t)(getIrqStatus() >> 24);
+        readRxPktLenWithStatus(inject && tries == 1 ? false : true, &stat, &val, &off);
+        if (tries == 1) { first = val; stat0 = stat; off0 = off; }
+        if (val == fp && (getIrqStatus() & RADIOLIB_LR11X0_IRQ_RX_DONE)) fp_flagged = true;
+        if ((stat & 0x0E) == RADIOLIB_LRXXXX_STAT_1_CMD_DAT) break;
+        cmd_flagged = true;
+      }
+
+      size_t len = val;
+      if ((stat & 0x0E) != RADIOLIB_LRXXXX_STAT_1_CMD_DAT) len = LR1110::getPacketLength(update);
+
+      if (cmd_flagged || fp_flagged) {
+        _stale_pktlen_reads++;
+        _ev_total++;
+        FkSpiEvent& e = _ev[_ev_write];
+        e.fp = fp; e.first = first; e.final = (uint16_t)len;
+        e.stat = stat0; e.off = off0; e.tries = tries > 4 ? 4 : tries;
+        e.rule = (cmd_flagged ? 1 : 0) | (fp_flagged ? 2 : 0);
+        e.inj = inject ? 1 : 0;
+        _ev_write = (uint8_t)((_ev_write + 1) % FK_SPI_EVENTS);
+        if (_ev_count < FK_SPI_EVENTS) _ev_count++;
+      }
+      return len;
+    }
+#endif
 
     bool isReceiving() {
       uint32_t irq = getIrqStatus();

@@ -1567,9 +1567,111 @@ void MyMesh::radioSampleRssi(int n, int* out_min, int* out_max) {
     fk reinit      - run the full recovery by hand
   Module-specific commands (simo/ce/pram) are left to the variant handler.
 */
+//en: the raw RadioLib object - the SPI diagnostics below talk to the chip directly
+//sk: surovy RadioLib objekt - SPI diagnostika nizsie hovori priamo s cipom
+extern RADIO_CLASS radio;
+
 bool MyMesh::radioDiagCliCommand(char* command, char* reply) {
   if (memcmp(command, "fk ", 3) != 0) return false;
   const char* arg = command + 3;
+
+#ifdef FK_RADIO_SPI_DIAG
+  //en: 'fk inject <n>' - skip the BUSY wait on every n-th length read (0 = off), and
+  //en: 'fk pretype on|off' - call getPacketType() before the length read, which is what
+  //en: the library path does. Both are experiment switches, see CustomLR2021.
+  //sk: 'fk inject <n>' - preskoc cakanie na BUSY pri kazdom n-tom citani dlzky (0 = vyp),
+  //sk: a 'fk pretype on|off' - zavolaj pred citanim dlzky getPacketType(), tak ako to
+  //sk: robi kniznicna cesta. Oboje su prepinace pokusu, vid CustomLR2021.
+  if (memcmp(arg, "inject", 6) == 0) {
+    const char* n = arg + 6;
+    while (*n == ' ') n++;
+    if (*n) radio._fk_inject = (uint16_t)atoi(n);
+    radio._fk_inject_cnt = 0;
+    sprintf(reply, "inject=%u (0 = vyp), pretype=%s",
+            (unsigned)radio._fk_inject, radio._fk_pretype ? "on" : "off");
+    return true;
+  }
+  if (memcmp(arg, "pretype", 7) == 0) {
+    const char* n = arg + 7;
+    while (*n == ' ') n++;
+    if (*n) radio._fk_pretype = (memcmp(n, "on", 2) == 0);
+    sprintf(reply, "pretype=%s, inject=%u",
+            radio._fk_pretype ? "on" : "off", (unsigned)radio._fk_inject);
+    return true;
+  }
+#endif
+
+#ifdef FK_RADIO_SPI_DIAG
+  //en: 'fk spifix' - dump the guard's ring buffer (see the radio class).
+  //en: rule tells which rule flagged the read: CMD = the status said the reply was not
+  //en: ours (the fix proposed upstream), FP = the value equalled irq[31:16] (the
+  //en: heuristic we ship). FP alone on a frame whose final length equals first is a
+  //en: false positive - the length was right all along.
+  //sk: 'fk spifix' - vypis kruhoveho buffra guardu (vid the radio class).
+  //sk: rule hovori, ktore pravidlo citanie oznacilo: CMD = status hlasil, ze odpoved
+  //sk: nie je nasa (oprava navrhnuta upstreamu), FP = hodnota sa rovnala irq[31:16]
+  //sk: (heuristika, ktoru posielame). Samotne FP na ramci, kde final == first, je
+  //sk: falosny poplach - dlzka bola spravna od zaciatku.
+  if (memcmp(arg, "spifix", 6) == 0) {
+    Serial.print("[FK] spifix total="); Serial.print(radio._ev_total);
+    Serial.print(" v buffri="); Serial.println(radio._ev_count);
+    for (uint8_t k = 0; k < radio._ev_count; k++) {
+      //en: oldest first
+      uint8_t i = (uint8_t)((radio._ev_write + RADIO_CLASS::FK_SPI_EVENTS - radio._ev_count + k)
+                            % RADIO_CLASS::FK_SPI_EVENTS);
+      const RADIO_CLASS::FkSpiEvent& e = radio._ev[i];
+      Serial.print(e.inj ? "[FK]  *fp=" : "[FK]   fp=");
+      Serial.print(e.fp);
+      Serial.print(" first=");        Serial.print(e.first);
+      Serial.print(" final=");        Serial.print(e.final);
+      Serial.print(" stat=0x");       Serial.print(e.stat, HEX);
+      Serial.print(" cmd=");          Serial.print((e.stat >> 1) & 0x03);
+      Serial.print(" tries=");        Serial.print(e.tries);
+      Serial.print(" rule=");
+      if (e.rule & 1) Serial.print("CMD");
+      if (e.rule == 3) Serial.print("+");
+      if (e.rule & 2) Serial.print("FP");
+      if (!(e.rule & 1) && (e.rule & 2) && e.first == e.final) Serial.print(" (falosny)");
+      Serial.println("");
+    }
+    sprintf(reply, "spifix total=%lu, v buffri %u udalosti (detail na Serial)",
+            (unsigned long)radio._ev_total, (unsigned)radio._ev_count);
+    return true;
+  }
+#endif
+
+#ifdef FK_RADIO_SPI_DIAG
+  //en: 'fk stale' - A/B test of the two-transaction read behind every "get" command.
+  //en: Eight reads with the BUSY wait deliberately skipped, then one proper read as a
+  //en: reference. fp = top half of the IRQ word, which is what a stale reply returns
+  //en: instead of the length. Prints per-read detail over Serial.
+  //sk: 'fk stale' - A/B test dvojtransakcneho citania, ktore stoji za kazdym "get"
+  //sk: prikazom. Osem citani s umyselne preskocenym cakanim na BUSY, potom jedno
+  //sk: poriadne ako referencia. fp = horna polovica IRQ slova, teda to, co zastarala
+  //sk: odpoved vrati namiesto dlzky. Detail kazdeho citania ide na Serial.
+  if (memcmp(arg, "stale", 5) == 0) {
+    uint32_t irq = radio.getIrqStatus();
+    uint16_t fp  = (uint16_t)(irq >> 16);
+    uint8_t  st  = 0;
+    uint16_t v   = 0;
+    int nStale = 0, nDat = 0, nOk = 0;
+    Serial.printf("[FK] stale test: irq=%08lX fp=%u\n", (unsigned long)irq, (unsigned)fp);
+    for (int i = 0; i < 8; i++) {
+      radio.readRxPktLenWithStatus(false, &st, &v);
+      uint8_t cs = (st >> 1) & 3;
+      if (cs == 3) nDat++; else if (cs == 2) nOk++;
+      if (v == fp) nStale++;
+      Serial.printf("[FK]   nowait #%d stat=%02X cmd=%u val=%u%s\n",
+                    i, (unsigned)st, (unsigned)cs, (unsigned)v, v == fp ? "  <- fp" : "");
+    }
+    radio.readRxPktLenWithStatus(true, &st, &v);
+    Serial.printf("[FK]   wait     stat=%02X cmd=%u val=%u\n",
+                  (unsigned)st, (unsigned)((st >> 1) & 3), (unsigned)v);
+    sprintf(reply, "fp=%u | nowait: fp-hits=%d/8 DAT=%d OK=%d | wait: cmd=%u len=%u",
+            (unsigned)fp, nStale, nDat, nOk, (unsigned)((st >> 1) & 3), (unsigned)v);
+    return true;
+  }
+#endif
 
   if (memcmp(arg, "rssi", 4) == 0) {
     int n = (arg[4] == ' ') ? atoi(arg + 5) : 32;
