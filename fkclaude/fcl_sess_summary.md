@@ -11,7 +11,7 @@ sám podčiarkne ako neplatný odkaz.
 
 ---
 
-## 45 Merge upstream 1.17.1; Novy variant xiao_nrf42_nicerf2021f33; Riesenie WatchDog radia; Nove cli prikazy fk xxx, pre testovanie, Repozitar na GB so zalohou globlaneho .claude
+## 45 Merge upstream 1.17.1; Novy variant xiao_nrf42_nicerf_lora2021f33; Riesenie WatchDog radia; Nove cli prikazy fk xxx, pre testovanie, Repozitar na GB so zalohou globlaneho .claude
 
 *(2026-08-15 → 2026-08-17, vetva `features/nrf-fota`)*
 
@@ -21,7 +21,7 @@ sám podčiarkne ako neplatný odkaz.
   - ↳ [.claude/skills/sync-upstream/SKILL.md](../.claude/skills/sync-upstream/SKILL.md)
 - **Voľba základu pre NiceRF variant** — odvodené z `xiao_nrf52`, nie z `meshtracker_x1`
   - ↳ [fcl_readme_nicerf_lora2021.md § Prečo odvodené z xiao_nrf52](fcl_readme_nicerf_lora2021.md#prečo-odvodené-z-xiao_nrf52-a-nie-z-meshtracker_x1)
-- **Nový variant `xiao_nrf52_nicerf2021f33`** — DIO mapa, RF switch, TCXO 3,3 V, PA tabuľka; na železe vysiela aj prijíma
+- **Nový variant `xiao_nrf52_nicerf_lora2021f33`** — DIO mapa, RF switch, TCXO 3,3 V, PA tabuľka; na železe vysiela aj prijíma
   - ↳ [fcl_readme_nicerf_lora2021.md § Zapojenie](fcl_readme_nicerf_lora2021.md#zapojenie)
 - **Sémantika výkonu** — ciferník s `PA_OFFSET=8` podľa konvencie RAK 1W (14 → ~22 dBm)
   - ↳ [fcl_readme_nicerf_lora2021.md § Ciferník výkonu](fcl_readme_nicerf_lora2021.md#ciferník-výkonu-set-tx)
@@ -34,7 +34,7 @@ sám podčiarkne ako neplatný odkaz.
 - **CE pin** — funguje ako skutočný vypínač modulu, parazitné napájanie ho neudrží
   - ↳ [fcl_readme_nicerf_lora2021.md § Test CE](fcl_readme_nicerf_lora2021.md#test-ce--parazitné-napájanie-modul-neudrží)
 - **Testovacie CLI `fk …`** — `info / simo / ce / pram`, aby sa nemuselo stále preflashovať
-  - ↳ [fcl_readme_nicerf_lora2021.md § Testovacie CLI](fcl_readme_nicerf_lora2021.md#testovacie-cli-fk---flag-fk_nicerf2021f33_test)
+  - ↳ [fcl_readme_nicerf_lora2021.md § Testovacie CLI](fcl_readme_nicerf_lora2021.md#testovacie-cli-fk---flag-fk_nicerf_lora2021f33_test)
 - **FOTA balíčky 1.16 → aktuál** — veľkosti sa zmestili (patch 31–37 kB, extraSafe pod 32 kB)
   - ↳ [fcl_readme_fota_extrasafe.md § Aktuálne riešenie](fcl_readme_fota_extrasafe.md#3-aktuálne-riešenie-build--265-commit-na-featuresnrf-fota)
 - **Watchdog rádia** — tri pokusy o detekciu boli mylné, funguje až pasívne RSSI okno z noise-floor vzorkovača

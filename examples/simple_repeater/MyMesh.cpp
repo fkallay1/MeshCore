@@ -1495,7 +1495,7 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
   } else if (radioDiagCliCommand(command, reply)) {
     //en: radio-agnostic bench diagnostics ('fk rssi|hammer|reinit')
 #endif
-#ifdef FK_NICERF2021F33_TEST
+#ifdef FK_NICERF_LORA2021F33_TEST
   } else if (nicerfTestCliCommand(command, reply)) {
     //en: bench test CLI ('fk …') for the NiceRF LR2021 module — variant target.cpp
 #endif

@@ -24,7 +24,7 @@ extern EnvironmentSensorManager sensors;
 bool radio_init();
 mesh::LocalIdentity radio_new_identity();
 
-#ifdef FK_NICERF2021F33_TEST
+#ifdef FK_NICERF_LORA2021F33_TEST
 //en: bench test CLI ('fk …'), implemented in target.cpp - see the comment there
 bool nicerfTestCliCommand(char* command, char* reply);
 #endif

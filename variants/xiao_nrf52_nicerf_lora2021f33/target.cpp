@@ -1,7 +1,7 @@
 #include <Arduino.h>
 #include "target.h"
 #include <helpers/ArduinoHelpers.h>
-#include <helpers/radiolib/NiceRF2021F33.h>
+#include <helpers/radiolib/NiceRF_LoRa2021F33.h>
 
 #ifdef DISPLAY_CLASS
   DISPLAY_CLASS display;
@@ -37,9 +37,9 @@ bool radio_init() {
   delay(5);   //en: let the module LDO settle before the first SPI transaction
 #endif
 
-  nicerf2021f33_pre_init(radio);        // PA table must be set before begin() applies TX power
+  nicerf_lora2021f33_pre_init(radio);        // PA table must be set before begin() applies TX power
   if (!radio.std_init(&SPI)) return false;
-  nicerf2021f33_post_init(radio);       // front-end RF switch: needs an initialised chip
+  nicerf_lora2021f33_post_init(radio);       // front-end RF switch: needs an initialised chip
   //en: which TCXO voltage the chip took - 0.0 means the configured one was rejected and
   //en: std_init() fell back, i.e. this module runs off a plain crystal.
   //sk: ktore napatie TCXO cip vzal - 0.0 znamena, ze nastavene odmietol a std_init()
@@ -48,29 +48,29 @@ bool radio_init() {
 
 #if defined(LR2021_PRAM_UPD) && defined(RADIOLIB_GODMODE)
   //en: load the firmware patch. Must come after std_init(), because begin() ->
-  //en: findChip() resets the chip and would wipe it. See the note in NiceRF2021F33.h.
+  //en: findChip() resets the chip and would wipe it. See the note in NiceRF_LoRa2021F33.h.
   {
-    int16_t st = nicerf2021f33_pram_load(radio);
+    int16_t st = nicerf_lora2021f33_pram_load(radio);
     bool ok = false; uint16_t ver = 0;
-    nicerf2021f33_pram_status(radio, &ok, &ver);
+    nicerf_lora2021f33_pram_status(radio, &ok, &ver);
     Serial.printf("[LR2021] pram load: rc=%d -> loaded=%s version=0x%04X\r\n",
                   (int)st, ok ? "YES" : "NO", (unsigned)ver);
   }
 #endif
 
-#if defined(NICERF2021F33_SIMO) && defined(RADIOLIB_GODMODE)
+#if defined(NICERF_LORA2021F33_SIMO) && defined(RADIOLIB_GODMODE)
   //en: DC-DC. Measured on this module: 20.5 -> 16.0 mA total in Rx (module part
   //en: ~11 -> ~6.5 mA, ~41%), so the SIMO inductor really is fitted. The chip
   //en: resets to SIMO_OFF, hence setting it on every init.
   //en: Load the PRAM first - the datasheet lists "DCDC (SIMO) impact on
   //en: sensitivity" for sub-GHz LoRa as a limitation the patch fixes.
   {
-    int16_t st = nicerf2021f33_set_simo(radio, true);
+    int16_t st = nicerf_lora2021f33_set_simo(radio, true);
     Serial.printf("[LR2021] simo: rc=%d\r\n", (int)st);
   }
 #endif
 
-  nicerf2021f33_report(radio);          // module identity + supply/temperature
+  nicerf_lora2021f33_report(radio);          // module identity + supply/temperature
 
   return true;
 }
@@ -80,10 +80,10 @@ mesh::LocalIdentity radio_new_identity() {
   return mesh::LocalIdentity(&rng); // create new random identity
 }
 
-#ifdef FK_NICERF2021F33_TEST
+#ifdef FK_NICERF_LORA2021F33_TEST
 /*
   Bench test commands, so the module can be poked without a rebuild.
-  Everything here is behind FK_NICERF2021F33_TEST and never ships enabled.
+  Everything here is behind FK_NICERF_LORA2021F33_TEST and never ships enabled.
 
     fk info        - chip identity, supply, temperature, errors, PRAM state
     fk simo on|off - switch the chip's internal regulator to DC-DC / LDO
@@ -104,7 +104,7 @@ bool nicerfTestCliCommand(char* command, char* reply) {
     //en: the standby flavour - all three were tested and ruled out with same-boot
     //en: A/B runs. Trust the boot-time reading; treat this one as indicative only.
     radio.standby(RADIOLIB_LR2021_STANDBY_XOSC);
-    nicerf2021f33_report(radio);
+    nicerf_lora2021f33_report(radio);
     uint8_t maj = 0, min = 0; uint16_t vbat = 0, err = 0;
     radio.getVersion(&maj, &min);
     radio.getVbat(13, &vbat);
@@ -217,7 +217,7 @@ bool nicerfTestCliCommand(char* command, char* reply) {
 #if defined(RADIOLIB_GODMODE)
   if (memcmp(arg, "simo ", 5) == 0) {
     bool on = (memcmp(arg + 5, "on", 2) == 0);
-    int16_t st = nicerf2021f33_set_simo(radio, on);   //en: leaves the chip in STDBY_RC
+    int16_t st = nicerf_lora2021f33_set_simo(radio, on);   //en: leaves the chip in STDBY_RC
     radio.standby(RADIOLIB_LR2021_STANDBY_XOSC);      //en: VBat only reads right with the XOSC up
     //en: measure BEFORE re-arming Rx - the ADC is only valid in standby
     uint8_t maj = 0, min = 0; uint16_t vbat = 0, err = 0;
@@ -236,9 +236,9 @@ bool nicerfTestCliCommand(char* command, char* reply) {
   if (memcmp(arg, "pram", 4) == 0) {
     if (memcmp(arg + 4, " load", 5) == 0) {
 #ifdef LR2021_PRAM_UPD
-      int16_t st = nicerf2021f33_pram_load(radio);
+      int16_t st = nicerf_lora2021f33_pram_load(radio);
       bool ok = false; uint16_t ver = 0;
-      nicerf2021f33_pram_status(radio, &ok, &ver);
+      nicerf_lora2021f33_pram_status(radio, &ok, &ver);
       radio.startReceive();   //en: setRegMode/PRAM left us in standby - re-arm Rx directly
                             //en: (wrapper's idle() is protected; its state already says RX,
                             //en:  which matches reality once the chip is receiving again)
@@ -249,7 +249,7 @@ bool nicerfTestCliCommand(char* command, char* reply) {
 #endif
     } else {
       bool ok = false; uint16_t ver = 0;
-      nicerf2021f33_pram_status(radio, &ok, &ver);
+      nicerf_lora2021f33_pram_status(radio, &ok, &ver);
       sprintf(reply, "pram loaded=%s ver=0x%04X", ok ? "YES" : "NO", (unsigned)ver);
     }
     return true;
@@ -275,4 +275,4 @@ bool nicerfTestCliCommand(char* command, char* reply) {
   strcpy(reply, "fk: info | simo on|off | ce on|off | pram [load]");
   return true;
 }
-#endif  // FK_NICERF2021F33_TEST
+#endif  // FK_NICERF_LORA2021F33_TEST

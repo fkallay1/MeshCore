@@ -136,7 +136,7 @@ nich má znieť takto (nie „podporuje WM1302 LR-FHSS", na to odpovedia „áno
 
 Ak by sa raz LR-FHSS otvorilo: vysielacia strana v LR2021 je pár hodín práce
 (uložiť LoRa stav → `beginLRFHSS()` → odoslať → obnoviť cez `std_init()` +
-`nicerf2021f33_post_init()`; RF switch aj PA tabuľka platia bez zmeny, uzol je
+`nicerf_lora2021f33_post_init()`; RF switch aj PA tabuľka platia bez zmeny, uzol je
 počas toho pár sekúnd hluchý). Overiť sa to dá aj bez brány — SDR záznam a
 [jumanamirza/LR-FHSS-receiver](https://github.com/jumanamirza/LR-FHSS-receiver)
 (MATLAB, dekóduje LR-FHSS z sx126x/lr1110, čiže aj z LR2021).

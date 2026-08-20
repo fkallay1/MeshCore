@@ -11,7 +11,7 @@ D:/FkDev/GHcli/bin/gh.exe pr comment 2739 --repo meshcore-dev/MeshCore --body-fi
 ```
 
 Pravidlá: bez zmienky o AI, bez URL a bez mriežkových čísel (krížové odkazy).
-Modul sa označuje **F33**, nie F233.
+Modul sa označuje **LoRa2021F33-2G4**, nie F233. Výrobca NiceRF (= G-NiceRF).
 
 ## Body
 
@@ -69,7 +69,7 @@ remapping the dial so the number means dBm at the module output, which keeps `se
 consistent with MeshCore's other high-power boards.
 
 **What we are preparing.** Two pieces, and the first one is deliberately
-board-independent so it can be shared: a `LoRa2021F33` support header under
+board-independent so it can be shared: a `NiceRF_LoRa2021F33` support header under
 `src/helpers/radiolib/` holding the module specifics only - RF switch table, the remapped
 PA drive table, the PRAM patch loader and a boot report - plus a variant for the XIAO
 nRF52840. The header takes no MCU assumptions, so your ESP32-C3 board should be able to

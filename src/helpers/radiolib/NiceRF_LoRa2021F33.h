@@ -5,6 +5,14 @@
 /* -----------------------------------------------------------------------------
    NiceRF LoRa2021F33-2G4 — Semtech LR2021 with an external dual-band front-end.
 
+   Vendor naming: the datasheet footer reads "NiceRF Wireless Technology Co., Ltd."
+   and the product name in every page header is LoRa2021F33-2G4. The same company
+   also brands itself G-NiceRF - that mark appears on packaging, on marketplace
+   listings and in the datasheet PDF metadata, but never in the document text.
+   NiceRF and G-NiceRF are the same manufacturer, not a clone or a knock-off of one
+   another. Datasheet V1.2, 2026-08:
+   www.nicerf.com/pdf/lora2021f33-2g4-2w-high-power-high-speed-multi-band-lr2021-wireless-communication-module-v1.2.pdf
+
    Board-independent support for the module: RF switch wiring, PA drive table and
    the init sequence. A board variant only supplies the MCU pins and includes this.
 
@@ -33,21 +41,21 @@
 
    2) RadioLib's built-in PA table is tuned for Semtech's reference design, whose
       lowest step already drives this module to roughly +19 dBm at the antenna.
-      NICERF2021F33_PA_TABLE_LF below re-maps the requested power so that it means
+      NICERF_LORA2021F33_PA_TABLE_LF below re-maps the requested power so that it means
       dBm AT THE MODULE OUTPUT, using the fixed PA drive (duty 7 / 6 slices) that
-      NiceRF's own demo uses. Define NICERF2021F33_STOCK_PA_TABLE to opt out.
+      NiceRF's own demo uses. Define NICERF_LORA2021F33_STOCK_PA_TABLE to opt out.
 
-   2.4 GHz is prepared but NOT enabled: without NICERF2021F33_ENABLE_24G the HF
+   2.4 GHz is prepared but NOT enabled: without NICERF_LORA2021F33_ENABLE_24G the HF
    DIOs are left untouched (RADIOLIB_NC) and only the sub-GHz path is programmed.
    ----------------------------------------------------------------------------- */
 
-#define NICERF2021F33_IRQ_DIO       9      // LR2021 DIO carrying IRQ to module pin 18
-#define NICERF2021F33_TCXO_VOLTAGE  3.3f   // NiceRF: LR20XX_SYSTEM_TCXO_CTRL_3_3V
+#define NICERF_LORA2021F33_IRQ_DIO       9      // LR2021 DIO carrying IRQ to module pin 18
+#define NICERF_LORA2021F33_TCXO_VOLTAGE  3.3f   // NiceRF: LR20XX_SYSTEM_TCXO_CTRL_3_3V
 
-static const uint32_t nicerf2021f33_rfswitch_dios[Module::RFSWITCH_MAX_PINS] = {
+static const uint32_t nicerf_lora2021f33_rfswitch_dios[Module::RFSWITCH_MAX_PINS] = {
   RADIOLIB_LR2021_DIO5,      // must stay at index 0 (see note 1 above)
   RADIOLIB_LR2021_DIO6,      // must stay at index 1
-#ifdef NICERF2021F33_ENABLE_24G
+#ifdef NICERF_LORA2021F33_ENABLE_24G
   RADIOLIB_LR2021_DIO7,
   RADIOLIB_LR2021_DIO8,
 #else
@@ -57,7 +65,7 @@ static const uint32_t nicerf2021f33_rfswitch_dios[Module::RFSWITCH_MAX_PINS] = {
   RADIOLIB_NC,
 };
 
-static const Module::RfSwitchMode_t nicerf2021f33_rfswitch_table[] = {
+static const Module::RfSwitchMode_t nicerf_lora2021f33_rfswitch_table[] = {
   //                       DIO5  DIO6  DIO7  DIO8
   { LR2021::MODE_STBY,   { LOW,  LOW,  HIGH, LOW  } },
   { LR2021::MODE_RX,     { LOW,  LOW,  HIGH, LOW  } },  // sub-GHz RX has no external LNA
@@ -67,7 +75,7 @@ static const Module::RfSwitchMode_t nicerf2021f33_rfswitch_table[] = {
   END_OF_MODE_TABLE,
 };
 
-#ifndef NICERF2021F33_STOCK_PA_TABLE
+#ifndef NICERF_LORA2021F33_STOCK_PA_TABLE
 /*
    Sub-GHz PA table, indexed by RadioLib as table[power + 9] for power -9..+22.
 
@@ -76,7 +84,7 @@ static const Module::RfSwitchMode_t nicerf2021f33_rfswitch_table[] = {
    the fixed 7/6 that NiceRF's demo uses for the whole sub-GHz range, which is
    also the configuration their published power figures were measured with.
 
-   NICERF2021F33_PAVAL_FOR_OUT[] maps a target MODULE OUTPUT of 10..30 dBm to the
+   NICERF_LORA2021F33_PAVAL_FOR_OUT[] maps a target MODULE OUTPUT of 10..30 dBm to the
    register value, interpolated from the datasheet's 868/915 MHz table
    (register -11/-5/1/7/13/19/25/31/37/44 -> 10.4/13.3/16.2/18.9/21.4/24.0/
    26.5/28.3/29.3/29.8 dBm).
@@ -87,7 +95,7 @@ static const Module::RfSwitchMode_t nicerf2021f33_rfswitch_table[] = {
    draw). The curve tracks, so the table is good to roughly +-1 dB. Still measure
    before trusting an absolute number near a regulatory limit.
 
-   NICERF2021F33_PA_OFFSET shifts what a requested dBm means. It defaults to 8,
+   NICERF_LORA2021F33_PA_OFFSET shifts what a requested dBm means. It defaults to 8,
    which lines the dial up with how MeshCore behaves on other high-power boards
    (RAK3401 "1W" and friends): the requested number is nominal, reality is higher,
    and 22 is the top of the scale.
@@ -109,49 +117,49 @@ static const Module::RfSwitchMode_t nicerf2021f33_rfswitch_table[] = {
    Keeping the chip drive low and calibrated is what makes the steps mean anything.
    Anything above register ~37 buys +0.5 dB for +87 mA - not worth it.
 */
-#ifndef NICERF2021F33_PA_OFFSET
-  #define NICERF2021F33_PA_OFFSET 8
+#ifndef NICERF_LORA2021F33_PA_OFFSET
+  #define NICERF_LORA2021F33_PA_OFFSET 8
 #endif
 
 //en: index 0 = 10 dBm module output ... index 20 = 30 dBm
-static const int8_t NICERF2021F33_PAVAL_FOR_OUT[21] = {
+static const int8_t NICERF_LORA2021F33_PAVAL_FOR_OUT[21] = {
   -11, -10, -8, -6, -4, -1,  1,  3,  5,  7, 10,   // 10..20 dBm
    12,  14, 17, 19, 21, 24, 27, 30, 35, 44        // 21..30 dBm
 };
 
-static LR2021PaTableEntry_t NICERF2021F33_PA_TABLE_LF[32];
+static LR2021PaTableEntry_t NICERF_LORA2021F33_PA_TABLE_LF[32];
 
 //en: expected module output (dBm) for a requested power, after clamping
-static inline int nicerf2021f33_expected_out(int requested) {
-  int out = requested + (NICERF2021F33_PA_OFFSET);
+static inline int nicerf_lora2021f33_expected_out(int requested) {
+  int out = requested + (NICERF_LORA2021F33_PA_OFFSET);
   if (out < 10) out = 10;
   if (out > 30) out = 30;
   return out;
 }
 
-static inline void nicerf2021f33_build_pa_table() {
+static inline void nicerf_lora2021f33_build_pa_table() {
   for (int i = 0; i < 32; i++) {
-    int out = nicerf2021f33_expected_out(i - 9);
-    NICERF2021F33_PA_TABLE_LF[i].paDutyCycle = 7;
-    NICERF2021F33_PA_TABLE_LF[i].paSlices    = 6;
-    NICERF2021F33_PA_TABLE_LF[i].paVal       = NICERF2021F33_PAVAL_FOR_OUT[out - 10];
+    int out = nicerf_lora2021f33_expected_out(i - 9);
+    NICERF_LORA2021F33_PA_TABLE_LF[i].paDutyCycle = 7;
+    NICERF_LORA2021F33_PA_TABLE_LF[i].paSlices    = 6;
+    NICERF_LORA2021F33_PA_TABLE_LF[i].paVal       = NICERF_LORA2021F33_PAVAL_FOR_OUT[out - 10];
   }
 }
-#endif  // NICERF2021F33_STOCK_PA_TABLE
+#endif  // NICERF_LORA2021F33_STOCK_PA_TABLE
 
 
 /* Call BEFORE std_init(): begin() already applies LORA_TX_POWER, so the table has
    to be in place by then. Pure setter, no SPI traffic. */
-template <class T> static inline void nicerf2021f33_pre_init(T& radio) {
-#ifndef NICERF2021F33_STOCK_PA_TABLE
-  nicerf2021f33_build_pa_table();
-  radio.setPaTable(NICERF2021F33_PA_TABLE_LF, false);
+template <class T> static inline void nicerf_lora2021f33_pre_init(T& radio) {
+#ifndef NICERF_LORA2021F33_STOCK_PA_TABLE
+  nicerf_lora2021f33_build_pa_table();
+  radio.setPaTable(NICERF_LORA2021F33_PA_TABLE_LF, false);
 #endif
 }
 
 /* Call AFTER std_init(): programming the DIO functions needs a live chip. */
-template <class T> static inline void nicerf2021f33_post_init(T& radio) {
-  radio.setRfSwitchTable(nicerf2021f33_rfswitch_dios, nicerf2021f33_rfswitch_table);
+template <class T> static inline void nicerf_lora2021f33_post_init(T& radio) {
+  radio.setRfSwitchTable(nicerf_lora2021f33_rfswitch_dios, nicerf_lora2021f33_rfswitch_table);
 }
 
 /* ---------------------------------------------------------------------------
@@ -173,25 +181,25 @@ template <class T> static inline void nicerf2021f33_post_init(T& radio) {
 
 //en: DS Rev 2.1 s22.3.1/s22.3.2 - same values RadioLib keeps in LR2021_registers.h,
 //en: redefined here so this header does not depend on a RadioLib internal include
-#define NICERF2021F33_PRAM_BASE          (0x801000UL)
-#define NICERF2021F33_PRAM_ADDR_LOADED   (0x800FF8UL)
-#define NICERF2021F33_PRAM_ADDR_VERSION  (0x800FFCUL)
-#define NICERF2021F33_PRAM_LOADED_MAGIC  (0x600DB002UL)
+#define NICERF_LORA2021F33_PRAM_BASE          (0x801000UL)
+#define NICERF_LORA2021F33_PRAM_ADDR_LOADED   (0x800FF8UL)
+#define NICERF_LORA2021F33_PRAM_ADDR_VERSION  (0x800FFCUL)
+#define NICERF_LORA2021F33_PRAM_LOADED_MAGIC  (0x600DB002UL)
 
 #ifdef LR2021_PRAM_UPD
 #include "lr20xx_pram_lr2021.h"
 
 //en: write the image at 0x801000 in 32-word blocks, then activate (opcode 0x012D)
-template <class T> static inline int16_t nicerf2021f33_pram_load(T& radio) {
+template <class T> static inline int16_t nicerf_lora2021f33_pram_load(T& radio) {
   const uint32_t blocks = lr2021_pram_size / 32u;
   for (uint32_t b = 0; b < blocks; b++) {
-    int16_t st = radio.writeRegMem32(NICERF2021F33_PRAM_BASE + b * 32u * 4u,
+    int16_t st = radio.writeRegMem32(NICERF_LORA2021F33_PRAM_BASE + b * 32u * 4u,
                                      &lr2021_pram[b * 32u], 32u);
     if (st != RADIOLIB_ERR_NONE) return st;
   }
   const uint32_t rest = lr2021_pram_size - blocks * 32u;
   if (rest > 0) {
-    int16_t st = radio.writeRegMem32(NICERF2021F33_PRAM_BASE + blocks * 32u * 4u,
+    int16_t st = radio.writeRegMem32(NICERF_LORA2021F33_PRAM_BASE + blocks * 32u * 4u,
                                      &lr2021_pram[blocks * 32u], rest);
     if (st != RADIOLIB_ERR_NONE) return st;
   }
@@ -200,11 +208,11 @@ template <class T> static inline int16_t nicerf2021f33_pram_load(T& radio) {
 #endif  // LR2021_PRAM_UPD
 
 //en: DS s22.3.2 - magic at 0x800FF8 must read 0x600DB002, version at 0x800FFC
-template <class T> static inline void nicerf2021f33_pram_status(T& radio, bool* loaded, uint16_t* ver) {
+template <class T> static inline void nicerf_lora2021f33_pram_status(T& radio, bool* loaded, uint16_t* ver) {
   uint32_t magic = 0, raw = 0;
-  radio.readRegMem32(NICERF2021F33_PRAM_ADDR_LOADED, &magic, 1);
-  radio.readRegMem32(NICERF2021F33_PRAM_ADDR_VERSION, &raw, 1);
-  if (loaded) *loaded = (magic == NICERF2021F33_PRAM_LOADED_MAGIC);
+  radio.readRegMem32(NICERF_LORA2021F33_PRAM_ADDR_LOADED, &magic, 1);
+  radio.readRegMem32(NICERF_LORA2021F33_PRAM_ADDR_VERSION, &raw, 1);
+  if (loaded) *loaded = (magic == NICERF_LORA2021F33_PRAM_LOADED_MAGIC);
   if (ver)    *ver    = (uint16_t)((raw >> 8) & 0xFFFF);
 }
 
@@ -217,7 +225,7 @@ template <class T> static inline void nicerf2021f33_pram_status(T& radio, bool* 
    Beware: DS lists "DCDC (SIMO) impact on sensitivity" for sub-GHz LoRa as a
    limitation fixed by the PRAM - so DC-DC without the PRAM is a bad trade.
 */
-template <class T> static inline int16_t nicerf2021f33_set_simo(T& radio, bool on) {
+template <class T> static inline int16_t nicerf_lora2021f33_set_simo(T& radio, bool on) {
   radio.standby();
   //en: ramp times kept at the RadioLib default resolution; only simo_usage changes
   const uint8_t ramps[4] = { 0, 0, 0, 0 };
@@ -236,7 +244,7 @@ template <class T> static inline int16_t nicerf2021f33_set_simo(T& radio, bool o
    left on VCC-less parasitic feed through the GPIO ESD diodes will answer SPI
    but cannot run its PA, and this is the reading that tells the two apart.
 */
-template <class T> static inline void nicerf2021f33_report(T& radio) {
+template <class T> static inline void nicerf_lora2021f33_report(T& radio) {
   uint8_t  major = 0, minor = 0;
   uint16_t vbat_mv = 0, errors = 0;
   radio.getVersion(&major, &minor);
@@ -248,34 +256,34 @@ template <class T> static inline void nicerf2021f33_report(T& radio) {
                 (unsigned)major, (unsigned)minor, (unsigned)vbat_mv, temp, (unsigned)errors);
 #if defined(RADIOLIB_GODMODE)
   bool pram_ok = false; uint16_t pram_ver = 0;
-  nicerf2021f33_pram_status(radio, &pram_ok, &pram_ver);
+  nicerf_lora2021f33_pram_status(radio, &pram_ok, &pram_ver);
   Serial.printf("[LR2021] pram: loaded=%s version=0x%04X\r\n", pram_ok ? "YES" : "no", (unsigned)pram_ver);
 #endif
   Serial.printf("[LR2021] irq=DIO%d  tcxo=%.1fV  freq=%.3fMHz  band=%s  rfsw=DIO5/DIO6%s\r\n",
-                (int)NICERF2021F33_IRQ_DIO, (double)NICERF2021F33_TCXO_VOLTAGE,
+                (int)NICERF_LORA2021F33_IRQ_DIO, (double)NICERF_LORA2021F33_TCXO_VOLTAGE,
                 (double)LORA_FREQ, (LORA_FREQ > 1500.0f) ? "HF(2G4)" : "LF(sub-GHz)",
-#ifdef NICERF2021F33_ENABLE_24G
+#ifdef NICERF_LORA2021F33_ENABLE_24G
                 "/DIO7/DIO8");
 #else
                 " (2G4 off)");
 #endif
 
-#ifndef NICERF2021F33_STOCK_PA_TABLE
+#ifndef NICERF_LORA2021F33_STOCK_PA_TABLE
   //en: what a requested dBm actually becomes: register value (= chip drive) and
   //en: the module output the datasheet predicts for it. RadioLib refuses any
   //en: request outside -9..+22 outright, so 22 is always the top of the dial.
   int idx = (int)LORA_TX_POWER + 9;
   if (idx < 0) idx = 0;
   if (idx > 31) idx = 31;
-  int8_t pv = NICERF2021F33_PA_TABLE_LF[idx].paVal;
+  int8_t pv = NICERF_LORA2021F33_PA_TABLE_LF[idx].paVal;
   Serial.printf("[LR2021] pa=nicerf(duty%u/slices%u) offset=%+d  tx=%ddBm req -> paVal=%d (%.1fdBm chip) -> ~%d dBm module out\r\n",
-                (unsigned)NICERF2021F33_PA_TABLE_LF[idx].paDutyCycle,
-                (unsigned)NICERF2021F33_PA_TABLE_LF[idx].paSlices,
-                (int)NICERF2021F33_PA_OFFSET,
+                (unsigned)NICERF_LORA2021F33_PA_TABLE_LF[idx].paDutyCycle,
+                (unsigned)NICERF_LORA2021F33_PA_TABLE_LF[idx].paSlices,
+                (int)NICERF_LORA2021F33_PA_OFFSET,
                 (int)LORA_TX_POWER, (int)pv, (double)pv / 2.0,
-                nicerf2021f33_expected_out((int)LORA_TX_POWER));
+                nicerf_lora2021f33_expected_out((int)LORA_TX_POWER));
   Serial.printf("[LR2021] dial: tx=-9 -> ~%d dBm ... tx=22 -> ~%d dBm out\r\n",
-                nicerf2021f33_expected_out(-9), nicerf2021f33_expected_out(22));
+                nicerf_lora2021f33_expected_out(-9), nicerf_lora2021f33_expected_out(22));
 #else
   Serial.printf("[LR2021] pa=radiolib-default  tx=%ddBm req\r\n", (int)LORA_TX_POWER);
 #endif

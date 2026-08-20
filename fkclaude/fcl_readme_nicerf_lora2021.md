@@ -1,6 +1,13 @@
 # XIAO nRF52840 + NiceRF LoRa2021F33-2G4 (Semtech LR2021)
 
-Variant `xiao_nrf52_nicerf2021f33` — primárne **868 MHz**, 2,4 GHz je pripravené,
+> **NiceRF = G-NiceRF.** Datasheet má v pätke *„NiceRF Wireless Technology Co.,
+> Ltd."* a v hlavičke každej strany produkt `LoRa2021F33-2G4`. Tá istá firma sa
+> značí aj **G-NiceRF** — je to na obaloch, na marketplace inzerátoch a
+> v metadátach PDF, ale v texte datasheetu nikde. **Nie je to klon ani fake**, len
+> dve podoby tej istej značky; keďže ide o Čínu, u niekoho to môže evokovať opak.
+> V našich názvoch a v próze používame `NiceRF`.
+
+Variant `xiao_nrf52_nicerf_lora2021f33` — primárne **868 MHz**, 2,4 GHz je pripravené,
 ale **zámerne nezapnuté** (jeden `-D`, viď koniec dokumentu).
 
 ## Prečo odvodené z `xiao_nrf52` a nie z `meshtracker_x1`
@@ -18,9 +25,9 @@ Preto:
 |---|---|
 | Board (`XiaoNrf52Board`, `variant.cpp`) | požičané z `variants/xiao_nrf52` cez `-I` + `build_src_filter`, **žiadna kópia** |
 | Rádio (LR2021 flagy, SPI piny) | vzor `variants/meshtracker_x1` |
-| Front-end modulu (RF switch, PA, DIO mapa) | `src/helpers/radiolib/NiceRF2021F33.h` — **board-nezávislé**, ProMicro variant to použije bezo zmeny |
+| Front-end modulu (RF switch, PA, DIO mapa) | `src/helpers/radiolib/NiceRF_LoRa2021F33.h` — **board-nezávislé**, ProMicro variant to použije bezo zmeny |
 
-**Pasca pri kopírovaní:** `-I variants/xiao_nrf52_nicerf2021f33` musí byť **pred**
+**Pasca pri kopírovaní:** `-I variants/xiao_nrf52_nicerf_lora2021f33` musí byť **pred**
 `-I variants/xiao_nrf52`, inak sa vezme SX1262-ový `target.h` a build padne na
 `'radio_driver' was not declared`.
 
@@ -71,7 +78,7 @@ cievka patrí na **LXA/LXB**, VDCC/VPAX sú len prepojky potrebné v oboch reži
 
 Rovnaká konvencia ako ostatné výkonné dosky v MeshCore (RAK3401 „1W" a spol.):
 **číslo je nominálne, PA si pripočíta svoje, 22 = maximum.** Zabezpečuje to
-`NICERF2021F33_PA_OFFSET`, default **8**:
+`NICERF_LORA2021F33_PA_OFFSET`, default **8**:
 
 | `set tx` | výstup modulu | prúd (merané, aj s XIAO) |
 |---|---|---|
@@ -181,7 +188,7 @@ Problém: východzia LF tabuľka RadioLibu je ladená na Semtech referenčný di
 Na tomto module **už jej najnižší stupeň (power = −9) tlačí ~19 dBm na anténu** —
 nad limitom 14 dBm ERP pre väčšinu EU868 subpásiem.
 
-Preto `NiceRF2021F33.h` obsahuje vlastnú `NICERF2021F33_PA_TABLE_LF`, kde
+Preto `NiceRF_LoRa2021F33.h` obsahuje vlastnú `NICERF_LORA2021F33_PA_TABLE_LF`, kde
 **`LORA_TX_POWER` znamená dBm na výstupe modulu** (default 14). PA drive je fixný
 7/6 — presne ako v NiceRF demo, čiže konfigurácia, pri ktorej merali svoje tabuľky.
 
@@ -200,7 +207,7 @@ Prírastky sedia (+27/+30/+34 očakávané vs +30/+38/+42 merané), rozdiel je o
 XIAO (~15–20 mA). Tabuľka je teda dobrá **na ~±1 dB**. Pre absolútne číslo pri
 regulačnom limite stále platí: premerať prístrojom.
 
-`-D NICERF2021F33_STOCK_PA_TABLE` prepne späť na RadioLib tabuľku (viď vyššie,
+`-D NICERF_LORA2021F33_STOCK_PA_TABLE` prepne späť na RadioLib tabuľku (viď vyššie,
 prečo tu nie je dobrý nápad).
 
 ## Chyba v RadioLib, ktorú header obchádza
@@ -333,16 +340,16 @@ Pri živej chybe je `RX_DONE` ešte nastavený a odtiaľ pochádza hodnota 4.
 V upstream RadioLibe 7.7.1 (pinnutý upstreamom MeshCore na `6d89348`), nie
 v našom kóde — celá LR2021 podpora v MeshCore je od `taco`
 (`7cc16366`, `696a82d7`, `36e77671`, `ce62c8b5`), naše je len tento variant
-a `NiceRF2021F33.h`. Chýba tam validácia, že prečítaná odpoveď patrí
+a `NiceRF_LoRa2021F33.h`. Chýba tam validácia, že prečítaná odpoveď patrí
 k odoslanému príkazu; náš override je **lokálny obchvat, nie oprava koreňa**.
 Kandidát na hlásenie do jgromes/RadioLib — trafí každého s LR2021.
 
 ## Zapnutie 2,4 GHz (zatiaľ NEROBIŤ)
 
-V `variants/xiao_nrf52_nicerf2021f33/platformio.ini` odkomentovať:
+V `variants/xiao_nrf52_nicerf_lora2021f33/platformio.ini` odkomentovať:
 
 ```ini
-  -D NICERF2021F33_ENABLE_24G=1
+  -D NICERF_LORA2021F33_ENABLE_24G=1
   -D LORA_FREQ=2445.0
   -D LORA_BW=203.0
 ```
@@ -358,26 +365,26 @@ Checklist predtým:
 5. 1 W na 2,4 GHz je ďaleko nad EU limitom 100 mW EIRP.
 6. 2,4 GHz uzly tvoria **samostatnú sieť** — s 868 MHz uzlami sa nespoja.
 
-Kompiluje sa to už teraz (overené `PLATFORMIO_BUILD_FLAGS=-D NICERF2021F33_ENABLE_24G=1`),
+Kompiluje sa to už teraz (overené `PLATFORMIO_BUILD_FLAGS=-D NICERF_LORA2021F33_ENABLE_24G=1`),
 len to nie je odskúšané na železe.
 
 ## Envy
 
 | Env | Popis |
 |---|---|
-| `Xiao_nrf52_nicerf2021f33_repeater` | bežný repeater |
-| `Xiao_nrf52_nicerf2021f33_repeater_fota` | repeater s LoRa-FOTA, `custom_fota_device = xiaonicerf` |
+| `Xiao_nrf52_nicerf_lora2021f33_repeater` | bežný repeater |
+| `Xiao_nrf52_nicerf_lora2021f33_repeater_fota` | repeater s LoRa-FOTA, `custom_fota_device = xiaonicerf` |
 
 `custom_fota_device` je nutné — hook odvodzuje meno zariadenia z `PIOENV.split("_")[0]`,
 čo by dalo `xiao` a miešalo by sa to s archívom SX1262 XIAO.
 
 ### Kam patria naše flagy
 
-⚠️ V zdieľanom bloku `[Xiao_nrf52_nicerf2021f33]` smie
+⚠️ V zdieľanom bloku `[Xiao_nrf52_nicerf_lora2021f33]` smie
 byť len **definícia hardvéru** (piny, TCXO, PA tabuľka, `MAX_LORA_TX_POWER`).
 Všetko ostatné — `LORA_RADIO_WATCHDOG`, `LORA_RADIO_DIAG_ONLY`,
-`LORA_RADIO_DIAG_CLI`, `RADIOLIB_GODMODE`, `FK_NICERF2021F33_TEST`,
-`LR2021_PRAM_UPD`, `NICERF2021F33_SIMO` — patrí **iba do FOTA envu**, aby
+`LORA_RADIO_DIAG_CLI`, `RADIOLIB_GODMODE`, `FK_NICERF_LORA2021F33_TEST`,
+`LR2021_PRAM_UPD`, `NICERF_LORA2021F33_SIMO` — patrí **iba do FOTA envu**, aby
 `..._repeater` ostal de facto štandardný repeater bez našich zmien. Do 2026-08-16
 to bolo v zdieľanom bloku a pretekalo do oboch. ProMicro to mal správne od
 začiatku (flagy sú v `[env:ProMicro_repeater_fota]`).
@@ -401,7 +408,7 @@ Modul aj RadioLib ich vedia (`beginLRFHSS()`, `beginFLRC()`, `beginGFSK()`,
 
 **LR-FHSS ako jednosmerný uplink do vlastnej brány** je reálna možnosť: uložiť
 LoRa stav → `beginLRFHSS()` → odoslať → obnoviť cez `std_init()` +
-`nicerf2021f33_post_init()`. RF switch to nerieši (`MODE_TX` je nezávislé od
+`nicerf_lora2021f33_post_init()`. RF switch to nerieši (`MODE_TX` je nezávislé od
 modemu) a PA tabuľka platí tiež. Uzol je počas toho pár sekúnd hluchý.
 
 ⚠️ **Ale najprv brána:** SX1302 (WM1302) LR-FHSS demodulovať vie len po firmware
@@ -513,7 +520,7 @@ Nechať zapnutý, kým sa zasahovacia vetva neoverí proti skutočnej poruche �
 tri predchádzajúce pokusy o detekciu stáli na predpokladoch a všetky tri boli
 zlé, takže tu platí: najprv merať, potom veriť.
 
-## Testovacie CLI (`fk …`) — flag `FK_NICERF2021F33_TEST`
+## Testovacie CLI (`fk …`) — flag `FK_NICERF_LORA2021F33_TEST`
 
 Aby sa dal modul skúšať bez neustáleho preflashovania. Vyžaduje aj
 `-D RADIOLIB_GODMODE=1` (RadioLib má `setRegMode`, `writeRegMem32`,
@@ -800,7 +807,7 @@ v rozptyle merania. Datasheetových „+80 nA" sa týka retenčného spánku.
 `rxerr=0`, `miss=0` — identické s LDO režimom. (Pozor: silné signály nezistia
 stratu 1–3 dB citlivosti, to by ukázala až slabá linka.)
 
-**Zapnutie natrvalo:** `-D NICERF2021F33_SIMO=1` (zapína sa pri každom
+**Zapnutie natrvalo:** `-D NICERF_LORA2021F33_SIMO=1` (zapína sa pri každom
 `radio_init()`, lebo **čip sa resetuje do LDO**). Zapínať **spolu s
 `LR2021_PRAM_UPD`** — datasheet uvádza „DCDC (SIMO) impact on sensitivity" pre
 sub-GHz LoRa ako vec, ktorú patch opravuje.
@@ -886,7 +893,7 @@ NiceRF preto pri CE dole žiada stiahnuť aj NSS a RESET.
   pripojiť na voľný pin — **D5 je voľný** (D1–D4, D8–D10 zabraté rádiom, D6/D7
   deklarované ako I2C, D0 = PIN_BUTTON1). Pri CE dole musia ísť dole aj NSS
   a RESET, inak tečie cez ESD diódy.
-- ProMicro variant: stačí `variants/promicro_nicerf2021f33/` rovnakým strihom
+- ProMicro variant: stačí `variants/promicro_nicerf_lora2021f33/` rovnakým strihom
   (target.h/.cpp + ini, board trieda požičaná z `variants/promicro`).
 
 ## Datasheet modulu — V1.2 (2026-08), STIAHNUTÉ 2026-08-20
