@@ -1624,6 +1624,7 @@ bool MyMesh::radioDiagCliCommand(char* command, char* reply) {
       Serial.print(e.fp);
       Serial.print(" first=");        Serial.print(e.first);
       Serial.print(" final=");        Serial.print(e.final);
+      Serial.print(" irq=0x");        Serial.print(e.irq, HEX);
       Serial.print(" stat=0x");       Serial.print(e.stat, HEX);
       Serial.print(" cmd=");          Serial.print((e.stat >> 1) & 0x03);
       Serial.print(" tries=");        Serial.print(e.tries);

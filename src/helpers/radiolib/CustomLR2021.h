@@ -181,6 +181,7 @@ class CustomLR2021 : public LR2021 {
     //sk: Vypise to az 'fk spifix' z CLI.
     struct FkSpiEvent {
       uint16_t fp;      //en: fingerprint = irq[31:16] before the read
+      uint32_t irq;     //en: whole IRQ word at that moment - says WHY the read happened
       uint16_t first;   //en: value the first read returned
       uint16_t final;   //en: value finally used
       uint8_t  stat;    //en: stat1 of the read that produced 'first'
@@ -232,6 +233,7 @@ class CustomLR2021 : public LR2021 {
     size_t fkDiagPktLen(bool update) {
       uint8_t  stat0 = 0, stat = 0, tries = 0;
       uint16_t fp = 0, val = 0, first = 0;
+      uint32_t irqw = 0, irq0 = 0;
       bool cmd_flagged = false, fp_flagged = false;
 
       bool inject = false;
@@ -241,10 +243,15 @@ class CustomLR2021 : public LR2021 {
 #endif
 
       for (tries = 1; tries <= 4; tries++) {
-        fp = (uint16_t)(getIrqStatus() >> 16);
+        irqw = getIrqStatus();
+        fp = (uint16_t)(irqw >> 16);
         readRxPktLenWithStatus(inject && tries == 1 ? false : true, &stat, &val);
-        if (tries == 1) { first = val; stat0 = stat; }
-        if (fp != 0 && val == fp) fp_flagged = true;
+        if (tries == 1) { first = val; stat0 = stat; irq0 = irqw; }
+        //en: same condition as CustomLR1110 on purpose, so both chips are comparable -
+        //en: a zero fingerprint is recorded too, it just does not drive a retry.
+        //sk: zamerne ta ista podmienka ako v CustomLR1110, aby boli oba cipy
+        //sk: porovnatelne - nulovy odtlacok sa tiez zaznamena, len nespusti opakovanie.
+        if (val == fp && (irqw & RADIOLIB_LR2021_IRQ_RX_DONE)) fp_flagged = true;
         if (((stat >> 1) & 0x03) == 0x03) break;   //en: CMD_DAT -> reply belongs to us
         cmd_flagged = true;
       }
@@ -256,7 +263,7 @@ class CustomLR2021 : public LR2021 {
         _stale_pktlen_reads++;
         _ev_total++;
         FkSpiEvent& e = _ev[_ev_write];
-        e.fp = fp; e.first = first; e.final = (uint16_t)len;
+        e.fp = fp; e.irq = irq0; e.first = first; e.final = (uint16_t)len;
         e.stat = stat0; e.off = 0; e.tries = tries > 4 ? 4 : tries;
         e.rule = (cmd_flagged ? 1 : 0) | (fp_flagged ? 2 : 0);
         e.inj = inject ? 1 : 0;

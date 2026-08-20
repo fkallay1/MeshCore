@@ -108,6 +108,7 @@ class CustomLR1110 : public LR1110 {
     //sk: Odtialto sa NIC netlaci, sme v horucej RX ceste.
     struct FkSpiEvent {
       uint16_t fp;      //en: fingerprint = irq[31:24] before the read
+      uint32_t irq;     //en: whole IRQ word at that moment - says WHY the read happened
       uint16_t first;   //en: value the first read returned
       uint16_t final;   //en: value finally used
       uint8_t  stat;    //en: stat1 of the read that produced 'first'
@@ -125,6 +126,7 @@ class CustomLR1110 : public LR1110 {
     size_t fkDiagPktLen(bool update) {
       uint8_t  stat0 = 0, stat = 0, off = 0, off0 = 0, tries = 0;
       uint16_t fp = 0, val = 0, first = 0;
+      uint32_t irqw = 0, irq0 = 0;
       bool cmd_flagged = false, fp_flagged = false;
 
       bool inject = false;
@@ -133,10 +135,11 @@ class CustomLR1110 : public LR1110 {
       if (_fk_pretype) { uint8_t t = 0; (void)getPacketType(&t); }
 #endif
       for (tries = 1; tries <= 4; tries++) {
-        fp = (uint16_t)(getIrqStatus() >> 24);
+        irqw = getIrqStatus();
+        fp = (uint16_t)(irqw >> 24);
         readRxPktLenWithStatus(inject && tries == 1 ? false : true, &stat, &val, &off);
-        if (tries == 1) { first = val; stat0 = stat; off0 = off; }
-        if (val == fp && (getIrqStatus() & RADIOLIB_LR11X0_IRQ_RX_DONE)) fp_flagged = true;
+        if (tries == 1) { first = val; stat0 = stat; off0 = off; irq0 = irqw; }
+        if (val == fp && (irqw & RADIOLIB_LR11X0_IRQ_RX_DONE)) fp_flagged = true;
         if ((stat & 0x0E) == RADIOLIB_LRXXXX_STAT_1_CMD_DAT) break;
         cmd_flagged = true;
       }
@@ -144,12 +147,38 @@ class CustomLR1110 : public LR1110 {
       size_t len = val;
       if ((stat & 0x0E) != RADIOLIB_LRXXXX_STAT_1_CMD_DAT) len = LR1110::getPacketLength(update);
 
+      //en: PROBE: a length of 0 while RX_DONE is set, with the status saying the reply is
+      //en: genuine (CMD_DAT), is a state this chip reaches routinely - unlike LR2021.
+      //en: Two readings are possible: either nothing is waiting, or the length register
+      //en: has not been updated yet at the moment RX_DONE fires. Only a re-read can tell
+      //en: them apart, so do it here and record how many it took. If a re-read ever
+      //en: returns non-zero, the retry rule is right and the status check alone is not
+      //en: enough on this family.
+      //sk: SONDA: dlzka 0 pri nastavenom RX_DONE, ked status hovori, ze odpoved je
+      //sk: platna (CMD_DAT), je stav, do ktoreho sa tento cip dostava bezne - na rozdiel
+      //sk: od LR2021. Su dva vyklady: alebo naozaj nic neceka, alebo sa register dlzky v
+      //sk: momente RX_DONE este nedopisal. Rozlisi to len opakovane citanie, takze ho tu
+      //sk: sprav a zaznamenaj, kolko pokusov trvalo. Ak niekdy vrati nenulu, pravidlo s
+      //sk: opakovanim je spravne a kontrola statusu sama na tejto rodine nestaci.
+      uint8_t probe = 0;
+      if (len == 0 && (irqw & RADIOLIB_LR11X0_IRQ_RX_DONE)) {
+        for (probe = 1; probe <= 3; probe++) {
+          uint8_t st2 = 0, of2 = 0;
+          uint16_t v2 = 0;
+          readRxPktLenWithStatus(true, &st2, &v2, &of2);
+          if (v2) { len = v2; off = of2; break; }
+        }
+        if (len == 0) probe = 0;   //en: nothing came out of it
+      }
+
       if (cmd_flagged || fp_flagged) {
         _stale_pktlen_reads++;
         _ev_total++;
         FkSpiEvent& e = _ev[_ev_write];
-        e.fp = fp; e.first = first; e.final = (uint16_t)len;
-        e.stat = stat0; e.off = off0; e.tries = tries > 4 ? 4 : tries;
+        e.fp = fp; e.irq = irq0; e.first = first; e.final = (uint16_t)len;
+        e.stat = stat0; e.off = off0;
+        //en: probe>0 = a re-read DID produce a length after a zero; tries stays the CMD_DAT count
+        e.tries = probe ? (uint8_t)(100 + probe) : (tries > 4 ? 4 : tries);
         e.rule = (cmd_flagged ? 1 : 0) | (fp_flagged ? 2 : 0);
         e.inj = inject ? 1 : 0;
         _ev_write = (uint8_t)((_ev_write + 1) % FK_SPI_EVENTS);
