@@ -889,6 +889,44 @@ NiceRF preto pri CE dole žiada stiahnuť aj NSS a RESET.
 - ProMicro variant: stačí `variants/promicro_nicerf2021f33/` rovnakým strihom
   (target.h/.cpp + ini, board trieda požičaná z `variants/promicro`).
 
+## Datasheet modulu — V1.2 (2026-08), STIAHNUTÉ 2026-08-20
+
+`https://www.nicerf.com/pdf/lora2021f33-2g4-2w-high-power-high-speed-multi-band-lr2021-wireless-communication-module-v1.2.pdf`
+
+Toto je datasheet **modulu** (18 strán), nie Semtechov `LR20xx Rev 2.1`. Doslovné
+znenie toho, čo z neho vyplýva:
+
+**Názov a výrobca.** V hlavičke každej strany stojí `LoRa2021F33-2G4`, v pätke
+**NiceRF Wireless Technology Co., Ltd.** (`www.nicerf.com`, `sales@nicerf.com`).
+Označenie **G-NiceRF je len v metadátach PDF** (pole creator), v texte sa
+nevyskytuje — je to ich značka, nie názov firmy. V próze teda **NiceRF
+LoRa2021F33-2G4**.
+
+**TCXO modul MÁ.** Vlastnosť z prvej strany: *„Industrial-grade TCXO Crystal
+Oscillator 0.5PPM"*. Potvrdzuje to našich 3,3 V a boot výpis `tcxo=3.30 V`
+(fallback na 0.0 sa nepoužil). Viď [[Zastaralá SPI odpoveď]] — upstream PR pre ten
+istý modul na ESP32-C3 tvrdí *„Crystal oscillator (XTAL), not TCXO"* a nastavuje 0.
+
+**DIO front-endu sa programovať MUSIA.** Datasheet to hovorí priamo pri tabuľke
+citlivosti: *„Note: For the 2.4GHz LNA (DIO5), it should normally be set to high
+level (Bypass OFF). If set to low level, sensitivity will decrease by 12dB (Bypass
+ON)."* Čiže je to na hostovi. Pre sub-GHz PA (DIO6) datasheet explicitný nie je —
+tam stále platí NiceRF demo (`LoRa/Core/Src/lr2021.c`) a odpoveď ich supportu.
+
+**Výkon podľa pásma** (potvrdzuje naše čísla, netreba nič opravovať):
+
+| pásmo | výkon | max dBm | prúd @5 V |
+|---|---|---|---|
+| 433/470 MHz | 2 W | 33 | < 1200 mA |
+| 868/915 MHz | 1 W | 30 | < 800 mA |
+| 1,9–2,5 GHz | 1 W | 31 | < 900 mA |
+
+Takže **„F33" je od 33 dBm** (2 W na 433). Na 868 je strop 30 dBm, čo presne sedí
+s našou PA tabuľkou, ktorá na `set tx 22` končí na ~30 dBm.
+
+**Pinout sedí presne** s tým, čo máme zapojené: 1 VCC, 5 CE, 9 ANT, 10 ANT-2G4,
+12 SCK, 13 NSS, 14 BUSY, 15 MOSI, 16 MISO, 17 RESET, 18 IRQ, ostatné GND.
+
 ## Zdroje
 
 - **LR20xx datasheet Rev 2.1** (13/04/26, aktuálny) —
