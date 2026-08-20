@@ -274,6 +274,37 @@ class CustomLR2021 : public LR2021 {
     }
 #endif
 
+#ifdef FK_RADIO_SPI_DIAG
+    //en: Is BUSY observable at all? SPItransferStream() waits 1 us after CS-high and then
+    //en: polls BUSY for a LOW level - so if the line has not risen yet, the wait does
+    //en: nothing and the reply is read too early. Watching for the RISE instead would
+    //en: prevent that, but only if the MCU can actually catch the line high. This issues
+    //en: the opcode with the wait skipped and then samples BUSY in a tight loop:
+    //en:   hi    = how many of the first samples read HIGH
+    //en:   fall  = sample index where it went low (0 = never seen high)
+    //en: If hi is always 0, BUSY rises and falls faster than we can sample, and no amount
+    //en: of polling can fix the handshake - the status byte stays the only signal.
+    //sk: Da sa BUSY vobec zachytit? SPItransferStream() pocka po CS-high 1 us a potom
+    //sk: poluje na NIZKU uroven - ak linka este nestupla, cakanie nerobi nic a odpoved sa
+    //sk: cita priskoro. Sledovat NASTUP by tomu predislo, ale len ak MCU vie linku
+    //sk: zachytit vysoko. Toto posle opcode s preskocenym cakanim a potom vzorkuje BUSY v
+    //sk: tesnej slucke:
+    //sk:   hi    = kolko z prvych vzoriek bolo VYSOKO
+    //sk:   fall  = index vzorky, kde spadla (0 = nikdy nevidena vysoko)
+    //sk: Ak je hi vzdy 0, BUSY stupa a padá rychlejsie nez vieme vzorkovat a handshake sa
+    //sk: polovanim opravit neda - status bajt ostava jediny signal.
+    void fkBusyProbe(uint16_t* hi, uint16_t* fall, uint16_t samples = 400) {
+      uint32_t pin = mod->getGpio();
+      *hi = 0; *fall = 0;
+      if (pin == RADIOLIB_NC) return;
+      mod->SPIwriteStream(RADIOLIB_LR2021_CMD_GET_RX_PKT_LENGTH, NULL, 0, false, false);
+      for (uint16_t i = 1; i <= samples; i++) {
+        if (mod->hal->digitalRead(pin)) { (*hi)++; }
+        else if (*hi) { *fall = i; break; }
+      }
+    }
+#endif
+
     bool isReceiving() {
       uint32_t irq = getIrqStatus();
       bool preamble = irq & RADIOLIB_LR2021_IRQ_PREAMBLE_DETECTED;  // bit 5

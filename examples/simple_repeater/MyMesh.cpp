@@ -1576,6 +1576,27 @@ bool MyMesh::radioDiagCliCommand(char* command, char* reply) {
   const char* arg = command + 3;
 
 #ifdef FK_RADIO_SPI_DIAG
+  //en: 'fk busy [n]' - can the MCU see BUSY high after an opcode? n runs, default 8.
+  //sk: 'fk busy [n]' - vidi MCU BUSY vysoko po opcode? n behov, default 8.
+  if (memcmp(arg, "busy", 4) == 0) {
+    int runs = (arg[4] == ' ') ? atoi(arg + 5) : 8;
+    if (runs < 1 || runs > 64) runs = 8;
+    int seen = 0, sum_hi = 0, sum_fall = 0;
+    for (int k = 0; k < runs; k++) {
+      uint16_t hi = 0, fall = 0;
+      radio.fkBusyProbe(&hi, &fall);
+      if (hi) { seen++; sum_hi += hi; sum_fall += fall; }
+      Serial.print("[FK]   busy run "); Serial.print(k);
+      Serial.print(" hi="); Serial.print(hi);
+      Serial.print(" fall="); Serial.println(fall);
+    }
+    sprintf(reply, "busy videny vysoko %d/%d, priemer hi=%d fall=%d",
+            seen, runs, seen ? sum_hi / seen : 0, seen ? sum_fall / seen : 0);
+    return true;
+  }
+#endif
+
+#ifdef FK_RADIO_SPI_DIAG
   //en: 'fk inject <n>' - skip the BUSY wait on every n-th length read (0 = off), and
   //en: 'fk pretype on|off' - call getPacketType() before the length read, which is what
   //en: the library path does. Both are experiment switches, see CustomLR2021.

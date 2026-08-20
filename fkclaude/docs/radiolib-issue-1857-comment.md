@@ -34,6 +34,30 @@ packet-status command while the buffer-status command returns a payload length o
 part of this is chip behaviour rather than the reply race, and only the status byte tells
 the two apart - which is the whole point of the request above.
 
+**BUSY duration is variable, which is why polling cannot close this.** Measured on the
+LR2021 board by issuing the opcode with the wait skipped and then sampling the BUSY line
+in a tight `digitalRead` loop, 40 runs:
+
+```
+16 samples high  32 runs
+15               2
+14, 13, 11, 6, 5 1 each
+ 1               1
+ 0 (never seen)  1
+```
+
+So four fifths of the time the line stays asserted long enough that the existing wait
+catches it comfortably - which is why this is sporadic rather than constant. But the
+duration varies, and in the tail it is either very short or not observable from the host
+at all. Those are exactly the reads that come back as the status stream: the 1 us delay
+before polling elapses, the line already reads low, nothing is waited for.
+
+This is worth weighing against the handshake option: waiting for the rise before waiting
+for the fall would cover the short cases, but it cannot cover a rise the host never sees -
+there a bounded timeout has to assume the command completed, which is the failing case
+again. The status check covers both, which is why it looks like the more robust of the
+two, or at least the one that should back the other up.
+
 **One more reason to make the failure visible.** A zero length is not just a lost frame in
 some callers - it can stop reception. In a discussion here about `getPacketLength()`
 returning 0 in RX IRQ mode, the answer was that `getPacketLength` does not clear the IRQ,
