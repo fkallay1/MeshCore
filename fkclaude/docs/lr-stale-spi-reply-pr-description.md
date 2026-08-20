@@ -123,10 +123,13 @@ here and what `irq[31:16]` reads when RX_DONE and CRC_ERROR are set together, so
 flagged genuine frames. The status reported `CMD_DAT` on exactly those, which is why it
 decides now.
 
-On LR11x0 the stale value is 0 and a zero-length frame does not occur, so the zero is
-unambiguous and the guard there stays a re-read on `len == 0 && RX_DONE` - no status byte
-needed. The existing `len == 0 && HEADER_ERR` handling is left untouched and still runs
-if re-reading does not help.
+On LR11x0 the same check applies, for the same reason. The first version of this used
+`len == 0 && RX_DONE` there instead, on the assumption that a zero length is unambiguous
+on that family. Hardware says otherwise: on a T1000-E that state occurs 25 times in three
+minutes, roughly one per two and a half received frames, and re-reading recovers nothing
+in any of them - 0 out of 25. So the zero is usually honest, and only the status can tell
+it apart from a stale reply. The existing `len == 0 && HEADER_ERR` handling is left
+untouched.
 
 Both overrides use only public API and protected members of the base class, so no
 `RADIOLIB_GODMODE` is needed.
@@ -181,9 +184,14 @@ skips the BUSY wait on every fourth length read, in the real receive path.
 - On genuine frames whose length happened to equal `irq[31:16]`, the status reported
   `CMD_DAT` and the guard correctly stayed out of the way.
 
-LR11x0 is not verified on hardware - the mechanism is derived from the driver code and
-the affected code path is shared with LR2021. Anyone with an LR11x0 board can check it
-cheaply: a length of 0 while RX_DONE is set is the signature, and reading the length
-again immediately afterwards returns the real value.
+LR11x0 verified on hardware as well, on a Seeed T1000-E on the same channel, the same
+way - the BUSY wait skipped on every fourth length read:
+
+- 4 of 4 sabotaged reads came back as 0 and reported `CMD_OK`; the re-read returned the
+  true length each time, recovering 84, 20 and 196 byte frames.
+- Genuine reads reporting a length of 0 - 25 of them in three minutes, with the IRQ word
+  at 0x38, 0x78 (header error) or 0xB8 (CRC error) - all reported `CMD_DAT`, and a probe
+  doing three extra reads on each recovered nothing. That is what ruled out the
+  value-based rule for this family.
 
 Builds clean: `t1000e_repeater`, `wio_wm1110_repeater`, `MeshTracker_X1_repeater`.
