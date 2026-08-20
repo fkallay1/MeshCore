@@ -108,6 +108,9 @@ class CustomLR2021 : public LR2021 {
     //sk: odtlačok zastaralej odpovede. Skutočný rámec, ktorého dĺžka sa náhodou zhoduje,
     //sk: stojí len pár čítaní navyše a vráti sa nezmenený.
     size_t getPacketLength(bool update = true) override {
+#ifdef FK_LR2021_SPI_DIAG
+      return fkDiagPktLen(update);
+#else
       size_t len = 0;
       for (int i = 0; i < 4; i++) {
         uint16_t stale = (uint16_t)(getIrqStatus() >> 16);
@@ -120,6 +123,7 @@ class CustomLR2021 : public LR2021 {
         _stale_pktlen_reads++;
       }
       return len;
+#endif
     }
 
     //en: how many stale answers had to be re-read (0 = the race never hit)
@@ -156,6 +160,73 @@ class CustomLR2021 : public LR2021 {
       if (stat) *stat = buff[0];
       if (val)  *val  = ((uint16_t)buff[2] << 8) | (uint16_t)buff[3];
       return st;
+    }
+#endif
+
+#ifdef FK_LR2021_SPI_DIAG
+    //en: Ring buffer of guard events. NOTHING is printed from here - this sits in the
+    //en: RX hot path and a Serial write would stall reception (the classic trap in this
+    //en: codebase). 'fk spifix' dumps it later, from the CLI.
+    //sk: Kruhovy buffer udalosti guardu. Odtialto sa NIC netlaci - sme v horucej RX
+    //sk: ceste a zapis do Serialu by zastavil prijem (klasicka pasca tohto kodu).
+    //sk: Vypise to az 'fk spifix' z CLI.
+    struct FkSpiEvent {
+      uint16_t fp;      //en: fingerprint = irq[31:16] before the read
+      uint16_t first;   //en: value the first read returned
+      uint16_t final;   //en: value finally used
+      uint8_t  stat;    //en: stat1 of the read that produced 'first'
+      uint8_t  tries;   //en: how many reads it took
+      uint8_t  rule;    //en: bit0 = CMD_DAT rule fired, bit1 = fingerprint rule fired
+    };
+    static const uint8_t FK_SPI_EVENTS = 8;
+    FkSpiEvent _ev[FK_SPI_EVENTS];
+    uint8_t _ev_count = 0, _ev_write = 0, _ev_total = 0;
+
+    //en: A/B of the two rules on live traffic, on the real failing read.
+    //en:  - CMD_DAT rule (proposed upstream): a read reply is ours only when stat1's
+    //en:    command status says "data is being transmitted". Needs the status byte of
+    //en:    the very read that produced the value, which is why the read is done here
+    //en:    rather than through LR2021::getPacketLength().
+    //en:  - fingerprint rule (what we ship): value == irq[31:16]. Cannot tell a real
+    //en:    68 from a stale 68, so it can fire on a genuine frame.
+    //en: Whatever happens, fall back to the library read so we never end up worse.
+    //sk: A/B oboch pravidiel na zivej premavke, na tom skutocne chybnom citani.
+    //sk:  - pravidlo CMD_DAT (navrhnute upstreamu): odpoved je nasa len ked command
+    //sk:    status v stat1 hlasi "data is being transmitted". Potrebuje status bajt
+    //sk:    prave toho citania, ktore hodnotu vyrobilo - preto sa cita tu a nie cez
+    //sk:    LR2021::getPacketLength().
+    //sk:  - pravidlo odtlacku (to, co posielame): hodnota == irq[31:16]. Nerozlisi
+    //sk:    realnu 68 od zastaralej 68, takze moze vystrelit aj na dobrom ramci.
+    //sk: V kazdom pripade sa nakoniec spadne na kniznicne citanie, aby sme na tom
+    //sk: nikdy neboli horsie.
+    size_t fkDiagPktLen(bool update) {
+      uint8_t  stat0 = 0, stat = 0, tries = 0;
+      uint16_t fp = 0, val = 0, first = 0;
+      bool cmd_flagged = false, fp_flagged = false;
+
+      for (tries = 1; tries <= 4; tries++) {
+        fp = (uint16_t)(getIrqStatus() >> 16);
+        fkRawPktLen(true, &stat, &val);
+        if (tries == 1) { first = val; stat0 = stat; }
+        if (fp != 0 && val == fp) fp_flagged = true;
+        if (((stat >> 1) & 0x03) == 0x03) break;   //en: CMD_DAT -> reply belongs to us
+        cmd_flagged = true;
+      }
+
+      size_t len = val;
+      if (((stat >> 1) & 0x03) != 0x03) len = LR2021::getPacketLength(update);
+
+      if (cmd_flagged || fp_flagged) {
+        _stale_pktlen_reads++;
+        _ev_total++;
+        FkSpiEvent& e = _ev[_ev_write];
+        e.fp = fp; e.first = first; e.final = (uint16_t)len;
+        e.stat = stat0; e.tries = tries > 4 ? 4 : tries;
+        e.rule = (cmd_flagged ? 1 : 0) | (fp_flagged ? 2 : 0);
+        _ev_write = (uint8_t)((_ev_write + 1) % FK_SPI_EVENTS);
+        if (_ev_count < FK_SPI_EVENTS) _ev_count++;
+      }
+      return len;
     }
 #endif
 

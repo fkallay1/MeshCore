@@ -527,6 +527,7 @@ Aby sa dal modul skúšať bez neustáleho preflashovania. Vyžaduje aj
 | `fk pram` | stav PRAM (magic + verzia) |
 | `fk pram load` | (znova) nahrá patch, ak je build s `LR2021_PRAM_UPD` |
 | `fk stale` | A/B test pretečenej SPI odpovede — flag `FK_LR2021_SPI_DIAG` |
+| `fk spifix` | posledných 8 spustení guardu: ktoré pravidlo, aké hodnoty — flag `FK_LR2021_SPI_DIAG` |
 
 ### Diagnostika rádia — flag `LORA_RADIO_DIAG_CLI` (nezávislý od typu rádia)
 
