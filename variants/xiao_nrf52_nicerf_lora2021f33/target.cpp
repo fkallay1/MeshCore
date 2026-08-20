@@ -116,7 +116,7 @@ bool nicerfTestCliCommand(char* command, char* reply) {
     return true;
   }
 
-#if defined(RADIOLIB_GODMODE) && defined(FK_LR2021_SPI_DIAG)
+#if defined(RADIOLIB_GODMODE) && defined(FK_RADIO_SPI_DIAG)
   //en: 'fk inject <n>' - skip the BUSY wait on every n-th length read (0 = off), and
   //en: 'fk pretype on|off' - call getPacketType() before the length read, which is what
   //en: the library path does. Both are experiment switches, see CustomLR2021.
@@ -142,7 +142,7 @@ bool nicerfTestCliCommand(char* command, char* reply) {
   }
 #endif
 
-#if defined(RADIOLIB_GODMODE) && defined(FK_LR2021_SPI_DIAG)
+#if defined(RADIOLIB_GODMODE) && defined(FK_RADIO_SPI_DIAG)
   //en: 'fk spifix' - dump the guard's ring buffer (see CustomLR2021::fkDiagPktLen).
   //en: rule tells which rule flagged the read: CMD = the status said the reply was not
   //en: ours (the fix proposed upstream), FP = the value equalled irq[31:16] (the
@@ -181,7 +181,7 @@ bool nicerfTestCliCommand(char* command, char* reply) {
   }
 #endif
 
-#if defined(RADIOLIB_GODMODE) && defined(FK_LR2021_SPI_DIAG)
+#if defined(RADIOLIB_GODMODE) && defined(FK_RADIO_SPI_DIAG)
   //en: 'fk stale' - A/B test of the two-transaction read behind every "get" command.
   //en: Eight reads with the BUSY wait deliberately skipped, then one proper read as a
   //en: reference. fp = top half of the IRQ word, which is what a stale reply returns

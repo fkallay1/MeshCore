@@ -38,13 +38,13 @@ sám podčiarkne ako neplatný odkaz.
 - **FOTA balíčky 1.16 → aktuál** — veľkosti sa zmestili (patch 31–37 kB, extraSafe pod 32 kB)
   - ↳ [fcl_readme_fota_extrasafe.md § Aktuálne riešenie](fcl_readme_fota_extrasafe.md#3-aktuálne-riešenie-build--265-commit-na-featuresnrf-fota)
 - **Watchdog rádia** — tri pokusy o detekciu boli mylné, funguje až pasívne RSSI okno z noise-floor vzorkovača
-  - ↳ [fcl_readme_nicerf_lora2021.md § Watchdog rádia](fcl_readme_nicerf_lora2021.md#watchdog-rádia--flag-lora_radio_watchdog-nezávislý-od-typu-rádia)
+  - ↳ [fcl_readme_nicerf_lora2021.md § Watchdog rádia](fcl_readme_nicerf_lora2021.md#watchdog-rádia--flag-fk_radio_watchdog-nezávislý-od-typu-rádia)
 - **`isChipResponding()` na SX1262** — vadné, 0 z 6000; watchdog ho už nepoužíva
-  - ↳ [fcl_readme_nicerf_lora2021.md § Watchdog rádia](fcl_readme_nicerf_lora2021.md#watchdog-rádia--flag-lora_radio_watchdog-nezávislý-od-typu-rádia)
+  - ↳ [fcl_readme_nicerf_lora2021.md § Watchdog rádia](fcl_readme_nicerf_lora2021.md#watchdog-rádia--flag-fk_radio_watchdog-nezávislý-od-typu-rádia)
 - **Metrika `n`** — nie je konštanta 960, pri nekonvergujúcom floore vyskočí (`n=92950`)
   - ↳ [fcl_readme_nicerf_lora2021.md § Metrika n nie je konštanta](fcl_readme_nicerf_lora2021.md#metrika-n-nie-je-konštanta)
 - **Nové CLI `fk win`** — prečíta pasívne okno na požiadanie; sériové CLI vyžaduje `\r`, nie `\n`
-  - ↳ [fcl_readme_nicerf_lora2021.md § Diagnostika rádia](fcl_readme_nicerf_lora2021.md#diagnostika-rádia--flag-lora_radio_diag_cli-nezávislý-od-typu-rádia)
+  - ↳ [fcl_readme_nicerf_lora2021.md § Diagnostika rádia](fcl_readme_nicerf_lora2021.md#diagnostika-rádia--flag-fk_radio_diag_cli-nezávislý-od-typu-rádia)
 - **Filter `FK_DEBUG_MAXPATH=4`** — skrýval prevádzku (uzol chodí cez 9–13 hopov), odstránený
   - ↳ [fcl_readme_nrf-fota.md § FK_DEBUG_MAXPATH môže skryť prevádzku](fcl_readme_nrf-fota.md#fk_debug_maxpath-môže-skryť-prevádzku)
 - **I2C displej** — pridaný výpis `display.begin()`; zlyhanie bolo hardvérové, nie firmvérové
@@ -90,7 +90,7 @@ sám podčiarkne ako neplatný odkaz.
 - **Párovanie len cez `cse_` ID** — moja chyba: zhoda názvu dávala falošné „máme"; jedna session mohla byť bridgnutá viackrát, každá epizóda má vlastný výrez
   - ↳ bez projektovej dokumentácie — `~/.claude/docs/session-recovery.md`
 
-**Otvorené na ďalej:** watchdog ostáva v `LORA_RADIO_DIAG_ONLY` (zasahovacia vetva
+**Otvorené na ďalej:** watchdog ostáva v `FK_RADIO_DIAG_ONLY` (zasahovacia vetva
 neoverená proti skutočnej poruche) · parazitné napájanie cez J-Link čaká na meranie
 multimetrom · krížový test adverts medzi ProMicro a nicerf nebol dokončený ·
 sessions, ktoré nikdy neboli na webe, sa obnoviť nedajú — ostávajú len zadania

@@ -25,10 +25,13 @@
       "kind": "t1000e",
       "path_to": "632139779C"
     },
+    "t1000e-local": { "role": "target", "transport": "com", "port": "COM22", "dfu_port": "COM23",
+                      "hub_port": 7422, "kind": "t1000e" },
     "xiao-nicerf": {
       "role": "target",
       "transport": "com",
       "port": "COM21",
+      "dfu_port": "COM20",
       "hub_port": 7421,
       "kind": "xiao-nicerf"
     },

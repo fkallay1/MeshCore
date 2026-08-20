@@ -382,8 +382,8 @@ len to nie je odskúšané na železe.
 
 ⚠️ V zdieľanom bloku `[Xiao_nrf52_nicerf_lora2021f33]` smie
 byť len **definícia hardvéru** (piny, TCXO, PA tabuľka, `MAX_LORA_TX_POWER`).
-Všetko ostatné — `LORA_RADIO_WATCHDOG`, `LORA_RADIO_DIAG_ONLY`,
-`LORA_RADIO_DIAG_CLI`, `RADIOLIB_GODMODE`, `FK_NICERF_LORA2021F33_TEST`,
+Všetko ostatné — `FK_RADIO_WATCHDOG`, `FK_RADIO_DIAG_ONLY`,
+`FK_RADIO_DIAG_CLI`, `RADIOLIB_GODMODE`, `FK_NICERF_LORA2021F33_TEST`,
 `LR2021_PRAM_UPD`, `NICERF_LORA2021F33_SIMO` — patrí **iba do FOTA envu**, aby
 `..._repeater` ostal de facto štandardný repeater bez našich zmien. Do 2026-08-16
 to bolo v zdieľanom bloku a pretekalo do oboch. ProMicro to mal správne od
@@ -437,7 +437,7 @@ Známa vrtochovitosť je ošetrená v `RadioLibWrappers.cpp`: so zapnutými side
 detektormi vracal LR2021 `-706` pri `startReceive()` po hardvérovom CAD, preto sa
 tam volá `standby()` navyše.
 
-## Watchdog rádia — flag `LORA_RADIO_WATCHDOG` (nezávislý od typu rádia)
+## Watchdog rádia — flag `FK_RADIO_WATCHDOG` (nezávislý od typu rádia)
 
 **Problém:** keď rádio ticho odumrie, MeshCore to nezistí. Uzol beží ďalej,
 vypisuje heartbeaty a nepreposiela nič, kým ho niekto fyzicky nereštartuje.
@@ -511,11 +511,11 @@ Rozhodovanie a obnova sú v `examples/simple_repeater/MyMesh.cpp`
 (`radioWatchdogLoop()`). Zber vzoriek si však vyžiadal **zásah do jadra** —
 `src/helpers/radiolib/RadioLibWrappers.{h,cpp}`, dva riadky min/max vo
 vzorkovači noise-floor plus `takeRssiWindow()`. Celé je to pod
-`#ifdef LORA_RADIO_WATCHDOG`, takže bez toho flagu je diff voči upstreamu
+`#ifdef FK_RADIO_WATCHDOG`, takže bez toho flagu je diff voči upstreamu
 prázdny a merge nebolí. Funguje na každej doske, lebo `radio_init()` má každý
 variant. Kandidát na upstream.
 
-**Režim merania:** `LORA_RADIO_DIAG_ONLY=1` = meraj a hlás, nikdy nezasahuj.
+**Režim merania:** `FK_RADIO_DIAG_ONLY=1` = meraj a hlás, nikdy nezasahuj.
 Nechať zapnutý, kým sa zasahovacia vetva neoverí proti skutočnej poruche —
 tri predchádzajúce pokusy o detekciu stáli na predpokladoch a všetky tri boli
 zlé, takže tu platí: najprv merať, potom veriť.
@@ -533,10 +533,10 @@ Aby sa dal modul skúšať bez neustáleho preflashovania. Vyžaduje aj
 | `fk ce on\|off` | vypne/zapne celý modul cez jeho LDO enable (pin CE) |
 | `fk pram` | stav PRAM (magic + verzia) |
 | `fk pram load` | (znova) nahrá patch, ak je build s `LR2021_PRAM_UPD` |
-| `fk stale` | A/B test pretečenej SPI odpovede — flag `FK_LR2021_SPI_DIAG` |
-| `fk spifix` | posledných 8 spustení guardu: ktoré pravidlo, aké hodnoty — flag `FK_LR2021_SPI_DIAG` |
+| `fk stale` | A/B test pretečenej SPI odpovede — flag `FK_RADIO_SPI_DIAG` |
+| `fk spifix` | posledných 8 spustení guardu: ktoré pravidlo, aké hodnoty — flag `FK_RADIO_SPI_DIAG` |
 
-### Diagnostika rádia — flag `LORA_RADIO_DIAG_CLI` (nezávislý od typu rádia)
+### Diagnostika rádia — flag `FK_RADIO_DIAG_CLI` (nezávislý od typu rádia)
 
 Tieto fungujú na SX126x aj LR2021 a nepotrebujú `RADIOLIB_GODMODE`.
 

@@ -143,7 +143,7 @@ class CustomLR2021 : public LR2021 {
     //sk: spravne hlasil CMD_DAT. Rozhodovat len podla tej hodnoty - ako to robila
     //sk: predosla verzia - teda strieľa aj na dobrych ramcoch, a preto tu rozhoduje status.
     size_t getPacketLength(bool update = true) override {
-#ifdef FK_LR2021_SPI_DIAG
+#ifdef FK_RADIO_SPI_DIAG
       return fkDiagPktLen(update);
 #else
       uint8_t  stat = 0;
@@ -164,7 +164,7 @@ class CustomLR2021 : public LR2021 {
     uint32_t getStalePktLenReads() const { return _stale_pktlen_reads; }
 
 
-#ifdef FK_LR2021_SPI_DIAG
+#ifdef FK_RADIO_SPI_DIAG
     //en: Ring buffer of guard events. NOTHING is printed from here - this sits in the
     //en: RX hot path and a Serial write would stall reception (the classic trap in this
     //en: codebase). 'fk spifix' dumps it later, from the CLI.

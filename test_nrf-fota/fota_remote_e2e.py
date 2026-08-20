@@ -474,6 +474,30 @@ def cmd_setup(cfg, args):
 
 # ────────────────────────── operácie ──────────────────────────
 
+#sk: 1200-baudove otvorenie portu = signal pre Adafruit bootloader "prejdi do DFU".
+#sk: Zavriet ho treba bez DTR, inak sa reset nespusti.
+def touch_1200(port):
+    import serial
+    try:
+        with serial.Serial(port, 1200) as sp:
+            sp.dtr = False
+        log(f"touch 1200 na {port}")
+    except Exception as e:
+        log(f"touch na {port} zlyhal ({e}) — zariadenie uz moze byt v bootloaderi")
+    time.sleep(1.0)
+
+
+#sk: Caka, kym sa COM port objavi v systeme (bootloader sa enumeruje az po resete).
+def wait_for_port(port, timeout_s):
+    import serial.tools.list_ports
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        if any(p.device.upper() == port.upper() for p in serial.tools.list_ports.comports()):
+            return True
+        time.sleep(0.3)
+    return False
+
+
 def cmd_hub(cfg, args):
     """Spustí fota_serial_hub.py pre zariadenie v novom okne (beží ďalej sám)."""
     dev = get_device(cfg, args.device or cfg["defaults"]["target"])
@@ -590,10 +614,31 @@ def flash_one(cfg, dev, args):
             hub_paused = True
             time.sleep(1.5)
             log("hub PAUSED — port uvoľnený na DFU")
+        #sk: Dosky, ktorych bootloader ma inu USB identitu nez aplikacia (XIAO, T1000-E),
+        #sk: sa v bootloaderi hlasia na INOM COM porte. nrfutil vie tychnut aj flashovat
+        #sk: len jeden port, takze pri nich zlyha uz na tom, ze aplikacny port po tychnuti
+        #sk: zmizne. Ak ma zariadenie v configu 'dfu_port', tychneme rucne na 'port' a DFU
+        #sk: spustime az na 'dfu_port', ked sa objavi. ProMicro dfu_port nepotrebuje —
+        #sk: jeho bootloader ma tu istu identitu, takze zostava na tom istom cisle.
+        dfu_port = dev.get("dfu_port")
         try:
+            if dfu_port:
+                touch_1200(dev["port"])
+                if not wait_for_port(dfu_port, 15):
+                    sys.exit(f"[CHYBA] bootloader sa neobjavil na {dfu_port} do 15 s")
+                log(f"bootloader na {dfu_port}")
+                args = ["-p", dfu_port]
+            else:
+                args = ["-p", dev["port"], "--touch", "1200"]
             r = subprocess.run([nrfutil, "dfu", "serial", "--package", str(zpath),
-                                "-p", dev["port"], "-b", "115200", "--singlebank", "--touch", "1200"],
+                                "-b", "115200", "--singlebank"] + args,
                                capture_output=True, text=True, timeout=420)
+            #sk: prvy pokus na bootloader niekedy zlyha na handshaku, druhy identicky prejde
+            if "Device programmed" not in (r.stdout or ""):
+                log("DFU: prvy pokus zlyhal, opakujem")
+                r = subprocess.run([nrfutil, "dfu", "serial", "--package", str(zpath),
+                                    "-b", "115200", "--singlebank"] + args,
+                                   capture_output=True, text=True, timeout=420)
         finally:
             if hub_paused:
                 time.sleep(3)

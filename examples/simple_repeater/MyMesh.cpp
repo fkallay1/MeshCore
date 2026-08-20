@@ -1491,7 +1491,7 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
   } else if (fotaHandleCliCommand(command, reply)) {
     //en: FOTA CLI ('fota …' / legacy 'ota …') — nrffota/FotaMyMesh.cpp
 #endif
-#ifdef LORA_RADIO_DIAG_CLI
+#ifdef FK_RADIO_DIAG_CLI
   } else if (radioDiagCliCommand(command, reply)) {
     //en: radio-agnostic bench diagnostics ('fk rssi|hammer|reinit')
 #endif
@@ -1504,7 +1504,7 @@ void MyMesh::handleCommand(uint32_t sender_timestamp, char *command, char *reply
   }
 }
 
-#ifdef LORA_RADIO_WATCHDOG
+#ifdef FK_RADIO_WATCHDOG
 /*
   Detect a radio that has stopped answering, and re-initialise it.
 
@@ -1553,7 +1553,7 @@ void MyMesh::radioSampleRssi(int n, int* out_min, int* out_max) {
   *out_min = lo; *out_max = hi;
 }
 
-#ifdef LORA_RADIO_DIAG_CLI
+#ifdef FK_RADIO_DIAG_CLI
 /*
   Bench diagnostics, radio-agnostic (works on SX126x and LR2021 alike):
     fk rssi [n]    - ACTIVE burst of n RSSI samples (default 32), min/max/spread
@@ -1628,7 +1628,7 @@ bool MyMesh::radioDiagCliCommand(char* command, char* reply) {
 
 void MyMesh::radioWatchdogLoop() {
   if (!millisHasNowPassed(next_radio_check)) return;
-  next_radio_check = futureMillis(LORA_RADIO_WATCHDOG);
+  next_radio_check = futureMillis(FK_RADIO_WATCHDOG);
 
   //en: The first call lands on the first loop() after boot, when the sampler has
   //en: had no chance to collect anything yet - that reads as 'no samples' and
@@ -1663,7 +1663,7 @@ void MyMesh::radioWatchdogLoop() {
   //en:                 0xFF forever (and LR2021 gave -255 dBm with its supply cut).
   bool dead = (samples == 0) || (spread == 0);
 
-#ifdef LORA_RADIO_DIAG_ONLY
+#ifdef FK_RADIO_DIAG_ONLY
   //en: OBSERVATION MODE - measure and report, never act. Used to learn what a
   //en: healthy radio actually looks like on each chip before trusting the rule.
   Serial.printf("[FK] rssi-window n=%lu min=%d max=%d spread=%d%s\r\n",
@@ -1715,7 +1715,7 @@ void MyMesh::loop() {
 
   mesh::Mesh::loop();
 
-#ifdef LORA_RADIO_WATCHDOG
+#ifdef FK_RADIO_WATCHDOG
   radioWatchdogLoop();
 #endif
 
