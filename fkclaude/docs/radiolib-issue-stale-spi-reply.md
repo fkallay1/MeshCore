@@ -76,24 +76,34 @@ mod->SPIreadStream(RADIOLIB_LRXXXX_CMD_NOP, buff, sizeof(buff), false, false);
 // buff[0..1] = status word, buff[2..3] = the reply - or the top half of the IRQ word
 ```
 
-Measured on the board, eight reads with the wait skipped followed by one proper read,
-repeated four times. `cmd` is the command status field of stat1, bits 3:1:
+Measured that way on the bench, eight reads with the wait skipped followed by one
+proper read, repeated four times. `cmd` is the command status field of stat1, bits 3:1:
 
 ```
 nowait  stat=04  cmd=2 (CMD_OK)   val=0    <- top half of the IRQ word, not the length
-nowait  stat=04  cmd=2 (CMD_OK)   val=0
-...   32 reads, all identical
 wait    stat=06  cmd=3 (CMD_DAT)  val=50   <- the real length of the last packet
 ```
 
-So 32 out of 32 early reads returned the status stream, and every one of them reported
-`CMD_OK`; the properly waited reads reported `CMD_DAT` and the correct length. The
-fingerprint is 0 in this bench test because the IRQ word had already been cleared by
-the preceding `readData()`. In the live failure the RX_DONE flag is still pending, which
-is where the value 4 comes from.
+32 out of 32 early reads returned the status stream and every one reported `CMD_OK`;
+the properly waited reads reported `CMD_DAT` and the correct length.
 
-Reading the length again after a stale reply returns the correct value, which also
-confirms that the Rx buffer still holds the packet at that point.
+The same thing measured in the live receive path is more convincing. Skipping the wait
+on every fourth length read, in a working mesh at SF7:
+
+```
+first=4  stat=05  cmd=2 (CMD_OK)   -> re-read returned 63, 65, 67, 73, ...
+```
+
+11 of 11 sabotaged reads returned exactly 4 with `CMD_OK`, the re-read returned the
+true length every time, and the node received the same traffic as a second receiver on
+the same channel - no bogus lengths, no receive errors - even though a quarter of its
+length reads had been broken on purpose.
+
+Worth adding, since it is the reason the status matters rather than just the value:
+comparing the returned length against irq[31:16] looks like a cheap way to detect this
+without the status byte, but 68 is both a common frame length and what irq[31:16] reads
+when RX_DONE and CRC_ERROR are set together. On such frames that comparison fires while
+the status correctly reports `CMD_DAT`. Measured as well.
 
 **Expected behavior**
 
@@ -103,9 +113,9 @@ the requested data without any indication.
 
 **Possible directions**
 
-The chip already reports whether a reply is on its way, and the measurement above shows
-it discriminates cleanly. The command status field in stat1 has four values, and
-`LRxxxx::SPIparseStatus()` currently only rejects two of them:
+The chip already reports whether a reply is on its way, and the measurements above show
+it discriminates in both directions. The command status field in stat1 has four values,
+and `LRxxxx::SPIparseStatus()` currently only rejects two of them:
 
 ```c++
 if((in & 0b00001110) == RADIOLIB_LRXXXX_STAT_1_CMD_PERR) { ... }
@@ -114,9 +124,10 @@ else if((in & 0b00001110) == RADIOLIB_LRXXXX_STAT_1_CMD_FAIL) { ... }
 
 `CMD_OK` ("successfully processed") and `CMD_DAT` ("successfully processed, data is
 being transmitted") are both accepted as success. On the read transaction of a get
-command, `CMD_DAT` is the only correct one - and a stale reply reported `CMD_OK` in all
-32 measured cases. Checking for it would catch this without any timing change, and
-would cover every get command rather than just the length.
+command, `CMD_DAT` is the only correct one - and every stale reply measured reported
+`CMD_OK`, while every genuine one reported `CMD_DAT`. Checking for it would catch this
+without any timing change, and would cover every get command rather than just the
+length.
 
 The callback only receives the status byte, so it cannot tell a read from a write on
 its own; it would need either a flag in the SPI config saying a data reply is expected,
@@ -127,15 +138,10 @@ before waiting for it to fall, bounded by a short timeout for the case where the
 has already completed by the time sampling starts.
 
 Either way it would be good if the failure were visible to the caller, rather than
-arriving as data that looks legitimate.
-
-And if touching the transport is not wanted at all, the length read alone can be made
-safe from the outside, because that one has a fingerprint to test against: compare the
-value returned against the top bytes of the IRQ word and, when they match, read it
-again. That is what the application this was found in does now, and it recovers the
-frames. It is a workaround rather than a fix - it costs an extra status read per packet
-and it does nothing for the other get commands, which have no fingerprint - but it is
-cheap and it needs no driver change.
+arriving as data that looks legitimate. An application can work around the length read
+from the outside, by doing the two transactions itself and keeping the status byte, but
+that only helps the one call it wraps - the other get commands stay exposed, and a wrong
+RSSI or SNR has no signature to test against at all.
 
 **Additional info**
 
