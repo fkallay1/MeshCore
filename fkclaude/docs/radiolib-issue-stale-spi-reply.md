@@ -87,12 +87,33 @@ the requested data without any indication.
 
 **Possible directions**
 
-Rather than guess at the right fix, a few options that seem open, in case it helps the
-discussion: wait for BUSY to actually rise before waiting for it to fall, with a bounded
-timeout for the case where the command has already completed; or make the reply read
-verifiable, so a caller can tell a real answer from the status stream; or, at minimum,
-document that these reads can return stale data so applications can guard the ones that
-matter.
+The chip already reports whether a reply is on its way. The command status field in
+stat1 has four values, and `LRxxxx::SPIparseStatus()` currently only rejects two of
+them:
+
+```c++
+if((in & 0b00001110) == RADIOLIB_LRXXXX_STAT_1_CMD_PERR) { ... }
+else if((in & 0b00001110) == RADIOLIB_LRXXXX_STAT_1_CMD_FAIL) { ... }
+```
+
+`CMD_OK` ("successfully processed") and `CMD_DAT` ("successfully processed, data is
+being transmitted") are both accepted as success. On the read transaction of a get
+command, `CMD_DAT` is the only correct one - `CMD_OK` means there is no reply to
+collect, which is exactly the case where the default status stream is returned
+instead. Checking for it on the second transaction would catch this without any
+timing changes, and would cover every get command rather than just the length.
+
+The callback only receives the status byte, so it cannot tell a read from a write on
+its own; it would need either a flag in the SPI config saying a data reply is
+expected, or a separate check in the read branch of `LRxxxx::SPIcommand()`.
+
+If the status turns out not to discriminate reliably in this state, the alternative is
+in the handshake itself: wait for BUSY to actually rise before waiting for it to fall,
+bounded by a short timeout for the case where the command has already completed by the
+time we start sampling.
+
+Either way it would be good if the failure were visible to the caller, rather than
+arriving as data that looks legitimate.
 
 **Additional info**
 
