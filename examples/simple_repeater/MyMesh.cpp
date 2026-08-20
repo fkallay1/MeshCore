@@ -1576,6 +1576,37 @@ bool MyMesh::radioDiagCliCommand(char* command, char* reply) {
   const char* arg = command + 3;
 
 #ifdef FK_RADIO_SPI_DIAG
+  //en: 'fk zero <n>' - make every n-th length read return 0 (0 = off), which sends
+  //en: recvRaw() down its bail-out path: no readData(), so nothing clears the IRQ flags.
+  //en: 'fk irq' - current IRQ word, the level of the IRQ line and the wrapper state, to
+  //en: see what that bail-out left behind.
+  //sk: 'fk zero <n>' - kazde n-te citanie dlzky vrati 0 (0 = vyp), cim posle recvRaw()
+  //sk: do vetvy bez readData(), takze IRQ priznaky nikto nevycisti.
+  //sk: 'fk irq' - aktualne IRQ slovo, uroven IRQ linky a stav wrappera, aby bolo vidiet,
+  //sk: co po tom bail-oute zostalo.
+  if (memcmp(arg, "zero", 4) == 0) {
+    const char* n = arg + 4;
+    while (*n == ' ') n++;
+    if (*n) radio._fk_zero = (uint16_t)atoi(n);
+    radio._fk_zero_cnt = 0;
+    sprintf(reply, "zero=%u (0 = vyp) - kazde n-te citanie dlzky vrati 0",
+            (unsigned)radio._fk_zero);
+    return true;
+  }
+  if (memcmp(arg, "irq", 3) == 0) {
+    uint32_t irq = 0;
+    uint8_t dio = 2;
+    radio.fkIrqState(&irq, &dio);
+    sprintf(reply, "irq=0x%lX dio=%s rawrx=%lu rxerr=%lu",
+            (unsigned long)irq,
+            dio == 2 ? "n/a" : (dio ? "HIGH" : "low"),
+            (unsigned long)radio_driver.getPacketsRecv(),
+            (unsigned long)radio_driver.getPacketsRecvErrors());
+    return true;
+  }
+#endif
+
+#ifdef FK_RADIO_SPI_DIAG
   //en: 'fk busy [n]' - can the MCU see BUSY high after an opcode? n runs, default 8.
   //sk: 'fk busy [n]' - vidi MCU BUSY vysoko po opcode? n behov, default 8.
   if (memcmp(arg, "busy", 4) == 0) {

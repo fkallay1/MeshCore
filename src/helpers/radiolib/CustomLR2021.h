@@ -228,6 +228,7 @@ class CustomLR2021 : public LR2021 {
     //sk:                citacie prikazy hned za sebou. Testuje, ci prave tato sekvencia
     //sk:                pretecenie spusta.
     uint16_t _fk_inject = 0, _fk_inject_cnt = 0;
+    uint16_t _fk_zero = 0, _fk_zero_cnt = 0;
     bool _fk_pretype = false;
 
     size_t fkDiagPktLen(bool update) {
@@ -238,6 +239,13 @@ class CustomLR2021 : public LR2021 {
 
       bool inject = false;
       if (_fk_inject && ++_fk_inject_cnt >= _fk_inject) { _fk_inject_cnt = 0; inject = true; }
+      //en: force the len==0 bail-out path in recvRaw() - it skips readData(), so nothing
+      //en: clears the IRQ flags. On this wrapper LR2021 also does not re-arm Rx, so the
+      //en: question is whether the flags (and the DIO line) stay asserted afterwards.
+      //sk: vynut cestu s nulovou dlzkou v recvRaw() - tam sa readData() preskoci, takze
+      //sk: IRQ priznaky nikto nevycisti. LR2021 sa navyse v tomto wrapperi nerearmuje,
+      //sk: takze otazka je, ci priznaky (a linka DIO) ostanu svietit.
+      if (_fk_zero && ++_fk_zero_cnt >= _fk_zero) { _fk_zero_cnt = 0; return 0; }
 #if RADIOLIB_GODMODE
       if (_fk_pretype) { uint8_t t = 0; (void)getPacketType(&t); }
 #endif
@@ -304,6 +312,16 @@ class CustomLR2021 : public LR2021 {
       }
     }
 #endif
+
+    //en: current IRQ word and the level of the IRQ line, for checking whether a
+    //en: zero-length read left the flags (and the line) asserted.
+    //sk: aktualne IRQ slovo a uroven IRQ linky, na overenie, ci nulove citanie
+    //sk: nechalo priznaky (a linku) svietit.
+    void fkIrqState(uint32_t* irq, uint8_t* dio) {
+      if (irq) *irq = getIrqStatus();
+      uint32_t p = mod->getIrq();
+      if (dio) *dio = (p == RADIOLIB_NC) ? 2 : (uint8_t)mod->hal->digitalRead(p);
+    }
 
     bool isReceiving() {
       uint32_t irq = getIrqStatus();
