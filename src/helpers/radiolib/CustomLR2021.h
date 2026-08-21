@@ -151,7 +151,11 @@ class CustomLR2021 : public LR2021 {
     //sk: spravne hlasil CMD_DAT. Rozhodovat len podla tej hodnoty - ako to robila
     //sk: predosla verzia - teda strieľa aj na dobrych ramcoch, a preto tu rozhoduje status.
     size_t getPacketLength(bool update = true) override {
-#ifdef FK_RADIO_SPI_DIAG
+#ifdef FK_STALE_GUARD_OFF
+      //en: test build for RadioLib issue 1857 - read the length through the library
+      //en: path so it goes via LRxxxx::SPIcommand(), where the BUSY wait fix lives.
+      return LR2021::getPacketLength(update);
+#elif defined(FK_RADIO_SPI_DIAG)
       return fkDiagPktLen(update);
 #else
       uint8_t  stat = 0;

@@ -66,7 +66,11 @@ class CustomLR1110 : public LR1110 {
     //sk: takze rozhoduje status a nie hodnota - tá sama nerozlisi skutocnu dlzku od
     //sk: nahodnej zhody.
     size_t getPacketLength(bool update) override {
-#ifdef FK_RADIO_SPI_DIAG
+#ifdef FK_STALE_GUARD_OFF
+      //en: test build for RadioLib issue 1857 - read the length through the library
+      //en: path so it goes via LRxxxx::SPIcommand(), where the BUSY wait fix lives.
+      size_t len = LR1110::getPacketLength(update);
+#elif defined(FK_RADIO_SPI_DIAG)
       size_t len = fkDiagPktLen(update);
 #else
       uint8_t  stat = 0;
