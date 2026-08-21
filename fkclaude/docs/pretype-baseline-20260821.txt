@@ -42,3 +42,43 @@ promicro-local   08:06:16.656 [FOTA]   AALIVE build #462  freq=869.618 sf=7 rawr
 t1000e-local     10:35:18.114 [FOTA]   AALIVE build #490  freq=869.618 sf=7 rawrx=3355 rawtx=664 rxpkts=3355 rxerr=28 spifix=459 stk_minfree=1400B nowused=508B/4096 isr=4509 miss=462 nf=-109
 xiao-nicerf      10:35:30.286 [FOTA]   AALIVE build #489  freq=869.618 sf=7 rawrx=4636 rawtx=3 rxpkts=4636 rxerr=99 spifix=0 isr=4739 miss=1 nf=-118
 promicro-local   10:35:31.774 [FOTA]   AALIVE build #462  freq=869.618 sf=7 rawrx=11952 rawtx=2 rxpkts=11952 rxerr=304 stk_minfree=1400B nowused=508B/4096 isr=12280 miss=22 nf=-106
+
+################################################################
+## FAZA CTRL — 2026-08-21 12:18:51
+## T1000-E: build #307, guard OFF (FK_STALE_GUARD_OFF), stary pin 6d893483,
+##          opravene citanie buff[1]/buff[2], 429252 B
+## XIAO   : NEDOTKNUTE, guard ON = oznackovany detektor pre LR2021
+## ProMicro: NEDOTKNUTE, stary RadioLib = referencia prijmu
+## Poradie faz na T1000-E: CTRL -> ISO (pin + len jeho commit) -> TREAT (jeho vetva)
+################################################################
+t1000e-local     12:18:30.523 [FOTA]   AALIVE build #307  freq=869.618 sf=7 rawrx=0 rawtx=1 rxpkts=0 rxerr=0 spifix=0 stk_minfree=1880B nowused=508B/4096 isr=1 miss=0 nf=-110
+xiao-nicerf      12:18:50.280 [FOTA]   AALIVE build #489  freq=869.618 sf=7 rawrx=5825 rawtx=3 rxpkts=5825 rxerr=115 spifix=0 isr=5944 miss=1 nf=-118
+promicro-local   12:18:39.645 [FOTA]   AALIVE build #462  freq=869.618 sf=7 rawrx=13022 rawtx=2 rxpkts=13022 rxerr=380 stk_minfree=1400B nowused=508B/4096 isr=13428 miss=24 nf=-106
+
+################################################################
+## FAZA NODIAG — 2026-08-21 17:38:53  VSETKY TRI OD NULY
+## Ciel: vidi sa preteka VOBEC? Je to jedina konfiguracia, ktora ju vidiet MOZE.
+## Preco: LR2021::getPacketLength aj LR11x0::getPacketLength si predradia
+##        getPacketType(), a nas DIAG cyklus getIrqStatus() - vsetky tri
+##        maskuju preteku. Guard bez DIAG vola readRxPktLenWithStatus() nahalo.
+## T1000-E #303 (LR11x0), XIAO #304 (LR2021): guard ON, DIAG OFF, stary pin
+## ProMicro #498 (SX1262): referencia prijmu
+## Detekcia: spifix=[1-9] = skutocna preteka (bez DIAG nie su FP falosne poplachy)
+################################################################
+t1000e-local     17:38:46.231 [FOTA]   AALIVE build #303  freq=869.618 sf=7 rawrx=58 rawtx=1 rxpkts=58 rxerr=0 spifix=0 stk_minfree=1408B nowused=508B/4096 isr=59 miss=0 nf=-109
+xiao-nicerf      17:38:43.958 [FOTA]   AALIVE build #304  freq=869.618 sf=7 rawrx=51 rawtx=1 rxpkts=51 rxerr=1 spifix=0 isr=53 miss=0 nf=-118
+promicro-local   17:38:41.054 [FOTA]   AALIVE build #498  freq=869.618 sf=7 rawrx=22 rawtx=1 rxpkts=22 rxerr=1 stk_minfree=1824B nowused=508B/4096 isr=24 miss=0 nf=-106
+
+################################################################
+## FAZA REPRO-445 — 2026-08-21 20:03:58
+## XIAO preflashnute na PUVODNY build #445 (z archivu, DFU zip vyrobeny z .bin)
+## #445 = build, na ktorom sa 20.8. pozoroval povodny symptom len=4.
+## Nema guard ani DIAG -> komolena dlzka PADNE DO RAW LOGU neopravena.
+## Detekcia: 'len=4 ' v RAW logu XIAO. Na LR2021 to NIE je platna dlzka
+##           (ProMicro minimum 12-14 B), takze samotny vyskyt je signal.
+## Krizove overenie: ten isty ramec podla first= na ProMicre/T1000-E.
+## T1000-E #303 a ProMicro #498 zostavaju nedotknute ako referencia.
+################################################################
+xiao-nicerf      20:03:40.101 [FOTA]   AALIVE build #445  freq=869.618 sf=7 rawrx=0 rawtx=1 rxpkts=0 rxerr=0 isr=1 miss=0 nf=-118
+t1000e-local     20:03:46.007 [FOTA]   AALIVE build #303  freq=869.618 sf=7 rawrx=1512 rawtx=1 rxpkts=1512 rxerr=4 spifix=0 stk_minfree=1400B nowused=508B/4096 isr=1522 miss=5 nf=-110
+promicro-local   20:03:44.147 [FOTA]   AALIVE build #498  freq=869.618 sf=7 rawrx=1482 rawtx=1 rxpkts=1482 rxerr=74 stk_minfree=1400B nowused=508B/4096 isr=1558 miss=1 nf=-107
