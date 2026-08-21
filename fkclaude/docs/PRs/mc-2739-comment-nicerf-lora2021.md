@@ -7,7 +7,7 @@ Cieľ bol: `meshcore-dev/MeshCore`, PR 2739 od `c03rad0r`.
 Príkaz (telo = len časť za posledným nadpisom Body; `rindex`, nie `index`):
 
 ```bash
-python -c "import io;p='fkclaude/docs/pr2739-nicerf-comment.md';s=io.open(p,encoding='utf-8').read();i=s.rindex(chr(35)*2+' Body')+7;io.open('body.md','w',encoding='utf-8',newline='').write(s[i:].lstrip(chr(10)))"
+python -c "import io;p='fkclaude/docs/PRs/mc-2739-comment-nicerf-lora2021.md';s=io.open(p,encoding='utf-8').read();i=s.rindex(chr(35)*2+' Body')+7;io.open('body.md','w',encoding='utf-8',newline='').write(s[i:].lstrip(chr(10)))"
 
 D:/FkDev/GHcli/bin/gh.exe pr comment 2739 --repo meshcore-dev/MeshCore --body-file body.md
 ```

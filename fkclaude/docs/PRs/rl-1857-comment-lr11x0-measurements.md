@@ -1,11 +1,11 @@
 # Komentar k RadioLib issue 1857 (doplnenie po merani na LR11x0)
 
-**NEODOSLANE.** Ciel: `jgromes/RadioLib`, issue 1857.
+**ODOSLANE 2026-08-20 22:16** ako komentar v RadioLib issue 1857.
 
 Prikaz (telo = len cast za poslednym nadpisom Body; `rindex`, nie `index`):
 
 ```bash
-python -c "import io;p='fkclaude/docs/radiolib-issue-1857-comment.md';s=io.open(p,encoding='utf-8').read();i=s.rindex(chr(35)*2+' Body')+7;io.open('body.md','w',encoding='utf-8',newline='').write(s[i:].lstrip(chr(10)))"
+python -c "import io;p='fkclaude/docs/PRs/rl-1857-comment-lr11x0-measurements.md';s=io.open(p,encoding='utf-8').read();i=s.rindex(chr(35)*2+' Body')+7;io.open('body.md','w',encoding='utf-8',newline='').write(s[i:].lstrip(chr(10)))"
 
 D:/FkDev/GHcli/bin/gh.exe issue comment 1857 --repo jgromes/RadioLib --body-file body.md
 ```

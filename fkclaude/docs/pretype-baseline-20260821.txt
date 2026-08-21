@@ -1,0 +1,44 @@
+# Baseline pre vyhodnotenie o 08:00 — zapisane 2026-08-21 03:00:04
+
+## promicro-local.log
+riadkov: 24729  bajtov: 3545960  posledna zmena: 2026-08-20 21:14:25
+21:14:04.894 [FOTA]   AALIVE build #462  freq=869.618 sf=7 rawrx=2082 rawtx=1 rxpkts=2082 rxerr=82 stk_minfree=1400B nowused=508B/4096 isr=2169 miss=4 nf=-105
+21:14:15.033 [FK] rssi-window n=960 min=-127 max=-101 spread=26
+
+## t1000e-local.log
+riadkov: 10209  bajtov: 1681145  posledna zmena: 2026-08-21 02:59:54
+02:59:54.247 [FOTA]   AALIVE build #490  freq=869.618 sf=7 rawrx=1231 rawtx=664 rxpkts=1231 rxerr=27 spifix=425 stk_minfree=1400B nowused=508B/4096 isr=2349 miss=427 nf=-108
+02:59:49.598 [FK] rssi-window n=960 min=-110 max=-107 spread=3
+
+## xiao-nicerf.log
+riadkov: 27877  bajtov: 4168134  posledna zmena: 2026-08-21 03:00:05
+03:00:05.027 [FOTA]   AALIVE build #489  freq=869.618 sf=7 rawrx=1914 rawtx=1 rxpkts=1914 rxerr=64 spifix=0 isr=1980 miss=1 nf=-117
+02:59:45.204 [FK] rssi-window n=960 min=-120 max=-116 spread=4
+
+
+## KOREKCIA 03:16:47 — promicro-local
+# Hub bol od 20.8. 21:14 odpojeny (doska resetovana), doska ale bezala dalej.
+# Baseline pre promicro je preto TENTO riadok, nie ten z 21:14 vyssie.
+# Medzi 21:14 a 03:15 je diera v logu: rawrx 2082 -> 9805 (7723 paketov nezaznamenanych).
+03:16:34.685 [FOTA]   AALIVE build #462  freq=869.618 sf=7 rawrx=9810 rawtx=1 rxpkts=9810 rxerr=148 stk_minfree=1400B nowused=508B/4096 isr=9978 miss=19 nf=-106
+03:16:34.685 [FK] rssi-window n=960 min=-111 max=-103 spread=8
+
+################################################################
+## BASELINE #2 — 2026-08-21 08:06:19 (start useku 08:00 -> 10:30)
+## Nocny usek 03:00->08:05 nedal ani jednu rule=CMD, preto sa test odklada.
+################################################################
+t1000e-local     08:06:08.491 [FOTA]   AALIVE build #490  freq=869.618 sf=7 rawrx=2438 rawtx=664 rxpkts=2438 rxerr=28 spifix=443 stk_minfree=1400B nowused=508B/4096 isr=3576 miss=446 nf=-109
+xiao-nicerf      08:05:55.153 [FOTA]   AALIVE build #489  freq=869.618 sf=7 rawrx=3497 rawtx=1 rxpkts=3497 rxerr=70 spifix=0 isr=3569 miss=1 nf=-118
+promicro-local   08:06:16.656 [FOTA]   AALIVE build #462  freq=869.618 sf=7 rawrx=10994 rawtx=1 rxpkts=10994 rxerr=210 stk_minfree=1400B nowused=508B/4096 isr=11225 miss=20 nf=-106
+# fk spifix: t1000e total=187 (uint8 wrap z 443), vsetkych 8 v buffri rule=FP (falosny), irq=0x38, cmd=3
+# fk spifix: xiao   total=0, buffer prazdny
+# XIAO RAW log 03:00-08:05: 0x vyskyt 'len=4' (povodny symptom sa neukazal)
+
+################################################################
+## BASELINE #3 — 2026-08-21 10:35:32  KONTROLA: fk pretype OFF na oboch
+## Usek 08:06->10:33 (pretype ON) opat 0x rule=CMD, XIAO 0x len=4 z 1122 ramcov.
+## Stary pin RadioLib, guard ZAP, DIAG build. Otazka: vrati sa preteka po vypnuti pretype?
+################################################################
+t1000e-local     10:35:18.114 [FOTA]   AALIVE build #490  freq=869.618 sf=7 rawrx=3355 rawtx=664 rxpkts=3355 rxerr=28 spifix=459 stk_minfree=1400B nowused=508B/4096 isr=4509 miss=462 nf=-109
+xiao-nicerf      10:35:30.286 [FOTA]   AALIVE build #489  freq=869.618 sf=7 rawrx=4636 rawtx=3 rxpkts=4636 rxerr=99 spifix=0 isr=4739 miss=1 nf=-118
+promicro-local   10:35:31.774 [FOTA]   AALIVE build #462  freq=869.618 sf=7 rawrx=11952 rawtx=2 rxpkts=11952 rxerr=304 stk_minfree=1400B nowused=508B/4096 isr=12280 miss=22 nf=-106

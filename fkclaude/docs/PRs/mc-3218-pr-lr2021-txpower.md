@@ -14,7 +14,7 @@ D:/FkDev/GHcli/bin/gh.exe pr create \
   --base dev \
   --head fkallay1:fix/lr2021-set-tx-power-rx-stall \
   --title "Fix LR2021 occasionally stopping reception after a TX power change" \
-  --body-file fkclaude/docs/lr2021-txpower-pr-description.md
+  --body-file fkclaude/docs/PRs/mc-3218-pr-lr2021-txpower.md
 ```
 
 (`gh` treba najskôr prihlásiť — viď poznámku o `gh auth login`.)

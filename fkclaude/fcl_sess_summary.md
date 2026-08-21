@@ -26,7 +26,7 @@ sám podčiarkne ako neplatný odkaz.
 - **Sémantika výkonu** — ciferník s `PA_OFFSET=8` podľa konvencie RAK 1W (14 → ~22 dBm)
   - ↳ [fcl_readme_nicerf_lora2021.md § Ciferník výkonu](fcl_readme_nicerf_lora2021.md#ciferník-výkonu-set-tx)
 - **Upstream PR #3218** — chyba `setTxPower` na LR2021 odoslaná; PR bez zmienky o AI
-  - ↳ [docs/lr2021-txpower-pr-description.md](docs/lr2021-txpower-pr-description.md) · [fcl_readme_nicerf_lora2021.md § Chyba v RadioLib](fcl_readme_nicerf_lora2021.md#chyba-v-radiolib-ktorú-header-obchádza)
+  - ↳ [docs/PRs/mc-3218-pr-lr2021-txpower.md](docs/PRs/mc-3218-pr-lr2021-txpower.md) · [fcl_readme_nicerf_lora2021.md § Chyba v RadioLib](fcl_readme_nicerf_lora2021.md#chyba-v-radiolib-ktorú-header-obchádza)
 - **PRAM patch pre LR2021** — 2240 B sa nahráva a verifikuje pri štarte
   - ↳ [fcl_readme_nicerf_lora2021.md § PRAM](fcl_readme_nicerf_lora2021.md#pram-firmvérový-patch-čipu--overené-na-hw-2026-08-15)
 - **DC-DC / SIMO** — cievka na module je osadená, spotreba v RX klesla o ~41 %

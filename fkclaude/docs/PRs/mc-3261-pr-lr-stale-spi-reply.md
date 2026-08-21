@@ -1,6 +1,7 @@
 # PR — zastaralá SPI odpoveď čítaná ako dĺžka paketu (LR2021 + LR1110)
 
-**NEODOSLANÉ.** Vetva `fix/lr2021-lr1110-stale-spi-reply` (z `upstream/dev`), na
+**ODOSLANÉ 2026-08-20** ako PR 3261 v meshcore-dev/MeshCore. Vetva
+`fix/lr2021-lr1110-stale-spi-reply` (z `upstream/dev`), na
 `origin` už je. Worktree `…/scratchpad/mc-pr-lr-stale` — po vybavení PR zmazať cez
 `git worktree remove`.
 
@@ -14,7 +15,7 @@ extrakcii zachovať prázdne riadky a hľadať nadpis cez `rindex`, nie `index` 
 sa do tela dostane aj táto interná hlavička, presne to sa už raz stalo):
 
 ```bash
-python -c "import io;p='fkclaude/docs/lr-stale-spi-reply-pr-description.md';s=io.open(p,encoding='utf-8').read();i=s.rindex(chr(35)*2+' Body')+7;io.open('body.md','w',encoding='utf-8',newline='').write(s[i:].lstrip(chr(10)))"
+python -c "import io;p='fkclaude/docs/PRs/mc-3261-pr-lr-stale-spi-reply.md';s=io.open(p,encoding='utf-8').read();i=s.rindex(chr(35)*2+' Body')+7;io.open('body.md','w',encoding='utf-8',newline='').write(s[i:].lstrip(chr(10)))"
 
 D:/FkDev/GHcli/bin/gh.exe pr create   --repo meshcore-dev/MeshCore   --base dev   --head fkallay1:fix/lr2021-lr1110-stale-spi-reply   --title "Fix packet loss when a stale SPI reply is read as the received length"   --body-file body.md
 ```
