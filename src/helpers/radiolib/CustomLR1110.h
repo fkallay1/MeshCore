@@ -24,13 +24,19 @@ class CustomLR1110 : public LR1110 {
     CustomLR1110(Module *mod) : LR1110(mod) { }
 
     //en: Read the receive buffer status ourselves, keeping the status word. Mirrors
-    //en: CustomLR2021::readRxPktLenWithStatus - see the reasoning there. The reply here
-    //en: is [stat 2B][len 1B][offset 1B], so a stale one yields irq[31:24] as the length
-    //en: and irq[23:16] as the offset; that offset is what shifts the payload.
+    //en: CustomLR2021::readRxPktLenWithStatus - see the reasoning there, but NOT its byte
+    //en: offsets: LR11x0 uses a ONE byte status (spiConfig BITS_8, LR11x0.cpp), where
+    //en: LR2021 uses two. The reply is therefore [stat 1B][len 1B][offset 1B], matching
+    //en: LR11x0::getRxBufferStatus() which takes len before offset. A stale reply is the
+    //en: default [stat 1B][irq 4B] stream, so it yields irq[31:24] as the length and
+    //en: irq[23:16] as the offset; that offset is what shifts the payload.
     //sk: Precitaj stav prijimacieho buffra sami a podrz si status slovo. Zrkadli to
-    //sk: CustomLR2021::readRxPktLenWithStatus - odovodnenie je tam. Odpoved ma tu tvar
-    //sk: [stat 2B][len 1B][offset 1B], takze zastarala da ako dlzku irq[31:24] a ako
-    //sk: offset irq[23:16]; prave ten offset posuva payload.
+    //sk: CustomLR2021::readRxPktLenWithStatus - odovodnenie je tam, ale NIE jeho pozicie
+    //sk: bajtov: LR11x0 ma JEDEN status bajt (spiConfig BITS_8, LR11x0.cpp), LR2021 dva.
+    //sk: Odpoved ma teda tvar [stat 1B][len 1B][offset 1B], zhodne s
+    //sk: LR11x0::getRxBufferStatus(), ktora berie dlzku pred offsetom. Zastarala odpoved
+    //sk: je default stream [stat 1B][irq 4B], takze da ako dlzku irq[31:24] a ako offset
+    //sk: irq[23:16]; prave ten offset posuva payload.
     int16_t readRxPktLenWithStatus(bool wait, uint8_t* stat, uint16_t* val, uint8_t* off = NULL) {
       int16_t st = mod->SPIwriteStream(RADIOLIB_LR11X0_CMD_GET_RX_BUFFER_STATUS, NULL, 0, wait, false);
       Module::BitWidth_t sw = mod->spiConfig.widths[RADIOLIB_MODULE_SPI_WIDTH_STATUS];
@@ -42,8 +48,8 @@ class CustomLR1110 : public LR1110 {
       mod->spiConfig.widths[RADIOLIB_MODULE_SPI_WIDTH_STATUS] = sw;
       mod->spiConfig.widths[RADIOLIB_MODULE_SPI_WIDTH_CMD]    = cw;
       if (stat) *stat = buff[0];
-      if (val)  *val  = buff[2];
-      if (off)  *off  = buff[3];
+      if (val)  *val  = buff[1];
+      if (off)  *off  = buff[2];
       return st;
     }
 
