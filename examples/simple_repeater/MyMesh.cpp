@@ -1643,6 +1643,49 @@ bool MyMesh::radioDiagCliCommand(char* command, char* reply) {
             (unsigned)radio._fk_inject, radio._fk_pretype ? "on" : "off");
     return true;
   }
+  //en: 'fk guard on|off' - master switch for the stale-reply guard. OFF leaves the
+  //en: read path untouched (one bool test, then the library read), so the measured
+  //en: configuration is not disturbed; ON runs the guard and records every recovery,
+  //en: dumpable with 'fk spifix'.
+  //sk: 'fk guard on|off' - hlavny prepinac guardu pretecenej odpovede. OFF nechava
+  //sk: citaciu cestu nedotknutu (jeden test bool a kniznicne citanie), takze merana
+  //sk: konfiguracia zostava cista; ON pusti guard a zaznamena kazdu zachranu, ktoru
+  //sk: potom vypise 'fk spifix'.
+  //en: 'fk guard a|b|c' also picks what separates two attempts: a = back to back,
+  //en: b = idle gap only, c = one getPacketType() in between. 'on' keeps the mode.
+  //sk: 'fk guard a|b|c' zaroven vyberie, co oddeluje dva pokusy: a = hned za sebou,
+  //sk: b = len necinna pauza, c = jeden getPacketType() medzi nimi. 'on' mod nemeni.
+  if (memcmp(arg, "guard", 5) == 0) {
+    const char* n = arg + 5;
+    while (*n == ' ') n++;
+    if (*n == 'a' || *n == 'b' || *n == 'c') {
+      radio._fk_guard_mode = (uint8_t)(*n - 'a' + 1);
+      radio._fk_guard = true;
+    } else if (*n) {
+      radio._fk_guard = (memcmp(n, "on", 2) == 0);
+    }
+    sprintf(reply, "guard=%s mode=%c gap=%uus, spifix=%lu, pretype=%s, inject=%u",
+            radio._fk_guard ? "ON" : "off",
+            (char)('a' + radio._fk_guard_mode - 1),
+            (unsigned)radio._fk_gap_us,
+            (unsigned long)radio.getStalePktLenReads(),
+            radio._fk_pretype ? "on" : "off",
+            (unsigned)radio._fk_inject);
+    return true;
+  }
+  //en: 'fk gap <us>' - the idle delay mode B inserts between attempts. Set it to what
+  //en: mode C's getPacketType() actually costs (read it off the us= field) so the two
+  //en: modes differ only in whether a command was issued.
+  //sk: 'fk gap <us>' - necinna pauza, ktoru vklada mod B medzi pokusy. Nastav ju na to,
+  //sk: co realne stoji getPacketType() v mode C (odcitaj z polozky us=), aby sa oba mody
+  //sk: lisili len tym, ci sa vydal prikaz.
+  if (memcmp(arg, "gap", 3) == 0) {
+    const char* n = arg + 3;
+    while (*n == ' ') n++;
+    if (*n) radio._fk_gap_us = (uint16_t)atoi(n);
+    sprintf(reply, "gap=%uus (mode b)", (unsigned)radio._fk_gap_us);
+    return true;
+  }
   if (memcmp(arg, "pretype", 7) == 0) {
     const char* n = arg + 7;
     while (*n == ' ') n++;
@@ -1680,6 +1723,10 @@ bool MyMesh::radioDiagCliCommand(char* command, char* reply) {
       Serial.print(" stat=0x");       Serial.print(e.stat, HEX);
       Serial.print(" cmd=");          Serial.print((e.stat >> 1) & 0x03);
       Serial.print(" tries=");        Serial.print(e.tries);
+      if (e.mode) {
+        Serial.print(" mode=");       Serial.print((char)('a' + e.mode - 1));
+        Serial.print(" us=");         Serial.print(e.us);
+      }
       Serial.print(" rule=");
       if (e.rule & 1) Serial.print("CMD");
       if (e.rule == 3) Serial.print("+");

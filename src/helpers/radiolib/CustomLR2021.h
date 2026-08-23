@@ -151,12 +151,13 @@ class CustomLR2021 : public LR2021 {
     //sk: spravne hlasil CMD_DAT. Rozhodovat len podla tej hodnoty - ako to robila
     //sk: predosla verzia - teda strieľa aj na dobrych ramcoch, a preto tu rozhoduje status.
     size_t getPacketLength(bool update = true) override {
-#ifdef FK_STALE_GUARD_OFF
-      //en: test build for RadioLib issue 1857 - read the length through the library
-      //en: path so it goes via LRxxxx::SPIcommand(), where the BUSY wait fix lives.
-      return LR2021::getPacketLength(update);
-#elif defined(FK_RADIO_SPI_DIAG)
-      return fkDiagPktLen(update);
+#ifdef FK_RADIO_SPI_DIAG
+      //en: guard OFF - one bool test, then straight to the library. Nothing is read,
+      //en: recorded or pre-called, so this is the untouched measured configuration.
+      //sk: guard OFF - jeden test bool a rovno do kniznice. Nic sa necita, nezapisuje
+      //sk: ani nepredradzuje, takze toto je nedotknuta merana konfiguracia.
+      if (!_fk_guard) return LR2021::getPacketLength(update);
+      return _fk_pretype ? fkDiagPktLen(update) : fkGuardPktLen(update);
 #else
       uint8_t  stat = 0;
       uint16_t val  = 0;
@@ -193,6 +194,8 @@ class CustomLR2021 : public LR2021 {
       uint8_t  tries;   //en: how many reads it took
       uint8_t  rule;    //en: bit0 = CMD_DAT rule fired, bit1 = fingerprint rule fired
       uint8_t  inj;     //en: 1 = the BUSY wait was skipped on purpose
+      uint8_t  mode;    //en: guard mode the event was recorded under (1=A, 2=B, 3=C)
+      uint16_t us;      //en: microseconds from the first read to the one that was used
     };
     static const uint8_t FK_SPI_EVENTS = 8;
     FkSpiEvent _ev[FK_SPI_EVENTS];
@@ -232,8 +235,92 @@ class CustomLR2021 : public LR2021 {
     //sk:                citacie prikazy hned za sebou. Testuje, ci prave tato sekvencia
     //sk:                pretecenie spusta.
     uint16_t _fk_inject = 0, _fk_inject_cnt = 0;
+    //en:  _fk_guard_mode decides what separates two attempts, which is the whole point
+    //en:  of the experiment: measured on a live episode, retrying the same opcode
+    //en:  back-to-back recovered 1 of 13 reads, while the library fallback - which
+    //en:  issues getPacketType() before reading the length - recovered 12 of 12. So the
+    //en:  question is whether the cure is the elapsed time or the intervening command.
+    //en:    1 = A, attempts back to back (nothing in between)
+    //en:    2 = B, idle delay of _fk_gap_us between attempts, no command
+    //en:    3 = C, one getPacketType() between attempts
+    //en:  A/B/C are switchable from the CLI so all three run inside one episode.
+    //sk:  _fk_guard_mode urcuje, co oddeluje dva pokusy, a o to v tomto pokuse ide:
+    //sk:  na zivej epizode opakovanie toho isteho opkodu za sebou zachranilo 1 z 13
+    //sk:  citani, kym kniznicny fallback - ktory pred citanim dlzky vola getPacketType()
+    //sk:  - zachranil 12 z 12. Otazka teda je, ci lieci uplynuty cas alebo vlozeny
+    //sk:  prikaz.
+    //sk:    1 = A, pokusy hned za sebou (nic medzi nimi)
+    //sk:    2 = B, medzi pokusmi necinne cakanie _fk_gap_us, ziadny prikaz
+    //sk:    3 = C, medzi pokusmi jeden getPacketType()
+    //sk:  A/B/C sa prepinaju z CLI, takze vsetky tri prebehnu v jednej epizode.
+    uint8_t  _fk_guard_mode = 1;
+    uint16_t _fk_gap_us = 60;
     uint16_t _fk_zero = 0, _fk_zero_cnt = 0;
     bool _fk_pretype = false;
+    //en:  _fk_guard = master switch for our stale-reply guard, 'fk guard on|off'.
+    //en:              OFF is a single bool test and then the plain library read, so the
+    //en:              timing of the measured configuration is left alone. ON runs the
+    //en:              guard and records every recovery into the ring buffer.
+    //sk:  _fk_guard = hlavny prepinac nasho guardu, 'fk guard on|off'.
+    //sk:              OFF je jediny test bool a potom hole kniznicne citanie, takze
+    //sk:              casovanie meranej konfiguracie zostava nedotknute. ON pusti guard
+    //sk:              a kazdu zachranu zapise do kruhoveho buffra.
+    bool _fk_guard = false;
+
+    //en: The shipped guard, plus a record of every recovery. Trusts the length only
+    //en: when stat1 says CMD_DAT; otherwise re-reads (Rx FIFO is still whole at that
+    //en: point) and finally falls back to the library read, so it never ends up worse.
+    //en: Nothing is printed from here - we are in the hot Rx path; 'fk spifix' dumps it.
+    //sk: Ostry guard plus zaznam kazdej zachrany. Dlzke veri len ked stat1 hlasi
+    //sk: CMD_DAT; inak precita znova (Rx FIFO je v tom momente jeste cele) a nakoniec
+    //sk: spadne na kniznicne citanie, takze nikdy neskonci horsie. Odtialto sa NIC
+    //sk: netlaci - sme v horucej RX ceste; vypise to 'fk spifix'.
+    size_t fkGuardPktLen(bool update) {
+      uint8_t  stat = 0, stat0 = 0, tries = 0;
+      uint16_t val = 0, first = 0;
+      size_t   len = 0;
+      bool inject = false;
+      if (_fk_inject && ++_fk_inject_cnt >= _fk_inject) { _fk_inject_cnt = 0; inject = true; }
+      uint32_t t0 = micros();
+      for (tries = 1; tries <= 3; tries++) {
+        //en: what separates two attempts is the variable under test - see _fk_guard_mode.
+        //en: Nothing is inserted before the first read, so 'first' stays comparable
+        //en: across modes.
+        //sk: co oddeluje dva pokusy, je tu meranou premennou - vid _fk_guard_mode. Pred
+        //sk: prvym citanim sa nevklada nic, aby 'first' ostal medzi modmi porovnatelny.
+        if (tries > 1) {
+          if (_fk_guard_mode == 2) {
+            delayMicroseconds(_fk_gap_us);
+          } else if (_fk_guard_mode == 3) {
+            uint8_t pt = 0; (void)getPacketType(&pt);
+          }
+        }
+        readRxPktLenWithStatus(inject && tries == 1 ? false : true, &stat, &val);
+        if (tries == 1) { first = val; stat0 = stat; }
+        if ((stat & 0x0E) == RADIOLIB_LRXXXX_STAT_1_CMD_DAT) { len = val; break; }
+        _stale_pktlen_reads++;
+      }
+      if (tries > 3) { len = LR2021::getPacketLength(update); tries = 4; }
+      uint32_t us = micros() - t0;
+
+      //en: record only when the guard actually did something - reading the IRQ word
+      //en: afterwards is safe, getIrqStatus() cannot be hit by this race.
+      //sk: zaznamenaj len ked guard naozaj zasiahol - precitanie IRQ slova az potom je
+      //sk: bezpecne, getIrqStatus() tato preteka zasiahnut nemoze.
+      if (tries > 1) {
+        uint32_t irqw = getIrqStatus();
+        FkSpiEvent& e = _ev[_ev_write];
+        e.fp = (uint16_t)(irqw >> 16); e.irq = irqw;
+        e.first = first; e.final = (uint16_t)len;
+        e.stat = stat0;  e.off = 0;
+        e.tries = tries; e.rule = 1; e.inj = inject ? 1 : 0;
+        e.mode = _fk_guard_mode; e.us = (uint16_t)(us > 65535 ? 65535 : us);
+        _ev_write = (uint8_t)((_ev_write + 1) % FK_SPI_EVENTS);
+        if (_ev_count < FK_SPI_EVENTS) _ev_count++;
+        _ev_total++;
+      }
+      return len;
+    }
 
     size_t fkDiagPktLen(bool update) {
       uint8_t  stat0 = 0, stat = 0, tries = 0;
@@ -277,6 +364,7 @@ class CustomLR2021 : public LR2021 {
         FkSpiEvent& e = _ev[_ev_write];
         e.fp = fp; e.irq = irq0; e.first = first; e.final = (uint16_t)len;
         e.stat = stat0; e.off = 0; e.tries = tries > 4 ? 4 : tries;
+        e.mode = 0; e.us = 0;   //en: not the A/B/C harness
         e.rule = (cmd_flagged ? 1 : 0) | (fp_flagged ? 2 : 0);
         e.inj = inject ? 1 : 0;
         _ev_write = (uint8_t)((_ev_write + 1) % FK_SPI_EVENTS);
