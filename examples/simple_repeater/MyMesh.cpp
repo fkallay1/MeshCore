@@ -1664,9 +1664,10 @@ bool MyMesh::radioDiagCliCommand(char* command, char* reply) {
     } else if (*n) {
       radio._fk_guard = (memcmp(n, "on", 2) == 0);
     }
-    sprintf(reply, "guard=%s mode=%c gap=%uus, spifix=%lu, pretype=%s, inject=%u",
+    sprintf(reply, "guard=%s mode=%c tries=%u gap=%uus, spifix=%lu, pretype=%s, inject=%u",
             radio._fk_guard ? "ON" : "off",
             (char)('a' + radio._fk_guard_mode - 1),
+            (unsigned)radio._fk_max_tries,
             (unsigned)radio._fk_gap_us,
             (unsigned long)radio.getStalePktLenReads(),
             radio._fk_pretype ? "on" : "off",
@@ -1679,6 +1680,22 @@ bool MyMesh::radioDiagCliCommand(char* command, char* reply) {
   //sk: 'fk gap <us>' - necinna pauza, ktoru vklada mod B medzi pokusy. Nastav ju na to,
   //sk: co realne stoji getPacketType() v mode C (odcitaj z polozky us=), aby sa oba mody
   //sk: lisili len tym, ci sa vydal prikaz.
+  //en: 'fk tries <n>' - how many reads the guard may take before falling back (1..8).
+  //en: tries=255 in the dump means the cap was not enough and the library read rescued it.
+  //sk: 'fk tries <n>' - kolko citani smie guard spravit, nez spadne na fallback (1..8).
+  //sk: tries=255 vo vypise znamena, ze strop nestacil a zachranilo to kniznicne citanie.
+  if (memcmp(arg, "tries", 5) == 0) {
+    const char* n = arg + 5;
+    while (*n == ' ') n++;
+    if (*n) {
+      int v = atoi(n);
+      if (v < 1) v = 1;
+      if (v > 8) v = 8;
+      radio._fk_max_tries = (uint8_t)v;
+    }
+    sprintf(reply, "tries=%u (max citani nez fallback)", (unsigned)radio._fk_max_tries);
+    return true;
+  }
   if (memcmp(arg, "gap", 3) == 0) {
     const char* n = arg + 3;
     while (*n == ' ') n++;

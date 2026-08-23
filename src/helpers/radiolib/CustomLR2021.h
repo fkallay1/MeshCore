@@ -255,6 +255,15 @@ class CustomLR2021 : public LR2021 {
     //sk:  A/B/C sa prepinaju z CLI, takze vsetky tri prebehnu v jednej epizode.
     uint8_t  _fk_guard_mode = 1;
     uint16_t _fk_gap_us = 60;
+    //en:  _fk_max_tries caps the attempts. The shipped guard stops at 3, which is why we
+    //en:  cannot tell whether a fourth or fifth read of the same opcode would still help
+    //en:  - and that is exactly the number the upstream patch has to choose. Settable
+    //en:  from the CLI so the recovery curve can be walked without reflashing.
+    //sk:  _fk_max_tries ohranicuje pocet pokusov. Posielany guard sa zastavi na 3, takze
+    //sk:  nevieme, ci by stvrte alebo piate citanie toho isteho opkodu jeste pomohlo - a
+    //sk:  presne toto cislo si ma upstream patch vybrat. Nastavitelne z CLI, aby sa krivka
+    //sk:  zotavenia dala prejst bez noveho flashu.
+    uint8_t  _fk_max_tries = 3;
     uint16_t _fk_zero = 0, _fk_zero_cnt = 0;
     bool _fk_pretype = false;
     //en:  _fk_guard = master switch for our stale-reply guard, 'fk guard on|off'.
@@ -282,7 +291,7 @@ class CustomLR2021 : public LR2021 {
       bool inject = false;
       if (_fk_inject && ++_fk_inject_cnt >= _fk_inject) { _fk_inject_cnt = 0; inject = true; }
       uint32_t t0 = micros();
-      for (tries = 1; tries <= 3; tries++) {
+      for (tries = 1; tries <= _fk_max_tries; tries++) {
         //en: what separates two attempts is the variable under test - see _fk_guard_mode.
         //en: Nothing is inserted before the first read, so 'first' stays comparable
         //en: across modes.
@@ -300,7 +309,11 @@ class CustomLR2021 : public LR2021 {
         if ((stat & 0x0E) == RADIOLIB_LRXXXX_STAT_1_CMD_DAT) { len = val; break; }
         _stale_pktlen_reads++;
       }
-      if (tries > 3) { len = LR2021::getPacketLength(update); tries = 4; }
+      //en: exhausted - fall back to the library read, which never ends up worse. 'tries'
+      //en: is clamped to 255 so the record still says "the cap was not enough".
+      //sk: vycerpane - spadni na kniznicne citanie, ktore nikdy neskonci horsie. 'tries'
+      //sk: sa zarazi na 255, takze zo zaznamu je vidno, ze strop nestacil.
+      if (tries > _fk_max_tries) { len = LR2021::getPacketLength(update); tries = 255; }
       uint32_t us = micros() - t0;
 
       //en: record only when the guard actually did something - reading the IRQ word
