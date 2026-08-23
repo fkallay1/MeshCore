@@ -115,10 +115,19 @@ verzii patchu:
 `readRadioRxFifo` obchádza `SPIcommand` úplne (`SPIreadStream` so status width 0),
 takže FIFO čítanie sa do cyklu nedostane a nehrozí dvojité vyzdvihnutie dát.
 
-**Otvorená otázka na meranie:** naše „vždy tri čítania" bolo namerané s variantou,
-ktorá opkód znova vydávala. Či to lieči samotné preklokovanie odpovede, alebo až
-nové vydanie príkazu, otestované nie je — na to sú buildy 905 (len odpoveď) a
-906 (aj opkód).
+**Zmerané 24. 8. 2026 na živej epizóde (ostrý guard, 13 udalostí):** opakovanie
+**toho istého opkódu** za sebou zachránilo len **1 z 13**. Zvyšných 12 zachránil až
+fallback `LR2021::getPacketLength()`, ktorý pred čítaním dĺžky volá `getPacketType()` —
+teda **iný príkaz medzi pokusmi**. Status hlásil `CMD_OK` (`stat=0x5`) pri všetkých 13
+prvých čítaniach.
+
+Staršie „vždy tri čítania, tretie uspeje" bol artefakt diagnostickej cesty:
+`fkDiagPktLen` volal `getIrqStatus()` **pred každým** čítaním dĺžky, takže medzi
+opakovaniami bol vždy iný príkaz. Ostrý guard číta trikrát za sebou bez ničoho medzi.
+
+Dôsledok pre patch: „opakuj to isté čítanie a breakni na CMD_DAT" opraví ~8 % týchto
+prípadov. Potrebná je varianta s vloženým príkazom — a tú dáva §6.7.1 v dokumentovanej
+forme: `GetStatus` po čítaní vráti výsledok toho čítania a je to iný opkód. Netestované.
 
 ## Diagnostické opkódy pre LR2021
 

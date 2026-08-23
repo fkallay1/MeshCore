@@ -1,3 +1,20 @@
+> **ZABLOKOVANE — NEPOSIELAT (24. 8. 00:20)**
+>
+> Meranie na zivej epizode s ostrym guardom vyvratilo dve tvrdenia v tele:
+>
+> 1. **„every natural occurrence needed three reads, the third succeeds" je artefakt**
+>    diagnostickej cesty. `fkDiagPktLen` volal `getIrqStatus()` **pred kazdym** citanim
+>    dlzky, takze medzi opakovaniami bol vzdy iny prikaz. Ostry `fkGuardPktLen` cita
+>    trikrat za sebou bez niceho medzitym.
+> 2. **Opakovanie toho isteho opkodu za sebou pomohlo len 1 z 13 udalosti.** Zvysnych 12
+>    zachranil az fallback `LR2021::getPacketLength()`, ktory ma v sebe `getPacketType()`
+>    pred citanim dlzky — teda **iny prikaz medzi pokusmi**. Status hlasil `CMD_OK`
+>    (`stat=0x5`, cmd=2) pri vsetkych 13 prvych citaniach.
+>
+> Dosledok: navrhovany patch (opakuj to iste citanie, breakni na CMD_DAT) by opravil
+> ~8 % tychto pripadov, nie vsetky. Telo treba prepisat az po tom, ako otestujeme
+> variantu s vlozenym prikazom medzi pokusmi.
+
 # Výsledok testu jgromesovej vetvy — komentár do RadioLib 1857
 
 **NEODOSLANÉ.** Čaká na Fedorovo schválenie.

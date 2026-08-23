@@ -235,6 +235,112 @@ Citlivost dosiek (merane 21. 8.): XIAO 934 ramcov/h a chybovost 1,2 %; T1000-E a
 ProMicro 732/h, ProMicro 4,6 %. **XIAO je najcitlivejsi** — symptom sa ukaze najskor
 tam, ale jeho ramec nemusi mat s cim sparovat, ak ho ostatne dosky nezachytili.
 
+
+## NAJSILNEJSIA STOPA (22. 8.): sumove pozadie, nie antena
+
+Odmerane z povodneho logu proti dnesnemu behu:
+
+| | ramce <=-113 dBm | ich SNR (priemer) | ich SNR (max) | chybovost | nf |
+|---|---|---|---|---|---|
+| **povodny** (stol) | **22,4 %** | **-3,9 dB** | **-1,0 dB** | **3,02 %** | -120..-109, Fedor pamata ~-116 |
+| dnesny | 13,4 % | -1,0 dB | **+7,2 dB** | 1,85 % | -120..-116 |
+
+Klucove: v povodnom behu mal **kazdy** ramec pod -113 dBm **negativny SNR** (max -1,0).
+Dnes maju take ramce SNR az +7,2. Uzol `216d` ma dnes priemerny SNR **10,4 dB** proti
+povodnym **8,0 dB** — dnesny prijem je celkovo o ~2,4 dB lepsi.
+
+Slabe klastre: vtedy **-120 (163x)**, -119, -118. Dnes -118, -117, -116, -115.
+
+Podiel ramcov na hranici dekodovania SF7 (SNR < -5 dB) je v oboch behoch 17 % zo
+slabych, ale slabych bolo vtedy 1,7x viac — a chybovost sa hybe v rovnakom pomere
+(3,02 % vs 1,85 %). Cize povodny beh mal **~1,7x viac prijmov na hranici dekodovania**,
+teda aj neuspesnych dekodov.
+
+**Hypoteza:** spustacom je **neuspesny prijem, ktory sa v RAW logu NEOBJAVI** (CRC alebo
+header error). Cip po nom zostane s nastavenymi IRQ priznakmi a zastarale citanie vrati
+`irq[31:16]` = 4. To vysvetluje aj to, preco korelacia so *zalogovanym* predchodcom
+nevysla (25 % vs 22 % zaklad) — hladalo sa na nespravnom mieste.
+
+**Co NEbolo pricinou:** antena sama (po prehodeni na staru: slabych 16,3 %, ale SNR<0
+kleslo na 2,9 %, chybovost 1,85 %, nf nezmenene), hustota refloodov (dnes 5,48 kopii na
+paket proti povodnym 3,44), `repeat` (v povodnom behu `rawtx=9`).
+
+**Odporucany dalsi krok:** zvysit sumove pozadie o ~3 dB, teda vratit dosku na stol k
+notebooku, kde si Fedor pamata `nf` okolo -116. Cielova metrika: chybovost 3 % a slabe
+ramce s negativnym SNR.
+
+
+## OPRAVA (22. 8. 12:20): nf pri udalostiach je -117/-118, NIE -120 a NIE -110
+
+Predchadzajucu uvahu „povodny beh bol zarusenejsi, treba zvysit nf" som postavil na
+ROZSAHU `nf -120..-109` z povodneho logu. To bolo nespravne — tie -109/-113 su
+jednotlive vzorky, **median povodneho behu je -120**.
+
+Rozhodujuce meranie — nf v momente kazdej z 16 udalosti:
+
+```
+vsetkych 16 udalosti:  nf = -117 (14x)  alebo  -118 (2x)
+```
+
+A priebeh v ramci logu:
+
+```
+rawrx 46055..47058   nf = -120          ~1000 ramcov, ZIADNA udalost
+rawrx 47058..47067   nf skace -116/-109/-115/-113/-119/-118   (prechod)
+rawrx 47067..47214   nf = -117/-118     <- vsetkych 16 udalosti
+```
+
+Cize udalosti su v ramci logu **uzavrete do obdobia zhorseneho sumu (-117/-118)**, a
+obdobie s -120 je cisté. Pozor na confounding: to iste obdobie obsahuje aj dopravny
+zhluk, takze to nie je dokaz kauzality.
+
+| stav | median nf | udalosti |
+|---|---|---|
+| povodny, prvá cast | -120 | 0 z ~1000 ramcov |
+| **povodny, druhá cast** | **-117/-118** | **16 z ~150 ramcov** |
+| dnes pred stolom | **-118** | 0 z 5050 ramcov |
+| dnes na stole (2m kabel) | -110 | 0 (zatiaľ malá vzorka) |
+
+**Dosledok 1:** stol bol chybny krok. -110 je o 7 dB horsie nez akakolvek podmienka,
+pri ktorej sa udalosti stali, a zabilo to celu populaciu ramcov pod -113 dBm (z 13,4 %
+na 0 %). Treba sa vratit na nf ~-118, teda tam, kde doska uz bola.
+
+**Dosledok 2:** nf -118 sam **nestaci** — dnes sme ho mali cely den a udalosti nula.
+Takze nf je nutna, nie postacujuca podmienka, alebo nie je pricinou vobec.
+
+**Dosledok 3 — OVERENE 22. 8. 12:58, hypoteza o kabli VYVRATENA:** po prehodeni na
+30 cm kabel je `nf = -109`, teda o 1 dB HORSIE nez na 2 m kabli (-110/-111). Dlzka
+kabla teda nerozhoduje; rozhoduje **poloha na stole vedla NB** (krátky kabel dosku k
+nemu dokonca pritiahol). Cena za polohu je ~9 dB:
+
+| zostava | nf |
+|---|---|
+| povodne miesto (rano) | **-118** |
+| stol, 2 m kabel | -110 / -111 |
+| stol, 30 cm kabel | **-109** |
+
+Riesenie nie je kabel, ale **vratit dosku na povodne miesto mimo stol**, kde mala -118 —
+co je presne nf, pri ktorom sa povodne udalosti diali.
+
+
+## PASCA v krizovom parovani ramcov (23. 8.)
+
+Parovanie ramcov medzi doskami podla `first=` musi zahrnut **bajt s dlzkou cesty**,
+inak sa spletu RÔZNE HOPY toho isteho paketu — kazda doska pocula iny reflood, takze
+maju legitimne rozdielne dlzky (kazdy hop pripise 2 B hash).
+
+* pri `route=1` je dlzka cesty **druhy bajt**, takze staci 4-bajtovy kluc z `first=`
+* pri `route=0` je hlavicka ina (hash kanala + timestamp pred cestou), dlzka cesty je
+  az za nimi a do 4-bajtoveho kluca sa NEDOSTANE
+
+Prejav: rozdiely dlzok su podozrivo pravidelne `+2` (jeden hop), `+1`/`+3` pri inych
+sirkach hashu. Kontrola: porovnat `path[N]` — ak sa N lisi, nie je to poskodenie.
+
+Odhalene tak, ze 11 „poskodenych" ramcov s dlzkami 83/117/55/32/128/149/147/57/40/139
+boli VSETKY `route=0` a vsetky mali rozdiel presne +2. Po vylucenii zostalo poskodenie
+**vylucne `len=4`** (859 ramcov), co je `irq[31:16]` pri nastavenom IBA `RX_DONE` —
+jednoznacny a uplny odtlacok.
+
 ## Po teste
 
 Report do RadioLib issue 1857 — sľúbené, viď `PRs/rl-1857-comment-test-offer.md`.

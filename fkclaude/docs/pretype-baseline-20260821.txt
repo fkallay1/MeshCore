@@ -82,3 +82,96 @@ promicro-local   17:38:41.054 [FOTA]   AALIVE build #498  freq=869.618 sf=7 rawr
 xiao-nicerf      20:03:40.101 [FOTA]   AALIVE build #445  freq=869.618 sf=7 rawrx=0 rawtx=1 rxpkts=0 rxerr=0 isr=1 miss=0 nf=-118
 t1000e-local     20:03:46.007 [FOTA]   AALIVE build #303  freq=869.618 sf=7 rawrx=1512 rawtx=1 rxpkts=1512 rxerr=4 spifix=0 stk_minfree=1400B nowused=508B/4096 isr=1522 miss=5 nf=-110
 promicro-local   20:03:44.147 [FOTA]   AALIVE build #498  freq=869.618 sf=7 rawrx=1482 rawtx=1 rxpkts=1482 rxerr=74 stk_minfree=1400B nowused=508B/4096 isr=1558 miss=1 nf=-107
+
+################################################################
+## ANTENA: prehodena na STARU (horsiu) — 2026-08-22 09:20:22
+## Dovod: z povodneho logu je to JEDINY potvrdeny rozdiel voci dnesnemu setupu.
+##   povodny beh (stara antena): 22.3 % ramcov <=-110 dBm, 22.6 % snr<0
+##   dnesny beh pred prehodenim : 13.0 % / 11.3 %  (n=3184, do 09:19)
+## Fedor pozn.: vtedy bolo aj ine pocasie (moze menit NF/SNR) a nepamata si,
+##              ci tam bol filter.
+## nf pre porovnanie: povodny -120..-109, dnesny -117/-118
+## Ostatne NEZMENENE: XIAO #445 bez guardu, T1000-E #303, ProMicro #498.
+################################################################
+xiao-nicerf      09:20:20.322 [FOTA]   AALIVE build #445  freq=869.618 sf=7 rawrx=6833 rawtx=1 rxpkts=6833 rxerr=123 isr=6957 miss=0 nf=-118
+t1000e-local     09:19:58.794 [FOTA]   AALIVE build #303  freq=869.618 sf=7 rawrx=7561 rawtx=1 rxpkts=7561 rxerr=189 spifix=0 stk_minfree=1400B nowused=508B/4096 isr=7766 miss=15 nf=-111
+promicro-local   09:20:16.618 [FOTA]   AALIVE build #498  freq=869.618 sf=7 rawrx=7464 rawtx=1 rxpkts=7464 rxerr=280 stk_minfree=1400B nowused=508B/4096 isr=7757 miss=12 nf=-107
+## DOPLNENIE 09:21:38: aktualna zostava = STARA antena BEZ filtra.
+##   Fedor si nepamata, ci povodny beh filter mal. Ak nemal, mame RF setup
+##   povodneho pozorovania zreprodukovany; ak mal, zostava filter ako jediny rozdiel.
+##   Nepriamy signal: povodny nf sa hybal -120..-109 (rozsah 11 dB), dnesny drzi
+##   stabilne -118. Vtedy teda bolo prostredie premenlivejsie, co filter neposobi.
+
+################################################################
+## REGRESNY TEST ISO — baseline 2026-08-22 16:08:13
+## T1000-E ide na ISO (nas pin + IBA jgromesov commit 623de00c8).
+## XIAO zostava na CTRL #304 (guard OFF flagom, stary pin) - nabieha k negativu.
+## Zakladna linia na starom pine (17:34..16:07, ~22.5 h):
+##   T1000-E 11218 : ProMicro 11072 = pomer 1.013
+##   T1000-E rxerr=292, ProMicro rxerr=369, spifix=0, stk_minfree=1400B
+## Sledovat: pomer k ProMicru, rxerr, miss, isr-rxpkts, stk_minfree, timeouty.
+################################################################
+t1000e-local     16:07:52.678 [FOTA]   AALIVE build #303  freq=869.618 sf=7 rawrx=11218 rawtx=1 rxpkts=11218 rxerr=292 spifix=0 stk_minfree=1400B nowused=508B/4096 isr=11531 miss=20 nf=-104
+promicro-local   16:08:10.824 [FOTA]   AALIVE build #498  freq=869.618 sf=7 rawrx=11072 rawtx=1 rxpkts=11072 rxerr=369 stk_minfree=1400B nowused=508B/4096 isr=11461 miss=19 nf=-107
+xiao-nicerf      16:08:00.074 [FOTA]   AALIVE build #304  freq=869.618 sf=7 rawrx=760 rawtx=1 rxpkts=760 rxerr=2 spifix=0 isr=763 miss=0 nf=-116
+
+################################################################
+## A/B NA XIAO — baseline CTRL 2026-08-22 19:24:34
+## CTRL #304 (guard OFF flagom, STARY pin) bezal 14:14..19:23 = 5.16 h
+##   574 udalosti / 2380 ramcov = 24.1 %  (preklopilo sa o 17:34)
+##   nf -117, rxerr=14, spifix=0 (strukturalne, guard je vypnuty)
+## Teraz ide na XIAO ISO #306 = nas pin + IBA jgromesov commit 623de00c8.
+## Rovnaka doska, rovnaka zostava, rovnaka prevadzka -> prve platne A/B.
+## Regresia ISO na T1000-E za 3.2 h: pomer 0.982 vs baseline 1.013, 0 timeoutov.
+################################################################
+xiao-nicerf      19:24:15.127 [FOTA]   AALIVE build #304  freq=869.618 sf=7 rawrx=2400 rawtx=1 rxpkts=2400 rxerr=14 spifix=0 isr=2415 miss=0 nf=-117
+t1000e-local     19:24:09.975 [FOTA]   AALIVE build #305  freq=869.618 sf=7 rawrx=1617 rawtx=1 rxpkts=1617 rxerr=13 spifix=0 stk_minfree=1408B nowused=508B/4096 isr=1640 miss=9 nf=-104
+promicro-local   19:24:22.213 [FOTA]   AALIVE build #498  freq=869.618 sf=7 rawrx=12723 rawtx=1 rxpkts=12723 rxerr=401 stk_minfree=1400B nowused=508B/4096 isr=13150 miss=25 nf=-106
+
+################################################################
+## NOCNE POROVNANIE VSETKYCH TROCH — start 2026-08-22 22:42:52
+## XIAO     #306 = ISO (nas pin + IBA jgromesov commit 623de00c8), od 22:25
+## T1000-E  #305 = ISO, od 16:08
+## ProMicro #498 = referencia, stary RadioLib
+## Zostava nezmenena: stol + filter + stara antena, nf ~-116.
+## Rano porovnat vsetky tri za rovnake okno od tohto casu.
+## Referencne pomery na STAROM pine: T1000-E:ProMicro = 1.013 (22.5 h)
+## Doterajsi ISO pomer T1000-E:ProMicro = 0.983 za 4 h (0.9 sigma, nevyznamne)
+## A/B baseline pre XIAO: CTRL #304 = 574/2380 = 24.1 % za 5.16 h
+################################################################
+xiao-nicerf      22:42:28.769 [FOTA]   AALIVE build #306  freq=869.618 sf=7 rawrx=104 rawtx=1 rxpkts=104 rxerr=2 spifix=0 isr=107 miss=0 nf=-118
+t1000e-local     22:42:29.386 [FOTA]   AALIVE build #305  freq=869.618 sf=7 rawrx=3480 rawtx=1 rxpkts=3480 rxerr=36 spifix=0 stk_minfree=1400B nowused=508B/4096 isr=3534 miss=17 nf=-103
+promicro-local   22:42:40.437 [FOTA]   AALIVE build #498  freq=869.618 sf=7 rawrx=14614 rawtx=1 rxpkts=14614 rxerr=447 stk_minfree=1400B nowused=508B/4096 isr=15091 miss=29 nf=-106
+
+################################################################
+## CITLIVEJSIA ANTENA — start okna 2026-08-23 09:48:39
+## Fedor vymenil antenu za CITLIVEJSIU, doska stale na stole.
+## nf na XIAO skocil o 09:45:49 z -117 na -114 (o 3 dB horsie) - vidno v logu.
+## Ciel: ci pri horsich podmienkach preteka prerazi aj cez jgromesovu opravu.
+## OBA LR dosky su na ISO (nas pin + iba jeho commit).
+## Doterajsi vysledok ISO na XIAO: 0 udalosti / 3920 ramcov za 11.4 h
+##   (baseline CTRL na starom pine bol 574/2380 = 24.1 % za 5.16 h)
+################################################################
+xiao-nicerf      09:48:19.020 [FOTA]   AALIVE build #306  freq=869.618 sf=7 rawrx=3920 rawtx=1 rxpkts=3920 rxerr=38 spifix=0 isr=3959 miss=0 nf=-114
+t1000e-local     09:48:17.598 [FOTA]   AALIVE build #305  freq=869.618 sf=7 rawrx=7271 rawtx=1 rxpkts=7271 rxerr=62 spifix=0 stk_minfree=1400B nowused=508B/4096 isr=7361 miss=27 nf=-102
+promicro-local   09:48:26.333 [FOTA]   AALIVE build #498  freq=869.618 sf=7 rawrx=18448 rawtx=1 rxpkts=18448 rxerr=557 stk_minfree=1400B nowused=508B/4096 isr=19043 miss=37 nf=-105
+
+################################################################
+## GUARD BUILD, cisty beh — start 2026-08-23 13:29:01
+## XIAO #308 (sha CA2D145F) = jgromesov fix (nas pin + cherry-pick 623de00c8)
+##   + NAS GUARD s runtime prepinacom 'fk guard on|off' + logovanie recovery
+##   guard OFF = jeden test bool a hole kniznicne citanie (nedotknute casovanie)
+##   guard ON  = guard + zapis kazdej zachrany do ring buffra ('fk spifix')
+## Stav: guard=off, pretype=off, inject=0, repeat=off
+## spifix=30 je zvysok z VALIDACIE nastroja (fk inject 3), nie prirodzene udalosti
+## T1000-E #305 = ISO, ProMicro #498 = referencia. VSETKY TRI rebootnute, logy od 0.
+##
+## VALIDACIA NASTROJA (13:26, fk inject 3, guard on) — guard ramce ZACHRANUJE:
+##   *fp=4 first=4 final=80 stat=0x5 cmd=2 tries=3 rule=CMD
+##   *fp=4 first=4 final=34 stat=0x5 cmd=2 tries=3 rule=CMD
+##   *fp=4 first=4 final=36 stat=0x5 cmd=2 tries=2 rule=CMD
+##   -> prve citanie 4, opakovane vytiahlo pravu dlzku; status hlasil CMD_OK (cmd=2)
+################################################################
+xiao-nicerf      13:28:37.586 [FOTA]   AALIVE build #308  freq=869.618 sf=7 rawrx=47 rawtx=1 rxpkts=47 rxerr=0 spifix=30 isr=48 miss=0 nf=-113
+t1000e-local     13:28:58.764 [FOTA]   AALIVE build #305  freq=869.618 sf=7 rawrx=45 rawtx=1 rxpkts=45 rxerr=0 spifix=0 stk_minfree=1408B nowused=508B/4096 isr=47 miss=1 nf=-101
+promicro-local   13:28:49.300 [FOTA]   AALIVE build #498  freq=869.618 sf=7 rawrx=45 rawtx=1 rxpkts=45 rxerr=3 stk_minfree=1408B nowused=508B/4096 isr=50 miss=1 nf=-104
