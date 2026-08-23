@@ -66,12 +66,8 @@ class CustomLR1110 : public LR1110 {
     //sk: takze rozhoduje status a nie hodnota - tá sama nerozlisi skutocnu dlzku od
     //sk: nahodnej zhody.
     size_t getPacketLength(bool update) override {
-#ifdef FK_STALE_GUARD_OFF
-      //en: test build for RadioLib issue 1857 - read the length through the library
-      //en: path so it goes via LRxxxx::SPIcommand(), where the BUSY wait fix lives.
-      size_t len = LR1110::getPacketLength(update);
-#elif defined(FK_RADIO_SPI_DIAG)
-      size_t len = fkDiagPktLen(update);
+#ifdef FK_RADIO_SPI_DIAG
+      size_t len = _fk_guard ? fkDiagPktLen(update) : LR1110::getPacketLength(update);
 #else
       uint8_t  stat = 0;
       uint16_t val  = 0;
@@ -133,6 +129,9 @@ class CustomLR1110 : public LR1110 {
     uint16_t _fk_inject = 0, _fk_inject_cnt = 0;
     uint16_t _fk_zero = 0, _fk_zero_cnt = 0;
     bool _fk_pretype = false;
+    //en: master switch for the guard, 'fk guard on|off' (shared CLI with LR2021)
+    //sk: hlavny prepinac guardu, 'fk guard on|off' (zdielane CLI s LR2021)
+    bool _fk_guard = false;
 
     size_t fkDiagPktLen(bool update) {
       uint8_t  stat0 = 0, stat = 0, off = 0, off0 = 0, tries = 0;
