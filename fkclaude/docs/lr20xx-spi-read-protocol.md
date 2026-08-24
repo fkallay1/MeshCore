@@ -158,3 +158,35 @@ povie, v akom režime sa nachádza.
 Surové bajty statusu rozlíšia aj to, čo `-2` zliepa do jednej hodnoty: `0x00` =
 MISO držané nízko (čip nenapájaný alebo drží zbernicu), `0xFF` = MISO plávajúce
 (žiadny driver). RadioLib obe hlási ako CHIP_NOT_FOUND.
+
+## A/B/A na živej epizóde: vložený príkaz zlyhanie ruší, nie zmierňuje
+
+Meranie 24. 8. 2026, 00:14–02:12, XIAO/LR2021 na builde #311 (jgromesova oprava
+aktívna), jediná menená premenná je cesta guardu. Epizóda syndrómu bola po celý čas
+živá — potvrdené tým, že sa zlyhania po prepnutí späť vrátili na tú istú úroveň.
+
+| fáza | cesta | rámce | udalostí guardu | podiel |
+|---|---|---|---|---|
+| 00:14–00:35 | ostrá (`pretype off`) | 142 | 119 | 83,8 % |
+| 00:35–01:24 | **diag (`pretype on`)** | 100 | **0** | **0 %** |
+| 01:24–02:12 | ostrá (kontrola) | 131 | 103 | 78,6 % |
+
+Ostrá cesta číta dĺžku trikrát za sebou, nič medzi tým. Diag cesta pred cyklom zavolá
+`getPacketType()` a potom **pred každým** čítaním `getIrqStatus()`.
+
+**Nula z 100 proti 103 zo 131.** To nie je zmiernenie — s vloženým príkazom nezlyhalo
+ani jedno *prvé* čítanie, takže sa nezaznamenala žiadna udalosť. Chyba teda nie je
+o opakovaní; je o tom, čo čítaniu bezprostredne predchádza.
+
+Doplňujúce čísla z ostrých fáz: keď sa zlyhanie stane, opakovanie toho istého opkódu
+ho vyrieši v ~30 % (845 z 2848 videných záznamov malo `tries=3`), zvyšok potrebuje
+fallback. **Neopravený neostal ani jeden rámec** (`final == first` nula krát, a na
+výstupe nula `len=4` vo všetkých troch fázach).
+
+Zatiaľ neoddelené: či lieči ten vložený príkaz alebo len čas, ktorý zaberie. Na to je
+build 907 s režimami `a` (nič) / `b` (len pauza) / `c` (vložený príkaz) a nastaviteľným
+stropom pokusov.
+
+**Dôsledok pre patch:** navrhovať „opakuj čítanie" je liečenie následku. Ak sa potvrdí,
+že rozhoduje predchádzajúca transakcia, správna oprava je iná — a `CMD_DAT` kontrola
+ostáva ako detekcia, nie ako oprava.
