@@ -225,3 +225,36 @@ milisekundy. Ale ak to platí, oprava „opakuj čítanie" funguje len ako spôs
 transakcie nasekať, a čistejšia oprava je vydať pred prvým čítaním dĺžky jednu neškodnú
 transakciu navyše. Otázka pre datasheet ostáva otvorená: nič v ňom takúto podmienku
 nespomína.
+
+## Náš RadioLib patch overený na železe
+
+24. 8. 2026, 05:26–06:17, tá istá doska, tá istá epizóda, 90 sekúnd medzi fázami.
+Guard **vypnutý** v oboch, takže v ceste je len knižnica.
+
+| build | RadioLib | rámce | `len=4` |
+|---|---|---|---|
+| #317 | iso1857 **+ náš patch** (opakuje len odpoveď, 5 pokusov) | 136 | **0** |
+| #321 | iso1857 sám | 32 | **26 = 81,2 %** |
+
+Kontrolný build hlásil prvý `len=4` už na **rámci #2, 16 sekúnd po bootnutí**. Pri
+podiele 81 % je pravdepodobnosť, že 136 rámcov vyjde čistých náhodou, mimo akúkoľvek
+diskusiu.
+
+Patch teda funguje — a funguje vo variante, ktorá **opakuje iba druhý (NOP) rámec** a
+opkód nechá na pokoji, takže nemá vedľajšie efekty `GetStatus` ani
+`GetAndClearIrqStatus`. To bola otevřená otázka od chvíle, keď sme zistili, že náš
+MeshCore guard opakuje celý príkaz, a teda ho nevalidoval.
+
+Zapadá to do hypotézy o počte transakcií: preklokovanie odpovede **je** transakcia,
+takže päť pokusov nasype dosť transakcií na to, aby odpoveď prišla správne.
+
+### Prehľad všetkých fáz noci
+
+| čas | konfigurácia | rámce | udalostí | zlyhaní/udalosť | `len=4` |
+|---|---|---|---|---|---|
+| 02:19 | guard `a`, strop 8 | 428 | 360 | 3,03 | 0 |
+| 02:48 | guard `c` (vložený príkaz) | 90 | 69 | **1,00** | 0 |
+| 03:24 | guard `b` (pauza 60 µs) | 57 | 46 | 3,96 | 0 |
+| 04:25 | guard `a` (kontrola) | 117 | 91 | **3,05** | 0 |
+| 05:26 | guard off, **náš patch** | 136 | 0 | — | **0** |
+| 06:15 | guard off, **bez patchu** | 32 | — | — | **26** |
