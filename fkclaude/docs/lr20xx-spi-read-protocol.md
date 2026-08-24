@@ -190,3 +190,38 @@ stropom pokusov.
 **Dôsledok pre patch:** navrhovať „opakuj čítanie" je liečenie následku. Ak sa potvrdí,
 že rozhoduje predchádzajúca transakcia, správna oprava je iná — a `CMD_DAT` kontrola
 ostáva ako detekcia, nie ako oprava.
+
+## Hypotéza: rozhoduje počet transakcií od RX_DONE, nie čas
+
+Meranie 24. 8. 2026, 02:19–03:30, build #317, guard v troch režimoch, strop pokusov 8.
+Kľúčová veličina je **zlyhaných čítaní na udalosť** — z počítadiel presne, bez
+závislosti na kruhovom buffri.
+
+| režim | čo je medzi pokusmi | zlyhaní/udalosť | uspeje čítanie č. |
+|---|---|---|---|
+| `a` | nič | **3,03** | 4. |
+| `c` | `getPacketType()` | **1,00** | 2. |
+| `b` | pauza 60 µs | **3,86** (malá vzorka) | 4.–5. |
+
+Pauza sa teda nechová ako príkaz. A ak sa to spočíta ako **transakcie od RX_DONE**,
+sedí všetko, čo sme kedy namerali:
+
+| konfigurácia | poradie transakcií | výsledok |
+|---|---|---|
+| guard OFF | `getPacketType`, dĺžka | zlyhá (2027 z 5996 rámcov = 34 %) |
+| režim `a` | dĺžka, dĺžka, dĺžka, **dĺžka** | uspeje 4. |
+| režim `c` | dĺžka, `getPacketType`, **dĺžka** | uspeje 3. |
+| diag (`pretype on`) | `getPacketType`, `getIrqStatus`, **dĺžka** | uspeje 1. čítanie, 0 zo 100 |
+
+Vo všetkých prípadoch, kde to uspeje, je čítanie **tretia alebo ďalšia** transakcia po
+RX_DONE. Kde je druhá (guard off), zlyháva — a to nie vždy, ale v tretine prípadov, čo
+je presne to, čo čakať na hranici.
+
+To vysvetľuje aj prečo diag cesta „predchádzala" zlyhaniu, kým `getPacketType` samotný
+v `LR2021::getPacketLength()` nie: diag má pred čítaním **dva** príkazy, knižnica jeden.
+
+Nie je to potvrdené — potrebuje to väčšiu vzorku pre `b` a najmä test s pauzou rádovo
+milisekundy. Ale ak to platí, oprava „opakuj čítanie" funguje len ako spôsob, ako tie
+transakcie nasekať, a čistejšia oprava je vydať pred prvým čítaním dĺžky jednu neškodnú
+transakciu navyše. Otázka pre datasheet ostáva otvorená: nič v ňom takúto podmienku
+nespomína.
