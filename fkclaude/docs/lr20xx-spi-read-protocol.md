@@ -258,3 +258,41 @@ takže päť pokusov nasype dosť transakcií na to, aby odpoveď prišla správ
 | 04:25 | guard `a` (kontrola) | 117 | 91 | **3,05** | 0 |
 | 05:26 | guard off, **náš patch** | 136 | 0 | — | **0** |
 | 06:15 | guard off, **bez patchu** | 32 | — | — | **26** |
+
+## Príčina nájdená: čip v tom stave BUSY vôbec nezdvihne
+
+26. 8. 2026. `fkBusyProbe` pošle opkód s **preskočeným** čakaním a vzorkuje BUSY v tesnej
+slučke (400 vzoriek). Osem pokusov za sebou, štyri opakovania celého testu, vždy rovnako:
+
+| pokus | `hi` | `fall` |
+|---|---|---|
+| 0, 1, 2 | **0** | 0 — BUSY nikdy nevidený hore |
+| 3–7 | 15–16 | 16–17 — hore ~15 vzoriek, potom padne |
+
+Linka teda **nie je prirýchla na zachytenie** — keď funguje, drží 15 vzoriek. Pri prvých
+troch transakciách ju čip jednoducho nezdvihne. Hostiteľ, ktorý čaká na jej **pokles**, sa
+preto vráti okamžite a vyčíta odpoveď skôr, než existuje.
+
+To je tá istá trojka ako pri čítaní dĺžky (1., 2., 3. vráti status, 4. je správne), takže
+takmer isto ide o jeden jav.
+
+### Potvrdenie: pauza po opkóde (2 MHz, jedno čítanie)
+
+| pauza | rámce | zlyhaní 1. čítania |
+|---|---|---|
+| 0 µs | 110 | 70,0 % |
+| **8 µs** | 108 | **0,0 %** |
+| 16 / 24 / 32 / 48 µs | 424 | **0,0 %** |
+| 0 µs (kontrola) | 103 | 83,5 % |
+
+532 rámcov s pauzou, ani jedna chyba, zovreté dvomi kontrolami.
+
+### Odporúčaná oprava
+
+Čakať na **stúpnutie** BUSY s krátkym timeoutom, až potom na pokles. Keď čip linku zdvihne,
+zachytí sa a čaká sa presne tak dlho, ako treba; keď ju nezdvihne, vyprší timeout — a ten
+timeout **je** tá pauza, ktorá vec opravuje. Oba prípady skončia správne a nič sa
+nespomaľuje zbytočne. Pevná pauza funguje tiež (8 µs stačilo), ale platí sa pri každom
+čítaní.
+
+Kontrola `CMD_DAT` ostáva ako záchranná sieť, nezávisle overená: 0 zo 136 proti 26 z 32.
