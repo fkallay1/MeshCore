@@ -7,7 +7,8 @@ Pravidlá: žiadna zmienka o AI, bez mriežkových čísel.
 
 Čo je v tele:
 * regresia: 0,977 a 0,984 proti SX1262 referencii, kontrola 1,013; 21 h bez timeoutov
-* BUSY sonda: prvé tri pokusy `hi=0`, ďalšie `hi≈15` — čip BUSY vôbec nezdvihne
+* BUSY sonda: v sériách po sebe idúcich transakcií `hi=0` — čip BUSY nezdvihne;
+  linka pritom čistá (882 841 vzoriek, 0 hrán). Dĺžka tých sérií kolíše.
 * hodiny SPI: 250k/500k = 0 %, 1 MHz = 33 %, 2 MHz = 78–89 % (tri kontroly)
 * pauza po opkóde pri 2 MHz: 0 µs = 70 a 83,5 %, 8–48 µs = **0 % z 532 rámcov**
 * náš CMD_DAT patch: 0 zo 136 proti 26 z 32, tá istá doska, 90 s medzi fázami
