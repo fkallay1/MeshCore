@@ -296,3 +296,31 @@ nespomaľuje zbytočne. Pevná pauza funguje tiež (8 µs stačilo), ale platí 
 čítaní.
 
 Kontrola `CMD_DAT` ostáva ako záchranná sieť, nezávisle overená: 0 zo 136 proti 26 z 32.
+
+## Vylúčené 27. 8. 2026: SIMO, PRAM, rušenie na BUSY
+
+Všetko A/B/A/B v jednej epizóde, po 100 rámcov na fázu, guard vypnutý.
+
+**Vnútorný regulátor čipu (`fk simo on|off`, DC-DC proti LDO):** 85,0 / 79,0 / 76,2 /
+79,2 %. Bez rozdielu.
+
+**Firmvérový patch v PRAM (`fk pram off` + `fk ce 300`, ktorý PRAM zmaže a init ho už
+nenahrá):** bez patchu 79,2 a 82,7 %, s patchom 71,8 a 85,0 %. Bez rozdielu. Overené tým,
+že riadok `pram load: rc=0 -> loaded=YES` sa v logu objaví len vo fázach s povoleným
+nahrávaním. **Stavový register PRAM sa na overenie použiť nedá — je sám pretečený**, štyri
+čítania za sebou dali `NO / YES / YES / NO`.
+
+Toto boli jediné dve veci, ktorými sa náš variant líši od upstreamových LR2021 dosiek
+(`meshnology_w12`, `meshtracker_x1`) — obe padli, takže hypotéza „spôsobujeme si to sami
+vlastným nastavením" neplatí.
+
+**Rušenie na vodiči BUSY (`fk bwin`):** vzorkovanie linky, kým sa nič neposiela a hlavná
+slučka je zastavená, 3 okná, **882 841 vzoriek, 0 vysokých, 0 hrán**. Linka je čistá; čip
+ju proste nezdvihne.
+
+**Pozor na kolíziu prefixov v CLI** — `fk busywin` chytil starší handler `fk busy`, lebo
+`memcmp(arg, "busy", 4)` sedí aj na `busywin`. Premenované na `fk bwin`.
+
+**Spresnenie k „prvé tri transakcie":** nie je to pevné číslo. V jednej sérii to boli
+zakaždým prvé tri sondy, v neskoršej videlo linku všetkých osem a séria piatich slepých
+prišla až potom.

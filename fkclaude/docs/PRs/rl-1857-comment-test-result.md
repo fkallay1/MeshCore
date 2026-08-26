@@ -53,10 +53,18 @@ busy run 6  hi=15  fall=16
 busy run 7  hi=15  fall=16
 ```
 
-Four invocations, the same pattern every time. So the line is not too fast to catch — when
-it works it stays high for fifteen samples. **For the first three transactions the chip
-does not assert BUSY at all.** A host that waits for BUSY to go low therefore returns
-immediately and clocks the reply out before there is one.
+Four invocations in a row, the same pattern each time. So the line is not too fast to
+catch — when it works it stays high for fifteen samples out of four hundred. **In stretches
+of consecutive transactions the chip does not assert BUSY at all**, and a host that waits
+for BUSY to go low therefore returns immediately and clocks the reply out before there is
+one. How long those stretches are varies: in the run above it was the first three probes
+every time, while in a later session all eight probes saw the line and a run of five blind
+ones turned up only afterwards. I would not read a fixed number into it.
+
+The line itself is clean. Sampling BUSY while nothing at all is being sent, with the main
+loop stopped so no other transaction can raise it, gave 882841 samples across three windows
+with zero highs and zero edges — so this is the chip declining to assert the line, not
+interference making us misread it.
 
 That also explains the count I kept seeing elsewhere: reads one, two and three come back
 as status, the fourth is correct. Same three.
