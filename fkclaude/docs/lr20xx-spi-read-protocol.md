@@ -341,3 +341,27 @@ stiahnutý úvodným čistým oknom. Po jeho odznení sa to vrátilo na pôvodn�
 
 Za zmienku stojí, že dve odpojenia napájania toho istého druhu dali raz 0 a raz 22 čistých
 rámcov. Dĺžka toho okna teda kolíše a sama o sebe nič neznamená.
+
+## 27. 8. 2026: po pohnutí vodičmi chyba ustala
+
+Bez resetu, bez zmeny softvéru. Priebeh merania po päťdesiatkach: **34, 37, 0, 0, 0, 0, 0**
+z 50, potom ďalších 410 rámcov nula. Spolu **660 rámcov za sebou bez chyby**, `rebootov: 0`.
+
+Podstatnejšie než chybovosť je, že sa zmenil **mechanizmus**:
+
+| kontrola | pred | po |
+|---|---|---|
+| `fk stat 0101` | striedavo `cmd=2` bez dát | 4/4 `cmd=3=DAT`, verzia `01 18` |
+| `fk busy` | série s `hi=0` (BUSY sa nedvíhal) | **8/8 videný vysoko, `hi≈14`** |
+
+Čip teda zdvihne BUSY na každej transakcii — tá vec, ktorú sme identifikovali ako príčinu,
+prestala nastávať. Všetky predchádzajúce „čisté okná" menili len číslo, nie chovanie linky.
+
+**Neuzavreté:** 660 rámcov je ~80 min, kým najdlhšia odmeraná spontánna remisia bola
+3 h 24 min (~2400 rámcov). Uzavrie to až to, keď sa chyba pohnutím tým istým spojom
+**privedie späť a znova odstráni**. Jedna remisia je náhoda, prepínanie je dôkaz.
+
+Ak sa potvrdí, sedí do toho všetko ostatné: zlý spoj neopraví reboot, reflash, nový zdroj
+ani nič v softvéri — a vysvetľuje aj to, prečo to nikto iný nehlási. Do textu pre jgromesa
+by potom muselo ísť jasne, že príčina bola u nás; jeho issue ostáva platné ako reálna race
+podmienka, náš prípad bol jej vyhrotená verzia.
