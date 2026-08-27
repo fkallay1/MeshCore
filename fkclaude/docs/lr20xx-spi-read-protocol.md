@@ -324,3 +324,20 @@ ju proste nezdvihne.
 **Spresnenie k „prvé tri transakcie":** nie je to pevné číslo. V jednej sérii to boli
 zakaždým prvé tri sondy, v neskoršej videlo linku všetkých osem a séria piatich slepých
 prišla až potom.
+
+## Vylúčené 27. 8. 2026 ráno: napájanie
+
+Obe fázy začínajú skutočným power-on resetom (`RESETREAS=0x0`), overené v logu.
+
+| zásah | čisté rámce pred prvým pokazeným | ustálená chybovosť |
+|---|---|---|
+| základ | — | 83,5 – 84,3 % |
+| odpojenie a zapojenie napájania | **0** | 86,0 % (121 rámcov) |
+| **iný napájací zdroj** | 22 | **81,9 %** (320 rámcov po nábehu) |
+
+Nový zdroj dal v prvom meraní 43,3 %, čo vyzeralo ako zlepšenie — ale bol to len priemer
+stiahnutý úvodným čistým oknom. Po jeho odznení sa to vrátilo na pôvodnú úroveň.
+**Vždy treba merať až to, čo príde po nábehu**, inak každý zásah vyzerá ako úspech.
+
+Za zmienku stojí, že dve odpojenia napájania toho istého druhu dali raz 0 a raz 22 čistých
+rámcov. Dĺžka toho okna teda kolíše a sama o sebe nič neznamená.
