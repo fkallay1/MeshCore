@@ -365,3 +365,37 @@ Ak sa potvrdí, sedí do toho všetko ostatné: zlý spoj neopraví reboot, refl
 ani nič v softvéri — a vysvetľuje aj to, prečo to nikto iný nehlási. Do textu pre jgromesa
 by potom muselo ísť jasne, že príčina bola u nás; jeho issue ostáva platné ako reálna race
 podmienka, náš prípad bol jej vyhrotená verzia.
+
+## 27. 8. 2026 večer: BUSY fyzicky odpojený — pauza ho plne zastúpi
+
+Rozhodujúci pokus. Vodič BUSY **vytiahnutý**, ten istý firmware (#332, RadioLib s naším
+patchom + MeshCore guard), tie isté podmienky, fázy pár minút po sebe:
+
+| konfigurácia | rámce | pretečené |
+|---|---|---|
+| bez pauzy, guard vypnutý | 34 | 19 = **55,9 %** |
+| bez pauzy, guard 8 pokusov | 8 | 8 = **100 %** |
+| **pauza 20 µs po opkóde** | **52** | **0 = 0,0 %** |
+
+Pri pauze `spifix` **nestúpol vôbec** (288 pred aj po), čiže guard nezasiahol ani raz —
+prvé čítanie prešlo zakaždým. Nie je to opravené opakovaním, chyba vôbec nenastane.
+
+### Čo je tým dokázané
+
+**BUSY v čítacej ceste neplní inú úlohu než časovanie.** Odpoj ho a stačí namiesto neho
+počkať; čip odpoveď pripraví rovnako, len o tom nemá ako dať vedieť.
+
+**Opakovanie je slabšia oprava než pauza a v krajnom prípade škodí.** Opakované čítania idú
+tesne za sebou, a keď BUSY nedvíha, sú **všetky** priskoro — preto guard s ôsmimi pokusmi
+dopadol horšie (100 %) než keby tam nebol (55,9 %). Naše minulotýždňové merania, kde štvrté
+čítanie uspelo, platia pre **slabý** spoj, kde čip BUSY dvíhal a čakanie na jeho pokles
+občas zabralo. Pri žiadnom BUSY neplatia.
+
+### Dôsledok pre upstream — obrátené poradie
+
+1. **čakať na stúpnutie BUSY s krátkym timeoutom** — keď linka funguje, čaká presne koľko
+   treba; keď nefunguje, timeout sám dodá ten čas
+2. **`CMD_DAT` už len ako detekcia**, nie ako oprava opakovaním
+
+Doteraz sme jgromesovi ponúkali ako hlavnú vec kontrolu `CMD_DAT` s opakovaním. Podľa tohto
+merania je to to horšie z dvoch riešení. Text treba prepísať.
