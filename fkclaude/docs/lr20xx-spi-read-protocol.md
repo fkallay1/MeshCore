@@ -430,3 +430,20 @@ oněmie (`mode=1`, prúd 10 mA, žiadne rámce). Watchdog to zachytil správne
 (`rssi-window spread=0 <== CONSTANT`), ale nezasiahol, lebo beží s `FK_RADIO_DIAG_ONLY=1`.
 Ručný `fk reinit` dosku okamžite zotavil. **Stojí za zváženie zapnúť watchdog naostro** —
 týka sa to všetkých dosiek, nie len tejto.
+
+### Časová os, kde sa pauza zapla za behu (najlepší jediný doklad)
+
+Jeden súvislý beh, BUSY **vytiahnutý po celý čas**, meniac sa len nastavenie:
+
+| čas | rámce | pretečené | `spifix` | stav |
+|---|---|---|---|---|
+| 18:35 | 5 | 0 | 0 | vodič ešte zapojený |
+| 18:36 | 25 | 10 | 0 | vodič vonku, chyba nabieha |
+| 18:38 | 42 | 27 | 0 | 64 % |
+| 18:40 | 63 | 43 | 288 | guard zasahuje a nestíha |
+| **18:41** | 63 | **43** | 288 | **zapnutá pauza 20 µs** |
+| 18:48 | **119** | **43** | **288** | ďalších 56 rámcov, **nula nových** |
+
+Od zapnutia pauzy sa počet pokazených zastavil na 43 a už sa nepohol, a `spifix` tiež —
+guard prestal mať čo opravovať, lebo prvé čítanie odvtedy prechádzalo zakaždým.
+Všetko s odpojeným vodičom, teda bez akejkoľvek pomoci od BUSY.
