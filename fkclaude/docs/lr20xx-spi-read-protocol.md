@@ -400,7 +400,7 @@ občas zabralo. Pri žiadnom BUSY neplatia.
 Doteraz sme jgromesovi ponúkali ako hlavnú vec kontrolu `CMD_DAT` s opakovaním. Podľa tohto
 merania je to to horšie z dvoch riešení. Text treba prepísať.
 
-## Záver: príčinou bol spoj na BUSY
+## NEUZAVRETÉ: chýbajúci BUSY je príčina, ale prečo chýbal nevieme
 
 Po zapojení vodiča späť, s **vypnutou pauzou aj guardom** a bez zásahu patchu
 (`spifix` sa nepohol): **306 rámcov, 0 pretečených**, sedem päťdesiatok za sebou na nule.
@@ -413,8 +413,8 @@ päťdesiatkach `0, 43, 0, 0`, kde tá 43 je presne obdobie s vytiahnutým BUSY.
 |---|---|
 | symptóm | čítanie dĺžky vráti `irq[31:16]`, 70–85 % rámcov |
 | bezprostredná príčina | odpoveď sa číta skôr, než je pripravená — čakanie na pokles BUSY sa vráti okamžite |
-| fyzická príčina | prechodový odpor na spoji BUSY |
-| oprava | vytiahnutie a zasunutie konektora (otrie plôšky a kolík si sadne) |
+| prečo MCU prestal BUSY vidieť | **NEVIEME** — pozri nižšie |
+| čo tomu predchádzalo, kým to prestalo | pohnutie vodičmi, potom vytiahnutie a zasunutie konektora |
 | čo pomáha softvérovo | pauza po opkóde — 0 z 52 rámcov aj s úplne odpojeným vodičom |
 | čo nepomáha | opakovanie čítania, keď BUSY nedvíha vôbec — všetky pokusy sú rovnako priskoro |
 
@@ -447,3 +447,23 @@ Jeden súvislý beh, BUSY **vytiahnutý po celý čas**, meniac sa len nastaveni
 Od zapnutia pauzy sa počet pokazených zastavil na 43 a už sa nepohol, a `spifix` tiež —
 guard prestal mať čo opravovať, lebo prvé čítanie odvtedy prechádzalo zakaždým.
 Všetko s odpojeným vodičom, teda bez akejkoľvek pomoci od BUSY.
+
+
+### Prečo to NIE JE uzavreté
+
+Tvrdenie „príčinou bol prechodový odpor na spoji" bolo **prestrelené**. Dokázané je len
+toto: *keď MCU nevidí BUSY, chyba nastane* — to preukázal kontrolovaný pokus s odpojením.
+**Prečo ho prestal vidieť, dokázané nie je.** Dve hypotézy sedia na dáta:
+
+| hypotéza | čo pre ňu hovorí | čo proti nej |
+|---|---|---|
+| zlý spoj (prechodový odpor) | výpis pinov niekedy hlásil `FLOATING` tam, kde mal byť `driven LOW`; chyba ustala po manipulácii s konektorom | sonda vzorkuje 400× v okne desiatok µs a videla **nulu vysokých** — odporový spoj by hranu spomalil, nie potlačil úplne |
+| **čip v istých stavoch BUSY nevyprodukuje** | tá istá nula vysokých; a chyba prichádzala a odchádzala sama, bez dotyku dosky | manipulácia s konektorom časovo súvisela s ustaním |
+
+Fedorova námietka (27. 8.): *„Ja mam len pocit, ze v urcitych situaciach to neprodukuje
+korektne BUSY."* — z merania sondou je to prinajmenšom rovnako podložené ako spoj.
+
+**A nie je dokázané ani to, že sa to nevráti.** Chyba raz sama odišla na **3 h 24 min** a
+potom sa vrátila. Čistý beh kratší než to nedokazuje nič. Preto od 27. 8. 20:34 beží
+build #333 s **pôvodnou knižnicou** (bez nášho patchu), s vypnutým guardom aj pauzou —
+aby prípadný návrat nič nemaskovalo.
