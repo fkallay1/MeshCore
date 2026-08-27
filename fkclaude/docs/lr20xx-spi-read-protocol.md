@@ -399,3 +399,34 @@ občas zabralo. Pri žiadnom BUSY neplatia.
 
 Doteraz sme jgromesovi ponúkali ako hlavnú vec kontrolu `CMD_DAT` s opakovaním. Podľa tohto
 merania je to to horšie z dvoch riešení. Text treba prepísať.
+
+## Záver: príčinou bol spoj na BUSY
+
+Po zapojení vodiča späť, s **vypnutou pauzou aj guardom** a bez zásahu patchu
+(`spifix` sa nepohol): **306 rámcov, 0 pretečených**, sedem päťdesiatok za sebou na nule.
+`fk busy` dáva 8/8 aj počas hýbania konektorom, `hi` = 13 až 31 (počas chyby 0).
+
+Symptóm sa dal **zapnúť a vypnúť vodičom** — jedna z priebežných meraní má rozpis po
+päťdesiatkach `0, 43, 0, 0`, kde tá 43 je presne obdobie s vytiahnutým BUSY.
+
+| | |
+|---|---|
+| symptóm | čítanie dĺžky vráti `irq[31:16]`, 70–85 % rámcov |
+| bezprostredná príčina | odpoveď sa číta skôr, než je pripravená — čakanie na pokles BUSY sa vráti okamžite |
+| fyzická príčina | prechodový odpor na spoji BUSY |
+| oprava | vytiahnutie a zasunutie konektora (otrie plôšky a kolík si sadne) |
+| čo pomáha softvérovo | pauza po opkóde — 0 z 52 rámcov aj s úplne odpojeným vodičom |
+| čo nepomáha | opakovanie čítania, keď BUSY nedvíha vôbec — všetky pokusy sú rovnako priskoro |
+
+### Diagnostika do budúcna
+
+`fk busy` je **jednosekundový priamy test kvality toho spoja**: zdravý dá 8/8, degradujúci
+série s `hi=0`. Nečaká sa na symptóm, meria sa príčina.
+
+### Nesúvisiaci, ale dôležitý vedľajší nález
+
+Keď BUSY vypadne za behu, rádio spadne do **STDBY_RC a samo sa nevráti** — repeater ticho
+oněmie (`mode=1`, prúd 10 mA, žiadne rámce). Watchdog to zachytil správne
+(`rssi-window spread=0 <== CONSTANT`), ale nezasiahol, lebo beží s `FK_RADIO_DIAG_ONLY=1`.
+Ručný `fk reinit` dosku okamžite zotavil. **Stojí za zváženie zapnúť watchdog naostro** —
+týka sa to všetkých dosiek, nie len tejto.
