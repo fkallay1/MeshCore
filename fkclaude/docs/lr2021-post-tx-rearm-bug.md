@@ -269,3 +269,58 @@ odpoveď cez LoRa dve sekundy hluchoty.
 Ďalší krok, keď bude doska po ruke: **osciloskop na 3V3 pri module počas vysielania.**
 Softvérovou náhradou je zníženie vysielacieho výkonu a porovnanie počtu zlyhaní na
 vysielanie vnútri tej istej epizódy.
+
+## ODVOLANÉ 28. 8. 2026 večer — nešlo o napájanie, ale o pretečené čítania
+
+Záver vyššie („čip stráca napájanie, resetuje sa sám") **neplatí**. Stál na
+údajoch, ktoré samy prišli cez pokazenú čítaciu cestu.
+
+### Čo ho zlomilo
+
+PRAM verzia pri poruche nebola jedna hodnota, ale tri rôzne — `0x04FD`, `0x1CFD`,
+`0x007D` — kým v zdravom stave je 391× zhodne `0x0313`. Čip po skutočnom resete
+hlási vždy to isté. Tri rôzne = **pokazené čítania**. A `vbat=3mV`, `temp=0.0C`,
+`rssi=-255` aj samotné `-707` sú tiež len čítania cez SPI.
+
+### Meranie, ktoré to rozhodlo
+
+Dve hodiny za sebou, rovnaké podmienky, dve referenčné dosky počúvajúce tú istú
+prevádzku (zhoda referencií 585/584 a 626/626, teda meranie je čisté):
+
+| | bez patchu (15:37–16:49) | s patchom (16:49–17:50) |
+|---|---|---|
+| XIAO prijatych | 359 | 576 |
+| **XIAO / referencia** | **0,61** | **0,92** |
+| mŕtve okná | 39 zo 142 (27 %) | 4 zo 122 (3 %) |
+| zásahy watchdogu | 13 | 1 |
+
+`0,92` je zhodné s rannou zdravou hodnotou (08:30–09:30). Build bez patchu bol
+`radiolib-iso` (jgromesov commit, bez našej opravy) a `_fk_rdgap_us = 0`, takže
+proti pretečeným čítaniam nemal ochranu žiadnu.
+
+**Pozor:** `fk rdgap` sa na overenie použiť nedá — pauzu vkladá len do našich
+vlastných pomôcok (`fkRawRead`, `readRxPktLenWithStatus`), nie do bežnej čítacej
+cesty RadioLibu. Preto bolo treba prepnúť symlink na `radiolib-cmddat`.
+
+### Prečo to vyzeralo ako väzba na vysielanie
+
+Neviem to zatiaľ vysvetliť mechanizmom. Väzba na TX bola nameraná a je reálna
+(277 prijatých : 0 zlyhaní proti 2 vyslaným : 2 zlyhania), ale keďže príčinou boli
+pretečené čítania, ide zrejme o to, že čítania stavu tesne po vysielaní sú na ne
+najcitlivejšie. **Neoverené.**
+
+### Čo ostáva nedovysvetlené
+
+S patchom to nie je nula: 4 mŕtve okná zo 122, jeden zásah watchdogu, päť zásahov
+strážcu nahodenia, a jedno osamelé `vbat=2454mV` v dávke, kde PRAM prečítala
+správne `0x0313` — teda to nevyzerá na pokazené čítanie.
+
+### Čo z toho platí ďalej
+
+- Obe zotavovacie cesty (strážca nahodenia, watchdog cez RSSI) sú užitočné a majú
+  ostať — zachytili a opravili 62 výpadkov bez jediného zlyhania.
+- Obe chyby v prvej verzii tej opravy (zaplavenie logu, nenulované počítadlo) boli
+  skutočné a sú opravené.
+- **Pre RadioLib je toto silnejší dôkaz než pôvodný:** nie chybné dĺžky paketov, ale
+  merateľná strata 39 % prevádzky, ktorá po nasadení patchu zmizne, s dvoma
+  referenčnými uzlami ako kontrolou.
