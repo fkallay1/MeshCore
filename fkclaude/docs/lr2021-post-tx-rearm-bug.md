@@ -1,6 +1,7 @@
-# LR2021: po vysielaní môže zlyhať nahodenie príjmu (−706)
+# LR2021: nahodenie príjmu môže zlyhať (−706) — chýbajúca maska STATE_INT_READY
 
-Nájdené a potvrdené 28. 8. 2026. **Netýka sa to pretečených SPI odpovedí** — je to
+Nájdené a potvrdené 28. 8. 2026. **Pôvodný názov hovoril „po vysielaní" — to bolo
+nesprávne, viď opravu na konci.** **Netýka sa to pretečených SPI odpovedí** — je to
 samostatná chyba v MeshCore, ktorá skončí tichým a trvalým výpadkom príjmu.
 
 ## Symptóm
@@ -87,3 +88,53 @@ Watchdog (`FKPR_RADIO_WATCHDOG`) tento stav **spoľahlivo deteguje** — hlási
 `rssi-window ... spread=-1 <== NO SAMPLES`. Zachytil oba spontánne výskyty. Beží však
 s `FK_RADIO_DIAG_ONLY=1`, takže len pozoruje. Zapnutie naostro by dosku zotavilo do 30 s
 aj bez tejto opravy, a chráni aj pred inými príčinami tichého výpadku.
+
+
+## OPRAVA DIAGNÓZY (28. 8., po štyroch výskytoch)
+
+Prvá verzia tohto dokumentu tvrdila, že chyba nastáva **po vysielaní**. **Nie je to tak.**
+V behu #336 sa **nevysielalo ani raz** (`rawtx=2` je z bootu, ďalšie `TX RAW` v logu nie sú)
+a napriek tomu nastali štyri zlyhania. Tri zo štyroch prišli **do pol sekundy po prijatom
+rámci**.
+
+### Skutočná príčina: chýbajúca maska v porovnaní
+
+```cpp
+state |= STATE_INT_READY;              // riadok 35, v ISR
+...
+state = STATE_RX;                      // riadok 196, po spracovaní paketu
+...
+if (state != STATE_RX) {               // riadok 202 — BEZ MASKY
+  int err = _radio->startReceive();
+```
+
+Ak **medzi priradením a porovnaním pribehne prerušenie z ďalšieho paketu**, `state` bude
+`STATE_RX | STATE_INT_READY`, čo sa nerovná `STATE_RX` — a zavolá sa `startReceive()` na
+prijímači, ktorý už v Rx je. LR2021 odpovie **−706** a wrapper ostane v `STATE_IDLE`.
+
+Že sa ten bit má maskovať, vie samotný kód o kúsok vyššie:
+
+```cpp
+bool RadioLibWrapper::isInRecvMode() const {
+  return (state & ~STATE_INT_READY) == STATE_RX;   // <-- tu maska JE
+}
+```
+
+### Prečo to sedí na všetko
+
+Nastáva **hneď po prijatí**, lebo treba ďalšie prerušenie v mikrosekundovom okne — a
+v meshi chodia pakety v dávkach retransmisií. Je **zriedkavé** z rovnakého dôvodu. A je to
+**len LR2021**, lebo ostatné čipy majú na tom mieste `STATE_IDLE` a nahodenie naozaj
+potrebujú.
+
+### Správna oprava
+
+```cpp
+if ((state & ~STATE_INT_READY) != STATE_RX) {
+```
+
+`standby()` pred opakovaním, ktorý bol v prvej verzii, je len **náplasť** — zbytočné
+volanie sa ňou vykoná a až potom opraví. S maskou sa nevykoná vôbec.
+
+Nasadené v builde #339, inštrumentácia ponechaná: ak sa počítadlo zlyhaní za porovnateľný
+čas (4 výskyty za 5,7 h) neposunie, je to potvrdené.
