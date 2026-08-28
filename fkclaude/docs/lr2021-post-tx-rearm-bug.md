@@ -138,3 +138,134 @@ volanie sa ňou vykoná a až potom opraví. S maskou sa nevykoná vôbec.
 
 Nasadené v builde #339, inštrumentácia ponechaná: ak sa počítadlo zlyhaní za porovnateľný
 čas (4 výskyty za 5,7 h) neposunie, je to potvrdené.
+
+## Doplnenie 28. 8. 2026 dopoludnia — čip sa resetuje sám
+
+Meranie na buildoch #340 až #344 prinieslo pozorovanie, ktoré doterajší výklad
+nepokrýva a je od neho nezávislé.
+
+### Čo bolo namerané
+
+O 10:04 doska ohluchla natrvalo. Kým som ju reštartoval, odpovedala cez CLI:
+
+| údaj | zdravý stav (dni dozadu, aj 09:31 v ten deň) | pri poruche 10:04 |
+|---|---|---|
+| `vbat` | 3311–3313 mV | **3 mV** |
+| `temp` | ~19 °C | **0,0 °C** |
+| `errors` | 0x0000 | **0x0001** |
+| PRAM | `loaded=YES version=0x0313` | **`loaded=no version=0x1CFD`** |
+| ResetSource | `NRESET` | **`ANALOG (POR/BRN)`** |
+
+PRAM je v RAM čipu, takže `loaded=no` znamená skutočný reset, nie chybu čítania.
+SPI pritom odpovedalo správne (`cmd=3=DAT`), len `SetRx` čip odmietal (−707,
+`SPI_CMD_FAILED`), lebo bol v čerstvom nenakonfigurovanom stave.
+
+O 09:31, teda pol hodiny predtým, ten istý príkaz vracal `NRESET` — pole sa mení,
+takže to nebol zvyšok z bootu.
+
+`fk reinit` príjem okamžite vrátil (po 7 minútach hluchoty). Hneď po ďalšom
+vysielaní `vbat` klesol z 3313 na **2455 mV** a pribudol bit `errors=0x0200`.
+
+### Väzba na vysielanie — platila, potom prestala
+
+V behu #340 prišlo **všetkých päť zlyhaní do 0,3–2,5 s po vysielaní**. Od buildu
+#343 doska padá **aj s vypnutým `repeat`**, teda bez vysielania. Väzba na TX teda
+nie je celý obraz.
+
+### Čo je vylúčené
+
+**Anténa a filter.** Úrovne príjmu sú pred poruchou aj po nej nerozlíšiteľné:
+
+| build | medián RSSI | najlepší RSSI | medián SNR |
+|---|---|---|---|
+| #339 (pred) | −47 dBm | −34 | 13,2 |
+| #340 (počas) | −47 dBm | −34 | 13,2 |
+| #342 / #343 (po) | −48 dBm | −34 | 13,5 |
+
+Poškodená vstupná cesta by citlivosť zrazila o desiatky dB. Vysielací výkon sa
+počas celého merania nemenil, `_prefs.tx_power_dbm` bolo trvalo 7.
+
+**Pozor na informačný riadok pri boote:** `tx=14dBm req -> ~22 dBm module out`
+počíta z konštanty `LORA_TX_POWER` z prekladu, nie z behovej hodnoty. Skutočne
+nastavený výkon hlási až `radio re-initialised OK (... tx=7)`.
+
+### Dve chyby v mojej vlastnej oprave
+
+1. **Zaplavenie logu.** Nahodenie sa opakovalo v každom kole `loop()` a zakaždým
+   vypisovalo — za 6,5 minúty 177 641 riadkov, čo samo spomalilo slučku. Výpis je
+   odvtedy obmedzený na jeden riadok za 5 s.
+2. **Počítadlo série sa nenulovalo.** `_n_rearm_run` klesalo na nulu len vtedy, keď
+   uspelo *opakovanie*. Po zotavení sa tá vetva už nevykonala, hodnota ostala visieť
+   a strážca strieľal každých 10 s na rádiu, ktoré bolo v poriadku (`run=467`
+   nemenné cez tri zásahy). Nuluje sa teraz pri **každom** úspešnom nahodení.
+
+### Otvorené
+
+Zmena `state = (len > 0) ? STATE_RX : STATE_IDLE` je od buildu #344 za behovým
+prepínačom `fk lenstate on|off`, **východzie je pôvodné správanie**, aby sa dalo
+zmerať, či súčasné padanie nespôsobuje práve ona.
+
+## Overené na železe 28. 8. 2026 predpoludním — obe podoby sa zotavia samy
+
+Porucha chodí **v epizódach**. Mimo epizódy je vysielanie neškodné (build #345:
+24 minút, 118 prijatých, 31 vyslaných, nula zásahov). Vnútri epizódy zabije príjem
+prakticky každé vysielanie.
+
+Preto sa nedá nič usudzovať z čistého okna hneď po flashi či reštarte — to je tá
+istá pasca, ktorá ma pri tomto probléme oklamala už dvakrát.
+
+### Dôkaz väzby na vysielanie
+
+Build #344, jediná zmenená premenná bol `repeat`:
+
+| fáza | trvanie | prijaté | vyslané | zlyhania |
+|---|---|---|---|---|
+| A — `repeat off` | 25,3 min | **277** | 1 | 1 |
+| B — `repeat on` | prvý paket | 1 | 1 | 1 |
+
+Odstupy zlyhaní od vysielania: 0,609 s a 0,318 s. Po prepočítaní sedia aj staršie
+buildy (#341: 6 TX / 6 zlyhaní, #342: 16 / 13, #343: 5 / 7) — väzba je zhruba jedna
+k jednej s vysielaním, príjem nespôsobuje nič.
+
+Zachytený aj typický spúšťač z praxe:
+
+```
+11:37:01.9  RX #147   <- prisiel LoRa CLI prikaz „get repeat"
+11:37:02.5  TX #40    <- doska odoslala odpoved
+11:37:02.8  -707      <- 0,308 s po tom vysielani
+11:37:04.7  zotavenie -> vbat=3316mV, pram loaded=YES, prijem spat
+```
+
+To vysvetľuje staršie hlásenie „skúšal som sa naň cez LoRa prihlásiť a prestalo to
+prijímať" — prihlásenie donúti repeater odpovedať a odpoveď je vysielanie.
+
+### Dve podoby, dva detektory
+
+| podoba | čo ju zachytí | čas do zotavenia |
+|---|---|---|
+| `SetRx` odmietnutý (−707) | strážca nahodenia (`radioRearmGuard`) | ~2 s |
+| čip ticho prestane merať, RSSI konštantne −255 | pravidlo watchdogu cez RSSI | ~60 s |
+
+Druhú podobu strážca nahodenia **nikdy neuvidí**: wrapper si myslí, že je v Rx,
+takže sa o nahodenie ani nepokúsi, a bez pokusu nie je čo odmietnuť.
+
+Preto bol zrušený `FK_RADIO_DIAG_ONLY` — pravidlo cez RSSI je jediné, čo tú podobu
+chytí. Výpis okna ostal, len sa už nekončí návratom. Overené na skutočnej poruche:
+
+```
+11:47:41  CONSTANT (1/3)
+11:48:11  CONSTANT (2/3)
+11:48:41  CONSTANT (3/3) -> zotavenie
+11:48:41  vbat=3315mV, pram loaded=YES, errors=0x0000
+11:49:11  rssi-window n=1024 max=-113 spread=142   (prijimac znovu meria)
+```
+
+### Čo to nerieši
+
+Príčinu. Uzol sa vracia k životu sám namiesto toho, aby ostal hluchý do reštartu,
+čo je pre vzdialený beh podstatné — ale vnútri epizódy stojí každá administrátorská
+odpoveď cez LoRa dve sekundy hluchoty.
+
+Ďalší krok, keď bude doska po ruke: **osciloskop na 3V3 pri module počas vysielania.**
+Softvérovou náhradou je zníženie vysielacieho výkonu a porovnanie počtu zlyhaní na
+vysielanie vnútri tej istej epizódy.
