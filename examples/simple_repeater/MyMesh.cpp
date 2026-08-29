@@ -1655,6 +1655,18 @@ bool MyMesh::radioDiagCliCommand(char* command, char* reply) {
   //en: b = idle gap only, c = one getPacketType() in between. 'on' keeps the mode.
   //sk: 'fk guard a|b|c' zaroven vyberie, co oddeluje dva pokusy: a = hned za sebou,
   //sk: b = len necinna pauza, c = jeden getPacketType() medzi nimi. 'on' mod nemeni.
+#if defined(PIN_LORA_CE)
+extern void fk_ce_cycle(uint32_t off_ms);
+#endif
+
+#ifdef FK_LRXXXX_STALE_COUNTER
+//en: counter from our RadioLib patch - how many read replies had to be fetched again.
+//en: Only exists when built against the patched RadioLib, hence the flag.
+//sk: pocitadlo z nasho RadioLib patchu - kolko odpovedi bolo treba vyzdvihnut znova.
+//sk: Existuje len pri builde proti zaplatanemu RadioLibu, preto ten flag.
+extern volatile uint32_t lrxxxx_stale_reads;
+#endif
+
   if (memcmp(arg, "guard", 5) == 0) {
     const char* n = arg + 5;
     while (*n == ' ') n++;
@@ -1664,6 +1676,17 @@ bool MyMesh::radioDiagCliCommand(char* command, char* reply) {
     } else if (*n) {
       radio._fk_guard = (memcmp(n, "on", 2) == 0);
     }
+#ifdef FK_LRXXXX_STALE_COUNTER
+    sprintf(reply, "guard=%s mode=%c tries=%u gap=%uus, spifix=%lu, rlretry=%lu, pretype=%s, inject=%u",
+            radio._fk_guard ? "ON" : "off",
+            (char)('a' + radio._fk_guard_mode - 1),
+            (unsigned)radio._fk_max_tries,
+            (unsigned)radio._fk_gap_us,
+            (unsigned long)radio.getStalePktLenReads(),
+            (unsigned long)lrxxxx_stale_reads,
+            radio._fk_pretype ? "on" : "off",
+            (unsigned)radio._fk_inject);
+#else
     sprintf(reply, "guard=%s mode=%c tries=%u gap=%uus, spifix=%lu, pretype=%s, inject=%u",
             radio._fk_guard ? "ON" : "off",
             (char)('a' + radio._fk_guard_mode - 1),
@@ -1672,6 +1695,7 @@ bool MyMesh::radioDiagCliCommand(char* command, char* reply) {
             (unsigned long)radio.getStalePktLenReads(),
             radio._fk_pretype ? "on" : "off",
             (unsigned)radio._fk_inject);
+#endif
     return true;
   }
   //en: 'fk gap <us>' - the idle delay mode B inserts between attempts. Set it to what
@@ -1827,6 +1851,140 @@ bool MyMesh::radioDiagCliCommand(char* command, char* reply) {
     return true;
   }
 
+  //en: 'fk stat' - what the chip actually says about itself. GetVersion (0x0101) is read
+  //en: raw, status bytes and all, because the decoded fields answer two questions the
+  //en: usual -2 CHIP_NOT_FOUND cannot: ResetSource says whether the chip saw a brown-out
+  //en: (0x1 = analog POR/BRN) or a real NRESET (0x2), and FWMajor/FWMinor must read
+  //en: 0x01/0x18 on an LR2021 - a concrete value to check against, unlike "not found".
+  //sk: 'fk stat' - co o sebe cip naozaj hlasi. GetVersion (0x0101) citame surovo, vratane
+  //sk: status bajtov, lebo dekodovane polia odpovedaju na dve veci, na ktore obvykle -2
+  //sk: CHIP_NOT_FOUND nestaci: ResetSource povie, ci cip videl brown-out (0x1 = analogovy
+  //sk: POR/BRN) alebo skutocny NRESET (0x2), a FWMajor/FWMinor musia byt na LR2021
+  //sk: 0x01/0x18 - konkretna hodnota na porovnanie, nie len "nenaslo sa".
+  //en: 'fk stat [opcode]' - probe ANY read command, hex opcode, default GetVersion 0101.
+  //en: Worth having because GetVersion never came back as CMD_DAT while the length read
+  //en: (0212) recovers on the fourth try, and that difference decides whether the stale
+  //en: reply is a property of the command or of the context it is issued from.
+  //sk: 'fk stat [opkod]' - odskusaj LUBOVOLNY citaci prikaz, hex opkod, default
+  //sk: GetVersion 0101. Ma to cenu preto, ze GetVersion sa nikdy neozval ako CMD_DAT,
+  //sk: kym citanie dlzky (0212) sa na stvrty pokus zotavi - a ten rozdiel rozhoduje, ci
+  //sk: je pretecena odpoved vlastnostou prikazu alebo kontextu, z ktoreho sa vydava.
+  //en: 'fk spi <hz>' - SPI clock. Default 2000000; try 250000 or 125000 during an episode.
+  //sk: 'fk spi <hz>' - hodiny SPI. Default 2000000; pocas epizody skus 250000 alebo 125000.
+  //en: 'fk rdgap <us>' - idle time between the opcode and the reply frame. With
+  //en: 'fk tries 1' the guard makes exactly one read, so the recorded event count over
+  //en: the frame count is the plain first-read failure rate at the stock 2 MHz clock.
+  //sk: 'fk rdgap <us>' - necinny cas medzi opkodom a ramcom s odpovedou. Pri 'fk tries 1'
+  //sk: spravi guard presne jedno citanie, takze pocet udalosti deleny poctom ramcov je
+  //sk: holá chybovost prveho citania pri standardnych 2 MHz.
+  //en: 'fk bwin [ms]' - is the BUSY line quiet when nothing is being sent? Default
+  //en: 200 ms. Zero highs and zero edges means the wire is clean and the fault is the
+  //en: chip not asserting the line, not interference making us misread it.
+  //sk: 'fk bwin [ms]' - je linka BUSY pokojna, ked sa nic neposiela? Default 200 ms.
+  //sk: Nula vysokych a nula hran znamena, ze vodic je cisty a chyba je v tom, ze cip
+  //sk: linku nezdvihne, nie v ruseni, ktore by nam ju kazilo citat.
+  if (memcmp(arg, "bwin", 4) == 0) {
+    const char* n = arg + 4;
+    while (*n == ' ') n++;
+    uint32_t ms = *n ? (uint32_t)atol(n) : 200;
+    if (ms < 10)   ms = 10;
+    if (ms > 2000) ms = 2000;
+    uint32_t smp = 0, hi = 0, ed = 0, lng = 0;
+    radio.fkBusyWindow(ms, &smp, &hi, &ed, &lng);
+    sprintf(reply, "busy %lums: vzoriek=%lu vysoko=%lu hran=%lu najdlhsi=%lu %s",
+            (unsigned long)ms, (unsigned long)smp, (unsigned long)hi,
+            (unsigned long)ed, (unsigned long)lng,
+            (hi == 0 && ed == 0) ? "-> linka cista" : "-> NIECO NA LINKE JE");
+    return true;
+  }
+
+  //en: A/B the post-read state rule without a rebuild - see _fk_lenstate in the wrapper.
+  //sk: A/B pravidla pre stav po citani bez prekladu - pozri _fk_lenstate vo wrapperi.
+  if (memcmp(arg, "lenstate", 8) == 0) {
+    const char* n = arg + 8;
+    while (*n == 0x20) n++;
+    if (*n) { radio_driver._fk_lenstate = (memcmp(n, "on", 2) == 0); }
+    sprintf(reply, "lenstate=%s (on = STATE_RX len ked sa nieco precitalo)",
+            radio_driver._fk_lenstate ? "on" : "off");
+    return true;
+  }
+
+  if (memcmp(arg, "rdgap", 5) == 0) {
+    const char* n = arg + 5;
+    while (*n == ' ') n++;
+    if (*n) {
+      long v = atol(n);
+      if (v < 0)    v = 0;
+      if (v > 2000) v = 2000;
+      radio._fk_rdgap_us = (uint16_t)v;
+    }
+    sprintf(reply, "rdgap=%uus (0 = vyp)", (unsigned)radio._fk_rdgap_us);
+    return true;
+  }
+
+  if (memcmp(arg, "spi", 3) == 0) {
+    const char* n = arg + 3;
+    while (*n == ' ') n++;
+    if (*n) {
+      uint32_t hz = (uint32_t)atol(n);
+      if (hz < 62500)   hz = 62500;
+      if (hz > 8000000) hz = 8000000;
+      radio.fkSetSpiHz(hz);
+    }
+    sprintf(reply, "spi=%lu Hz (default 2000000)", (unsigned long)radio._fk_spi_hz);
+    return true;
+  }
+
+  if (memcmp(arg, "stat", 4) == 0) {
+    const char* n = arg + 4;
+    while (*n == ' ') n++;
+    uint16_t op = RADIOLIB_LR2021_CMD_GET_VERSION;
+    if (*n) op = (uint16_t)strtoul(n, NULL, 16);
+    uint8_t b[4] = { 0 };
+    radio.fkRawRead(op, b, sizeof(b));
+    const char* src[3] = { "cleared", "ANALOG(POR/BRN)", "NRESET" };
+    uint8_t rs = (uint8_t)((b[1] >> 4) & 0x0F);
+    sprintf(reply, "op=%04X raw=%02X %02X %02X %02X | cmd=%u%s irq=%u reset=%s mode=%u",
+            (unsigned)op, b[0], b[1], b[2], b[3],
+            (unsigned)((b[0] >> 1) & 0x07),
+            (((b[0] >> 1) & 0x07) == 3) ? "=DAT" : "=OK/ine",
+            (unsigned)(b[0] & 1),
+            rs < 3 ? src[rs] : "?", (unsigned)(b[1] & 0x07));
+    return true;
+  }
+
+  //en: 'fk ce <ms>' - real power-down of the module (LDO enable low, every driven line
+  //en: low first so nothing back-feeds it through the ESD diodes), then re-init. Tests
+  //en: whether losing the supply clears the stale-reply state, which a plain reboot does
+  //en: not. Default 300 ms; the DFU cycle that used to clear it leaves the module quiet
+  //en: for tens of seconds, so try seconds too.
+  //sk: 'fk ce <ms>' - skutocne odpojenie modulu (enable LDO dole, vsetky budene linky
+  //sk: najprv dole, aby ho nic neprinapajalo cez ESD diody), potom re-init. Testuje, ci
+  //sk: strata napajania vycisti stav s pretecenou odpovedou, co samotny reboot nerobi.
+  //sk: Default 300 ms; DFU cyklus, ktory to vediel vycistit, drzi modul ticho desiatky
+  //sk: sekund, takze skusaj aj sekundy.
+  if (memcmp(arg, "ce", 2) == 0) {
+    const char* n = arg + 2;
+    while (*n == ' ') n++;
+    uint32_t ms = *n ? (uint32_t)atol(n) : 300;
+    if (ms > 30000) ms = 30000;
+    fk_ce_cycle(ms);
+    bool ok = radio_init();
+    if (ok) {
+      radio_driver.begin();
+      radio_driver.setParams(_prefs.freq, _prefs.bw, _prefs.sf, _prefs.cr);
+      radio_driver.setTxPower(_prefs.tx_power_dbm);
+      radio_driver.setRxBoostedGainMode(_prefs.rx_boosted_gain);
+    }
+    uint8_t b[4] = { 0 };
+    radio.fkRawRead(RADIOLIB_LR2021_CMD_GET_VERSION, b, sizeof(b));
+    sprintf(reply, "ce off %lums -> init %s | raw=%02X %02X %02X %02X reset=%u mode=%u",
+            (unsigned long)ms, ok ? "OK" : "FAILED",
+            b[0], b[1], b[2], b[3],
+            (unsigned)((b[1] >> 4) & 0x0F), (unsigned)(b[1] & 0x07));
+    return true;
+  }
+
   if (memcmp(arg, "reinit", 6) == 0) {
     bool ok = radio_init();
     if (ok) {
@@ -1882,14 +2040,20 @@ void MyMesh::radioWatchdogLoop() {
   //en:                 0xFF forever (and LR2021 gave -255 dBm with its supply cut).
   bool dead = (samples == 0) || (spread == 0);
 
-#ifdef FK_RADIO_DIAG_ONLY
-  //en: OBSERVATION MODE - measure and report, never act. Used to learn what a
-  //en: healthy radio actually looks like on each chip before trusting the rule.
   Serial.printf("[FK] rssi-window n=%lu min=%d max=%d spread=%d%s\r\n",
                 (unsigned long)samples, lo, hi, spread,
                 dead ? ((samples == 0) ? "  <== NO SAMPLES" : "  <== CONSTANT") : "");
-  return;
-#endif
+
+//en: Observation mode used to stop here. It no longer does: the constant-RSSI signature
+//en: has since been seen on a real fault - the chip loses its supply mid-run, reports
+//en: vbat=3mV and pram loaded=no, and goes on claiming to be in Rx, so the re-arm guard
+//en: never sees it. This rule is the only one that catches that, and the recovery below
+//en: is the same sequence that fk reinit has repeatedly brought the node back with.
+//sk: Pozorovaci rezim tu predtym koncil. Uz nie: signatura konstantneho RSSI sa medzitym
+//sk: ukazala na skutocnej poruche - cipu vypadne napajanie za behu, hlasi vbat=3mV a pram
+//sk: loaded=no, a dalej tvrdi, ze je v Rx, takze strazca nahodenia to nikdy neuvidi. Toto
+//sk: pravidlo je jedine, ktore to zachyti, a zotavenie nizsie je ta ista postupnost,
+//sk: ktorou uzol opakovane vratil k zivotu prikaz fk reinit.
 
   if (!dead) { radio_dead_count = 0; return; }
 
@@ -1901,10 +2065,38 @@ void MyMesh::radioWatchdogLoop() {
   if (radio_dead_count < 3) return;
 
   radio_dead_count = 0;
-  Serial.println(F("[FK] radio not responding - re-initialising"));
+  radioRecover("watchdog: radio neodpoveda");
+}
+
+bool MyMesh::radioRecover(const char* why) {
+  Serial.printf("[FK] zotavenie radia: %s\r\n", why);
+  //en: Snapshot the chip BEFORE re-initialising it. Every episode so far healed itself
+  //en: before anyone could measure it, so the one number that would separate the two
+  //en: candidate faults - is BUSY being asserted, and does a read that WAITS for it come
+  //en: back as CMD_DAT - was never captured while a fault was live. These two lines are
+  //en: that measurement, and the re-init a few lines below destroys the evidence.
+  //sk: Odfotografuj cip PRED reinicializaciou. Kazda doterajsia epizoda sa zahojila skor,
+  //sk: nez ju stihol niekto zmerat, takze jedine cislo, ktore odlisi dve zostavajuce
+  //sk: vysvetlenia - ci sa dviha BUSY a ci citanie, ktore naň POCKA, vrati CMD_DAT - sme
+  //sk: nikdy nezachytili za zivota poruchy. Tieto dva riadky su prave to meranie a reinit
+  //sk: o par riadkov nizsie dokaz znici.
+  {
+    uint32_t bs = 0, bh = 0, be = 0, bl = 0;
+    radio.fkBusyWindow(3, &bs, &bh, &be, &bl);
+    uint8_t stW = 0, stN = 0; uint16_t vW = 0, vN = 0;
+    radio.readRxPktLenWithStatus(true,  &stW, &vW);
+    radio.readRxPktLenWithStatus(false, &stN, &vN);
+    uint16_t vbat = 0; radio.getVbat(13, &vbat);
+    Serial.printf("[FK] SNIMKA pri poruche: busy hi=%lu/%lu hran=%lu | "
+                  "cakane cmd=%u len=%u | necakane cmd=%u len=%u | vbat=%umV | irq=%08lX\r\n",
+                  (unsigned long)bh, (unsigned long)bs, (unsigned long)be,
+                  (unsigned)((stW >> 1) & 3), (unsigned)vW,
+                  (unsigned)((stN >> 1) & 3), (unsigned)vN,
+                  (unsigned)vbat, (unsigned long)radio.getIrqStatus());
+  }
   if (!radio_init()) {
     Serial.println(F("[FK] radio re-init FAILED - will retry"));
-    return;
+    return false;
   }
 
   //en: radio_init() alone is not enough to get back on the air:
@@ -1924,6 +2116,34 @@ void MyMesh::radioWatchdogLoop() {
   Serial.printf("[FK] radio re-initialised OK (%.3fMHz sf=%d bw=%.1f tx=%d)\r\n",
                 (double)_prefs.freq, (int)_prefs.sf, (double)_prefs.bw,
                 (int)_prefs.tx_power_dbm);
+  return true;
+}
+
+void MyMesh::radioRearmGuard() {
+  //en: One refusal is normal - the chip was already in Rx. What is not normal is a run
+  //en: of them lasting seconds: that is the chip refusing SetRx outright, which is what
+  //en: a chip that has reset itself does. Require both a count and a duration, so that a
+  //en: transmission in progress - during which SetRx is legitimately refused - cannot
+  //en: trigger it.
+  //sk: Jedno odmietnutie je bezne - cip uz v Rx bol. Bezne nie je seria trvajuca sekundy:
+  //sk: to je cip, ktory SetRx odmieta nastvrdo, presne ako cip po vlastnom resete.
+  //sk: Vyzadujeme aj pocet aj trvanie, aby to nespustilo prebiehajuce vysielanie, pocas
+  //sk: ktoreho je odmietnutie legitimne.
+  uint32_t run = radio_driver.rearmFailureRun();
+  if (run == 0) { radio_rearm_since = 0; return; }
+  uint32_t now = millis();
+  if (radio_rearm_since == 0) { radio_rearm_since = now; return; }
+  if (run < 50 || (uint32_t)(now - radio_rearm_since) < 2000) return;
+  //en: back off between attempts, so a recovery that does not take cannot become a hot
+  //en: loop of its own - the very mistake the rate limit in the wrapper exists to stop.
+  //sk: medzi pokusmi couvni, nech sa zo zotavenia, ktore nezaberie, nestane vlastna
+  //sk: horuca slucka - prave ta chyba, kvoli ktorej je vo wrapperi obmedzenie vypisu.
+  if (radio_last_recover && (uint32_t)(now - radio_last_recover) < 10000) return;
+  radio_last_recover = now;
+  Serial.printf("[FK] straz: run=%lu trva=%lums\r\n", (unsigned long)run, (unsigned long)(now - radio_rearm_since));
+  radioRecover("SetRx odmietany dlhodobo (cip sa zrejme resetoval)");
+  radio_driver.clearRearmFailureRun();
+  radio_rearm_since = 0;
 }
 #endif
 
@@ -1936,6 +2156,7 @@ void MyMesh::loop() {
 
 #ifdef FKPR_RADIO_WATCHDOG
   radioWatchdogLoop();
+  radioRearmGuard();
 #endif
 
 #ifdef FK_ANON_FLOOD_DIRECT_FALLBACK

@@ -48,6 +48,40 @@ public:
   bool startSendRaw(const uint8_t* bytes, int len) override;
   bool isSendComplete() override;
   void onSendFinished() override;
+
+  //en: how many times the post-transmit re-arm was rejected, and how many of those the
+  //en: standby retry rescued. Both should stay 0 on chips other than LR2021.
+  //sk: kolkokrat bolo nahodenie prijmu po vysielani odmietnute a kolko z toho zachranilo
+  //sk: opakovanie cez standby. Na inych cipoch nez LR2021 maju obe ostat na nule.
+  //en: how many times the interrupt landed inside the window (the race itself), and the
+  //en: runtime switch that turns the mask off again for an A/B
+  //sk: kolkokrat sa prerusenie trafilo do okna (samotny subeh) a prepinac, ktorym sa maska
+  //sk: da za behu vypnut pre A/B
+  uint32_t _n_race = 0;
+  bool _fk_mask = true;
+  uint32_t _n_rearm_failed = 0;
+  uint32_t _n_rearm_fixed = 0;
+
+  //en: consecutive failed re-arms, cleared as soon as one succeeds. A single failure is
+  //en: routine (the chip was already in Rx); a run of them means the chip stopped
+  //en: accepting SetRx altogether and only a full re-init will bring it back.
+  //sk: pocet zlyhanych nahodeni za sebou, nuluje sa hned ako jedno prejde. Jedno zlyhanie
+  //sk: je bezne (cip uz v Rx bol); seria znamena, ze cip prestal SetRx prijimat uplne a
+  //sk: vrati ho az plna reinicializacia.
+  uint32_t _n_rearm_run = 0;
+  uint32_t _t_rearm_msg = 0;   //en: rate limit for the failure message
+  uint32_t rearmFailureRun() const { return _n_rearm_run; }
+  void clearRearmFailureRun() { _n_rearm_run = 0; }
+
+  //en: A/B for the post-read state. false = the original behaviour (LR2021 stays in Rx
+  //en: after readData, so keep claiming STATE_RX); true = only claim Rx when a packet
+  //en: was really read. The second is what a TX-done interrupt needs, but it also makes
+  //en: us re-arm a receiver that is already in Rx, so it has to be measurable both ways.
+  //sk: A/B pre stav po citani. false = povodne spravanie (LR2021 po readData v Rx
+  //sk: zostava, takze drz STATE_RX); true = tvrd Rx len ked sa naozaj nieco precitalo.
+  //sk: To druhe potrebuje prerusenie po vysielani, ale zaroven nahadzuje prijem, ktory
+  //sk: uz bezi - preto to musi byt meratelne na obe strany.
+  bool _fk_lenstate = false;
   bool isInRecvMode() const override;
   bool isChannelActive();
 

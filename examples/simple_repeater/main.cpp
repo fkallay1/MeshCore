@@ -74,6 +74,18 @@ static void fk_module_power_cycle(uint32_t off_ms) {
   delay(50);
   Serial.println("[FK] module power-up: CE high");
 }
+
+//en: exposed for 'fk ce <ms>' - report the lines, drop the supply for off_ms, report
+//en: again. The pin report either side is the point: it says whether the module really
+//en: went dark or whether something still feeds it through an IO pin.
+//sk: vyvedene pre 'fk ce <ms>' - vypis linky, zhod napajanie na off_ms, vypis znova.
+//sk: Prave ten vypis pred a po je podstatny: povie, ci modul naozaj zhasol, alebo ho
+//sk: nieco stale prinapaja cez IO pin.
+void fk_ce_cycle(uint32_t off_ms) {
+  fk_pin_report("pred ce off");
+  fk_module_power_cycle(off_ms);
+  fk_pin_report("po ce on");
+}
 #endif
 
 void setup() {

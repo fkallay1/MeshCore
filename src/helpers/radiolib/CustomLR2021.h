@@ -112,8 +112,63 @@ class CustomLR2021 : public LR2021 {
     //sk: takze getRxPktLength() vrati irq[31:16] - s nastavenym RX_DONE presne 4. Sirka
     //sk: statusu na 0 nam oba status bajty ponecha, rovnaky trik pouziva
     //sk: LRxxxx::getIrqStatus.
+    //en: Raw two-frame read that leaves the status bytes IN the buffer, so the caller
+    //en: sees exactly what the chip put on MISO. 0x00 means the line was held low
+    //en: (module unpowered, or holding the bus); 0xFF means nothing drove it at all.
+    //en: RadioLib folds both into ERR_CHIP_NOT_FOUND, which is why "init failed" never
+    //en: told us which of the two it was.
+    //sk: Surove dvojramcove citanie, ktore status bajty necha V buffri, takze volajuci
+    //sk: vidi presne to, co cip poslal na MISO. 0x00 = linka drzana dole (modul bez
+    //sk: napajania, alebo drzi zbernicu), 0xFF = nikto ju nebudi. RadioLib oboje zliepa
+    //sk: do ERR_CHIP_NOT_FOUND, preto nam "init failed" nikdy nepovedalo, ktore z toho.
+    //en: SPI clock, changeable at runtime. RadioLib runs this platform at 2 MHz, which is
+    //en: already far below what the chip takes, but a marginal bus would still show up as
+    //en: a rate that changes with the clock. Note a slower clock also stretches every
+    //en: transaction, so only a NEGATIVE result is clean: unchanged rate at a fraction of
+    //en: the clock rules timing out, while a change would be ambiguous - we already know
+    //en: that adding idle time alone does not help.
+    //sk: hodinovy kmitocet SPI, menitelny za behu. RadioLib tu bezi na 2 MHz, co je uz aj
+    //sk: tak hlboko pod tym, co cip znesie, ale hranicna zbernica by sa prejavila tym, ze
+    //sk: sa chybovost s kmitoctom meni. Pozor, pomalsie hodiny zaroven predlzia kazdu
+    //sk: transakciu, takze cisty je len ZAPORNY vysledok: nezmenena chybovost pri zlomku
+    //sk: kmitoctu casovanie vylucuje, kym zmena by bola dvojznacna - o samotnom cakani uz
+    //sk: vieme, ze nepomaha.
+    uint32_t _fk_spi_hz = 2000000;
+    void fkSetSpiHz(uint32_t hz) {
+      _fk_spi_hz = hz;
+      ((ArduinoHal*)mod->hal)->spiSettings = SPISettings(hz, MSBFIRST, SPI_MODE0);
+    }
+
+    int16_t fkRawRead(uint16_t cmd, uint8_t* buff, size_t len) {
+      mod->SPIwriteStream(cmd, NULL, 0, true, false);
+      if (_fk_rdgap_us) { delayMicroseconds(_fk_rdgap_us); }
+      Module::BitWidth_t sw = mod->spiConfig.widths[RADIOLIB_MODULE_SPI_WIDTH_STATUS];
+      Module::BitWidth_t cw = mod->spiConfig.widths[RADIOLIB_MODULE_SPI_WIDTH_CMD];
+      mod->spiConfig.widths[RADIOLIB_MODULE_SPI_WIDTH_STATUS] = Module::BITS_0;
+      mod->spiConfig.widths[RADIOLIB_MODULE_SPI_WIDTH_CMD]    = Module::BITS_0;
+      int16_t st = mod->SPIreadStream(RADIOLIB_LRXXXX_CMD_NOP, buff, len, true, false);
+      mod->spiConfig.widths[RADIOLIB_MODULE_SPI_WIDTH_STATUS] = sw;
+      mod->spiConfig.widths[RADIOLIB_MODULE_SPI_WIDTH_CMD]    = cw;
+      return st;
+    }
+
+    //en: idle time inserted between the opcode frame and the frame that clocks the reply
+    //en: out. This is a DIFFERENT place from the gap between retries, which did not help:
+    //en: measured on the SPI clock sweep, the chip needs somewhere between 16 and 32 us
+    //en: from the start of the opcode before the reply is ready (clean at 500 kHz = 32 us
+    //en: of opcode frame, 33 % bad at 1 MHz = 16 us, ~80 % bad at 2 MHz = 8 us). If that
+    //en: reading is right, waiting here should fix it at the stock clock.
+    //sk: necinny cas vlozeny medzi opkodovy ramec a ramec, ktory vytahuje odpoved. Je to
+    //sk: INE miesto nez pauza medzi opakovaniami, ktora nepomohla: z prebehu cez hodiny
+    //sk: SPI vychadza, ze cip potrebuje 16 az 32 us od zaciatku opkodu, kym ma odpoved
+    //sk: hotovu (cisto pri 500 kHz = 32 us opkodoveho ramca, 33 % chyb pri 1 MHz = 16 us,
+    //sk: ~80 % pri 2 MHz = 8 us). Ak to citanie sedi, cakanie tu to ma opravit pri
+    //sk: standardnych hodinach.
+    uint16_t _fk_rdgap_us = 0;
+
     int16_t readRxPktLenWithStatus(bool wait, uint8_t* stat, uint16_t* val) {
       int16_t st = mod->SPIwriteStream(RADIOLIB_LR2021_CMD_GET_RX_PKT_LENGTH, NULL, 0, wait, false);
+      if (_fk_rdgap_us) { delayMicroseconds(_fk_rdgap_us); }
       Module::BitWidth_t sw = mod->spiConfig.widths[RADIOLIB_MODULE_SPI_WIDTH_STATUS];
       Module::BitWidth_t cw = mod->spiConfig.widths[RADIOLIB_MODULE_SPI_WIDTH_CMD];
       mod->spiConfig.widths[RADIOLIB_MODULE_SPI_WIDTH_STATUS] = Module::BITS_0;
@@ -406,6 +461,39 @@ class CustomLR2021 : public LR2021 {
     //sk:   fall  = index vzorky, kde spadla (0 = nikdy nevidena vysoko)
     //sk: Ak je hi vzdy 0, BUSY stupa a padá rychlejsie nez vieme vzorkovat a handshake sa
     //sk: polovanim opravit neda - status bajt ostava jediny signal.
+    //en: Watch BUSY while NOTHING is being sent, to see whether the line is quiet. This
+    //en: runs inside the CLI handler, so the main loop - and with it the periodic RSSI
+    //en: reads that legitimately raise BUSY - is stopped for the duration; anything seen
+    //en: here is therefore either noise or the chip acting on its own. On a clean line
+    //en: both counters must come back zero.
+    //en: Deliberately does NOT touch the frequency: a few hundred ms of blocked receive
+    //en: costs at most a packet, while re-tuning risks leaving the node off channel if
+    //en: anything goes wrong half way.
+    //sk: Sleduj BUSY, kym sa NIC neposiela, aby bolo vidno, ci je linka pokojna. Bezi to
+    //sk: vnutri obsluhy CLI, takze hlavna slucka - a s nou aj pravidelne citania RSSI,
+    //sk: ktore BUSY legitimne dvihaju - su na ten cas zastavene; cokolvek sa tu objavi, je
+    //sk: teda bud rusenie alebo vlastna cinnost cipu. Na cistej linke musia obe pocitadla
+    //sk: vratit nulu.
+    //sk: Zamerne NEmeni frekvenciu: par sto ms zablokovaneho prijmu stoji nanajvys jeden
+    //sk: paket, kym preladenie riskuje, ze uzol ostane mimo kanal, ak sa nieco pokazi v
+    //sk: polovici.
+    void fkBusyWindow(uint32_t ms, uint32_t* samples, uint32_t* highs, uint32_t* edges,
+                      uint32_t* longest) {
+      uint32_t pin = mod->getGpio();
+      *samples = *highs = *edges = *longest = 0;
+      if (pin == RADIOLIB_NC) return;
+      uint32_t t0 = millis();
+      int prev = mod->hal->digitalRead(pin);
+      uint32_t run = prev ? 1 : 0;
+      while (millis() - t0 < ms) {
+        int now = mod->hal->digitalRead(pin);
+        (*samples)++;
+        if (now) { (*highs)++; run++; if (run > *longest) *longest = run; }
+        else { run = 0; }
+        if (now != prev) { (*edges)++; prev = now; }
+      }
+    }
+
     void fkBusyProbe(uint16_t* hi, uint16_t* fall, uint16_t samples = 400) {
       uint32_t pin = mod->getGpio();
       *hi = 0; *fall = 0;

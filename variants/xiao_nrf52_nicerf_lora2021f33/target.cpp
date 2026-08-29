@@ -23,6 +23,10 @@ AutoDiscoverRTCClock rtc_clock(fallback_clock);
 
 EnvironmentSensorManager sensors;
 
+//en: runtime switch for the PRAM firmware patch, see the note at the load site
+//sk: prepinac nahravania firmveroveho patchu PRAM za behu, vid poznamku pri nahravani
+bool fk_pram_enable = true;
+
 bool radio_init() {
   rtc_clock.begin(Wire);
 
@@ -49,7 +53,15 @@ bool radio_init() {
 #if defined(LR2021_PRAM_UPD) && defined(RADIOLIB_GODMODE)
   //en: load the firmware patch. Must come after std_init(), because begin() ->
   //en: findChip() resets the chip and would wipe it. See the note in NiceRF_LoRa2021F33.h.
-  {
+  //en: fk_pram_enable makes it skippable at runtime: a module power-down through CE wipes
+  //en: the PRAM, and if the reload is skipped on the re-init that follows, the chip runs
+  //en: without the patch - so the patch can be A/B tested inside one episode of the fault
+  //en: instead of across two builds, which is the only way the numbers stay comparable.
+  //sk: fk_pram_enable ho robi vypinatelnym za behu: odpojenie modulu cez CE PRAM zmaze, a
+  //sk: ak sa pri nasledujucej re-inicializacii preskoci nahratie, cip bezi bez patchu -
+  //sk: takze sa patch da A/B otestovat v jednej epizode chyby namiesto medzi dvoma
+  //sk: buildmi, co je jedina cesta, ako ostanu cisla porovnatelne.
+  if (fk_pram_enable) {
     int16_t st = nicerf_lora2021f33_pram_load(radio);
     bool ok = false; uint16_t ver = 0;
     nicerf_lora2021f33_pram_status(radio, &ok, &ver);
@@ -149,10 +161,20 @@ bool nicerfTestCliCommand(char* command, char* reply) {
 #else
       strcpy(reply, "not built with LR2021_PRAM_UPD");
 #endif
+    } else if (memcmp(arg + 4, " on", 3) == 0 || memcmp(arg + 4, " off", 4) == 0) {
+      //en: only arms/disarms the reload; it takes effect on the next init, so the
+      //en: sequence is 'fk pram off' then 'fk ce 300', which wipes the patch and does
+      //en: not put it back.
+      //sk: len povoli/zakaze nahratie; prejavi sa az pri dalsej inicializacii, takze
+      //sk: postup je 'fk pram off' a potom 'fk ce 300', co patch zmaze a uz ho nevrati.
+      fk_pram_enable = (memcmp(arg + 4, " on", 3) == 0);
+      sprintf(reply, "pram reload=%s (prejavi sa pri dalsom init, spusti 'fk ce 300')",
+              fk_pram_enable ? "ON" : "OFF");
     } else {
       bool ok = false; uint16_t ver = 0;
       nicerf_lora2021f33_pram_status(radio, &ok, &ver);
-      sprintf(reply, "pram loaded=%s ver=0x%04X", ok ? "YES" : "NO", (unsigned)ver);
+      sprintf(reply, "pram loaded=%s ver=0x%04X reload=%s", ok ? "YES" : "NO",
+              (unsigned)ver, fk_pram_enable ? "ON" : "OFF");
     }
     return true;
   }

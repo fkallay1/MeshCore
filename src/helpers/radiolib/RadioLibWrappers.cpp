@@ -193,18 +193,119 @@ int RadioLibWrapper::recvRaw(uint8_t* bytes, int sz) {
       }
     }
     #if defined(USE_LR2021)
-    state = STATE_RX;     // LR2021 stays in Rx after readData, calling startReceive while still in Rx throws -706 errors
+    //en: Only claim we are still in Rx when a packet was actually read. The TX-done
+    //en: interrupt sets the same STATE_INT_READY bit, so after forwarding a packet this
+    //en: block runs with nothing to read: getPacketLength() returns leftovers, readData()
+    //en: fails with -24, and pinning STATE_RX here told the wrapper it was receiving while
+    //en: the chip sat in STDBY_RC after the transmit. Nothing re-arms after that and the
+    //en: radio is deaf until reboot - and the Dispatcher's stuck-radio check cannot see it,
+    //en: because it reads isInRecvMode(), which is this very flag.
+    //sk: Tvrd, ze sme v Rx, len ked sa naozaj precital paket. Prerusenie „TX done" nastavuje
+    //sk: ten isty bit STATE_INT_READY, takze po preposlani paketu sa tento blok vykona bez
+    //sk: toho, aby bolo co citat: getPacketLength() vrati zvysky, readData() zlyha s -24, a
+    //sk: pripnutie STATE_RX tu povedalo wrapperu, ze prijima, hoci cip bol po vysielani
+    //sk: v STDBY_RC. Potom uz nikto prijem nenahodi a radio je hluche az do rebootu - a
+    //sk: kontrola zaseknuteho radia v Dispatcheri to nevidi, lebo cita prave tento priznak.
+    state = _fk_lenstate ? ((len > 0) ? STATE_RX : STATE_IDLE) : STATE_RX;   //en: runtime A/B, see _fk_lenstate
     #else
     state = STATE_IDLE;   // need another startReceive()
     #endif
   }
 
-  if (state != STATE_RX) {
+  //en: Mask STATE_INT_READY out of the comparison, the way isInRecvMode() already does.
+  //en: The ISR ORs that bit in, so if a second packet arrives between the assignment
+  //en: above and this test, state becomes STATE_RX|STATE_INT_READY - which is not equal
+  //en: to STATE_RX, so we would call startReceive() on a receiver that is already in Rx.
+  //en: LR2021 answers that with -706 and the wrapper is left in STATE_IDLE for good.
+  //sk: Vymaskuj STATE_INT_READY z porovnania, rovnako ako to uz robi isInRecvMode().
+  //sk: ISR ten bit priraduje cez OR, takze ak medzi priradenim vyssie a tymto testom
+  //sk: pride dalsi paket, state je STATE_RX|STATE_INT_READY - a to sa nerovna STATE_RX,
+  //sk: takze by sme zavolali startReceive() na prijimaci, ktory uz v Rx je. LR2021 na to
+  //sk: odpovie -706 a wrapper ostane v STATE_IDLE natrvalo.
+  //en: Measure the race instead of waiting for its absence: evaluate both conditions and
+  //en: count the times they disagree. Those are exactly the moments that used to call
+  //en: startReceive() on a receiver already in Rx and kill it. _fk_mask=false restores the
+  //en: old broken behaviour for a proper A/B in the same traffic.
+  //sk: Namiesto cakania na neprítomnost meraj samotny subeh: vyhodnot obe podmienky a
+  //sk: pocitaj, kolkokrat sa nezhoduju. Prave to su okamihy, ktore predtym volali
+  //sk: startReceive() na uz bezicom prijme a zabijali ho. _fk_mask=false vrati povodne
+  //sk: chybne spravanie pre poctive A/B v tej istej prevadzke.
+  {
+    uint8_t st = state;
+    bool masked   = ((st & ~STATE_INT_READY) != STATE_RX);
+    bool unmasked = (st != STATE_RX);
+    if (unmasked && !masked) {
+      _n_race++;
+      Serial.printf("[FK] race: prerusenie v okne (state=0x%02X), maska zachytila #%lu\r\n",
+                    st, (unsigned long)_n_race);
+    }
+    if (_fk_mask ? masked : unmasked) {
     int err = _radio->startReceive();
+#if defined(USE_LR2021)
+    //en: LR2021 rejects SetRx with -706 unless it is in standby. startRecv() guards
+    //en: against that, this inline re-arm never did - and this is the path taken after
+    //en: a transmit, because recvRaw() otherwise pins state to STATE_RX and never comes
+    //en: here. On every other chip this same line is the normal post-packet path and is
+    //en: correct, which is why the omission is invisible until an LR2021 replies to
+    //en: something. When it hits, state stays IDLE, the next loop retries identically,
+    //en: and the receiver is down until a reboot.
+    //en: The retry is instrumented rather than silent: we want to see in the log that
+    //en: the error really happens, not just that the symptom went away.
+    //sk: LR2021 odmietne SetRx s -706, ak nie je v standby. startRecv() to osetruje,
+    //sk: toto vnutorne nahodenie nikdy nie - a prave sem sa program dostane po vysielani,
+    //sk: lebo inak recvRaw() drzi state na STATE_RX a sem vobec nepride. Na kazdom inom
+    //sk: cipe je ten isty riadok bezna cesta po prijatom pakete a je spravny, preto to
+    //sk: chybalo nepovsimnute, kym LR2021 na nieco neodpovie. Ked to nastane, state
+    //sk: ostane IDLE, dalsie kolo skusi to iste a prijem je mrtvy az do rebootu.
+    //sk: Opakovanie je zamerne s vypisom, nie ticho: chceme v logu vidiet, ze ta chyba
+    //sk: naozaj nastava, nie len ze symptom zmizol.
+    if (err != RADIOLIB_ERR_NONE) {
+      _n_rearm_failed++;
+      _radio->standby();
+      err = _radio->startReceive();
+      if (err == RADIOLIB_ERR_NONE) { _n_rearm_fixed++; }
+
+      //en: Never log this unconditionally. recvRaw() runs on every loop() iteration, so
+      //en: once the chip stops accepting SetRx for good the message turns into tens of
+      //en: thousands of lines a minute: it buries every other message, and the serial
+      //en: writes themselves slow the loop to a crawl. Report the first failure of a run
+      //en: and then at most one line per five seconds, carrying the running count.
+      //sk: Toto nikdy nelogovat bez podmienky. recvRaw() bezi v kazdom kole loop(), takze
+      //sk: ked cip prestane SetRx prijimat natrvalo, sprava sa zmeni na desiatky tisic
+      //sk: riadkov za minutu: pochova kazdu inu spravu a samotne zapisy na seriovu linku
+      //sk: spomalia slucku na plazenie. Vypis prve zlyhanie serie a potom najviac jeden
+      //sk: riadok za pat sekund, aj s poctom.
+      if (err == RADIOLIB_ERR_NONE) {
+        if (_n_rearm_run) {
+          Serial.printf("[FK] nahodenie prijmu opat preslo po %lu zlyhaniach\r\n",
+                        (unsigned long)_n_rearm_run);
+        }
+        _n_rearm_run = 0;
+      } else {
+        uint32_t now = millis();
+        if (_n_rearm_run == 0 || (uint32_t)(now - _t_rearm_msg) >= 5000) {
+          _t_rearm_msg = now;
+          Serial.printf("[FK] nahodenie prijmu odmietnute: %d (za sebou %lu)\r\n",
+                        err, (unsigned long)_n_rearm_run + 1);
+        }
+        _n_rearm_run++;
+      }
+    }
+#endif
     if (err == RADIOLIB_ERR_NONE) {
+      //en: Any successful re-arm ends the run - not only one that needed the retry.
+      //en: Clearing it only in the retry branch left the count standing after a
+      //en: recovery put the receiver back in Rx, because this block then stops being
+      //en: entered at all, and the guard kept firing on a radio that was already fine.
+      //sk: Seriu ukoncuje kazde uspesne nahodenie, nie len to, ktore potrebovalo
+      //sk: opakovanie. Nulovanie iba vo vetve opakovania nechalo pocet visiet aj po
+      //sk: zotaveni, ktore prijem vratilo do Rx - tento blok sa uz potom nevykonava
+      //sk: vobec a strazca strielal na radiu, ktore bolo v poriadku.
+      _n_rearm_run = 0;
       state = STATE_RX;
     } else {
       MESH_DEBUG_PRINTLN("RadioLibWrapper: error: startReceive(%d)", err);
+    }
     }
   }
   return len;
