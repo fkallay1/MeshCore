@@ -1628,7 +1628,13 @@ bool MyMesh::radioDiagCliCommand(char* command, char* reply) {
   }
 #endif
 
-#ifdef FK_RADIO_SPI_DIAG
+//en: guard/tries/gap reach into members that only CustomLR2021 has; CustomLR1110 has
+//en: _fk_guard but not _fk_guard_mode, _fk_max_tries or _fk_gap_us, so the group
+//en: needs the chip check on top of the diagnostics flag.
+//sk: guard/tries/gap siahaju na cleny, ktore ma len CustomLR2021; CustomLR1110 ma
+//sk: _fk_guard, ale nie _fk_guard_mode, _fk_max_tries ani _fk_gap_us, takze skupina
+//sk: potrebuje okrem diagnostickeho flagu aj kontrolu cipu.
+#if defined(FK_RADIO_SPI_DIAG) && defined(USE_LR2021)
   //en: 'fk inject <n>' - skip the BUSY wait on every n-th length read (0 = off), and
   //en: 'fk pretype on|off' - call getPacketType() before the length read, which is what
   //en: the library path does. Both are experiment switches, see CustomLR2021.
@@ -1738,7 +1744,7 @@ extern volatile uint32_t lrxxxx_stale_reads;
   }
 #endif
 
-#ifdef FK_RADIO_SPI_DIAG
+#if defined(FK_RADIO_SPI_DIAG) && defined(USE_LR2021)   //en: FkSpiEvent fields differ per chip
   //en: 'fk spifix' - dump the guard's ring buffer (see the radio class).
   //en: rule tells which rule flagged the read: CMD = the status said the reply was not
   //en: ours (the fix proposed upstream), FP = the value equalled irq[31:16] (the
@@ -1782,7 +1788,7 @@ extern volatile uint32_t lrxxxx_stale_reads;
   }
 #endif
 
-#ifdef FK_RADIO_SPI_DIAG
+#if defined(FK_RADIO_SPI_DIAG) && defined(USE_LR2021)
   //en: 'fk stale' - A/B test of the two-transaction read behind every "get" command.
   //en: Eight reads with the BUSY wait deliberately skipped, then one proper read as a
   //en: reference. fp = top half of the IRQ word, which is what a stale reply returns
@@ -1852,6 +1858,15 @@ extern volatile uint32_t lrxxxx_stale_reads;
     return true;
   }
 
+#if defined(USE_LR2021)
+  //en: Everything below down to the LR2021 guard end pokes at LR2021-only members
+  //en: (fkBusyWindow, fkRawRead, _fk_rdgap_us, fk_ce_cycle). On an SX126x board those
+  //en: do not exist, so the whole group has to compile out - the radio-agnostic
+  //en: commands live outside it and stay available everywhere.
+  //sk: Vsetko az po koniec tohto bloku saha na cleny, ktore ma len LR2021
+  //sk: (fkBusyWindow, fkRawRead, _fk_rdgap_us, fk_ce_cycle). Na doske so SX126x
+  //sk: neexistuju, takze cela skupina sa musi vynechat z prekladu - prikazy nezavisle
+  //sk: od cipu su mimo nej a ostavaju dostupne vsade.
   //en: 'fk stat' - what the chip actually says about itself. GetVersion (0x0101) is read
   //en: raw, status bytes and all, because the decoded fields answer two questions the
   //en: usual -2 CHIP_NOT_FOUND cannot: ResetSource says whether the chip saw a brown-out
@@ -1985,6 +2000,7 @@ extern volatile uint32_t lrxxxx_stale_reads;
             (unsigned)((b[1] >> 4) & 0x0F), (unsigned)(b[1] & 0x07));
     return true;
   }
+#endif   //en: USE_LR2021 - LR2021-only diagnostics
 
   if (memcmp(arg, "reinit", 6) == 0) {
     bool ok = radio_init();
@@ -2071,6 +2087,7 @@ void MyMesh::radioWatchdogLoop() {
 
 bool MyMesh::radioRecover(const char* why) {
   Serial.printf("[FK] zotavenie radia: %s\r\n", why);
+#if defined(USE_LR2021)
   //en: Snapshot the chip BEFORE re-initialising it. Every episode so far healed itself
   //en: before anyone could measure it, so the one number that would separate the two
   //en: candidate faults - is BUSY being asserted, and does a read that WAITS for it come
@@ -2095,6 +2112,7 @@ bool MyMesh::radioRecover(const char* why) {
                   (unsigned)((stN >> 1) & 3), (unsigned)vN,
                   (unsigned)vbat, (unsigned long)radio.getIrqStatus());
   }
+#endif   //en: USE_LR2021 - snapshot uses LR2021-only reads
   if (!radio_init()) {
     Serial.println(F("[FK] radio re-init FAILED - will retry"));
     return false;
