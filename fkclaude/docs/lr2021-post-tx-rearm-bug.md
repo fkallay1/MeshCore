@@ -324,3 +324,51 @@ správne `0x0313` — teda to nevyzerá na pokazené čítanie.
 - **Pre RadioLib je toto silnejší dôkaz než pôvodný:** nie chybné dĺžky paketov, ale
   merateľná strata 39 % prevádzky, ktorá po nasadení patchu zmizne, s dvoma
   referenčnými uzlami ako kontrolou.
+
+## VYRIEŠENÉ 29. 8. 2026 — čip hlási zlyhanie kalibrácie a nerozbehnutý kryštál
+
+Snímka odobratá **pri poruche, pred reinicializáciou** (`radioRecover()`) dala to,
+čo celý predchádzajúci deň unikalo. Štyri výskyty, prakticky identické:
+
+```
+02:16:28  busy hi=0/1544 hran=0 | cakane cmd=3 len=0 | vbat=3mV | irq=00030000
+03:32:48  busy hi=0/2240 hran=0 | cakane cmd=3 len=0 | vbat=3mV | irq=00030000
+03:35:48  busy hi=0/1582 hran=0 | cakane cmd=3 len=0 | vbat=3mV | irq=00030000
+03:51:45  busy hi=0/1696 hran=0 | cakane cmd=3 len=0 | vbat=3mV | irq=00030000
+```
+
+`cakane cmd=3` = čítanie, ktoré počká na BUSY, vráti **správny** stav CMD_DAT.
+Čítania teda **nie sú pokazené** a hodnoty nižšie sú pravdivé.
+
+### Tri stupne, potvrdené naprieč 593 čítaniami
+
+| `vbat` | `errors` | bit | význam podľa datasheetu | počet |
+|---|---|---|---|---|
+| > 3000 mV | `0x0000` | — | v poriadku | 586 |
+| 2000–3000 mV | `0x0200` | 9 | `RXFREQ_NO_FE_CAL_ERR` — kalibrácia vstupného dielu pre Rx nie je k dispozícii | 3 |
+| < 100 mV | `0x0001` | 0 | `HF_XOSC_START_ERR` — vysokofrekvenčný kryštál sa nerozbehol | 3 |
+
+Chybový register je **nezávislý** od merania napätia a mení sa spolu s ním.
+
+### Mechanizmus
+
+1. Napätie klesne → **zlyhá kalibrácia prijímacieho dielu**. Prijímač nie je poriadne
+   nahodený, vzorkovač RSSI vracia konštantu, strácajú sa rámce. To je tá časť, kde
+   pomer voči susedným doskám klesol z 0,92 na 0,34.
+2. Klesne ďalej → **nerozbehne sa kryštál**. Bez hodín čip nezdvihne BUSY (0 z 2240
+   vzoriek), `vbat` číta 3 mV, PRAM sa javí prázdna — odtiaľ predchádzajúci mylný
+   záver „čip sa resetoval".
+3. `radio_init()` kryštál znova naštartuje a prekalibruje — preto zotavenie funguje.
+
+### Čo to opravuje z predchádzajúcich záverov
+
+- „Nešlo o napájanie, ale o pretečené čítania" (28. 8. večer) — **neplatí**. Snímka
+  ukazuje `cakane cmd=3`, čítania sú v poriadku.
+- Pôvodný záver o napájaní bol správny, len postavený na údajoch, ktoré vtedy neboli
+  overitelné. Teraz sú: chyba je pomenovaná samotným čipom.
+- Syndróm `len=4` je **iná porucha** — dnes sa nevyskytla ani raz (32 186× predtým).
+
+### Ďalší krok
+
+Osciloskop na 3V3 pri module počas prevádzky. Hľadá sa pokles hlboký natoľko, že
+zhodí kalibráciu, a v horšom prípade až kryštál.
