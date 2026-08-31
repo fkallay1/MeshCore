@@ -103,3 +103,40 @@ rámcov. A to napriek 50 cm kábla navyše, ktorý stojí okolo 0,5 dB.
 
 Jedna hodina pri rozdiele 0,5 dB nie je nezvratná — nočný pokles šumu môže robiť
 časť toho zlepšenia. Overiť dlhším oknom porovnateľným s dňom.
+
+## Potvrdené nočným porovnaním 31. 8. 2026
+
+Jednohodinové meranie hneď po výmene bolo podhodnotené. Porovnanie **dvoch po
+sebe idúcich nocí za rovnaké hodiny (01:00–07:00)** dáva čistý výsledok — rovnaká
+denná doba, porovnateľná prevádzka (2 472 vs 2 401 prijatých rámcov celkom):
+
+| | stará (kolineár) | nová (Mikrotik omni) | rozdiel |
+|---|---|---|---|
+| **`nf`** | **−117 dBm** | **−120 dBm** | **−3 dB** |
+| `216D` RSSI medián | −116 dBm | −117 dBm | **−1 dB** |
+| **`216D` SNR medián** | **0,0 dB** | **+2,2 dB** | **+2,2 dB** |
+| SNR kvartily | −0,5 / 0,0 / 0,5 | 2,0 / 2,2 / 2,8 | posun ~+2,3 dB |
+| `216D` rámcov | 322 | 359 | +11 % |
+
+`nf` bolo **−117 každú hodinu** so starou anténou a **−120 každú hodinu** s novou.
+Žiadne kolísanie — nie je to teda denný chod šumu, ako sme podozrievali.
+
+### Ako to rozumieť
+
+Rozklad je nezvyčajne čistý a každá zložka sedí:
+
+- **signál o 1 dB slabší** (−116 → −117) — to je tých 50 cm kábla navyše
+- **šum o 3 dB nižší** (−117 → −120) — to je samotná anténa
+- **výsledné SNR o 2,2 dB lepšie** — presne 3 − 1
+
+Mikrotik omni teda **nemá vyšší zisk, ale chytá menej šumu**. Pri uzle na hranici
+citlivosti je to to isté, čo zisk — rezerva k demodulačnej hranici SF7 stúpla
+z ~7,5 dB na ~9,7 dB.
+
+Počet rámcov stúpol len o 11 %, lebo `216D` sa aj predtým prijímal skoro celý;
+zlepšenie sa prejaví až pri ešte slabších uzloch alebo pri zhoršených podmienkach.
+
+### Zdravie počas merania
+
+XIAO 4 695 rámcov, ProMicro 4 992, T1000-E 4 961 — a na **žiadnej doske ani jedna
+snímka pri poruche, ani jeden zásah watchdogu**. Jedenásť hodín úplne čisto.
