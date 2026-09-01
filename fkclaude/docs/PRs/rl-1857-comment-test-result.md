@@ -1,6 +1,8 @@
 # RadioLib issue 1857 — komentár po odskúšaní jeho opravy
 
-**Stav: NA SCHVÁLENIE. Neposlané.**
+**NEPOSLANÉ — nahradené novšou verziou.** Odoslaná bola prepracovaná podoba
+v `rl-1857-comment-ten-day-result.md` (1. 9. 2026). Tento súbor ostáva ako záznam
+toho, ako text vyzeral pred odvolaním LR11x0 čísel.
 
 Merané 20.–26. 8. 2026, tri dosky, 149 065 prijatých rámcov, 8 buildov na XIAO.
 Pravidlá: žiadna zmienka o AI, bez mriežkových čísel.
