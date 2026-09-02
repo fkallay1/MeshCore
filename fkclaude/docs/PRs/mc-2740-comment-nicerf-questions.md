@@ -1,6 +1,10 @@
 # MeshCore issue 2740 — otázky na carlhoddera + oznámenie nášho portu
 
-**Stav: NA SCHVÁLENIE. Neposlané.**
+**ODOSLANÉ 3. 9. 2026:** https://github.com/meshcore-dev/MeshCore/issues/2740#issuecomment-5517533661
+
+Odoslané s odsekmi spojenými do jedného riadku — GitHub vykresľuje mäkký zlom ako koniec
+riadku, takže natvrdo zalomený text by bol rozstrapkaný. Tu v súbore je zalomenie ponechané
+kvôli čitateľnosti; telo je inak znak za znak zhodné.
 
 ## Kam to ide a prečo tam
 
@@ -91,6 +95,8 @@ akú má NiceRF prax pri osádzaní tohto čipu.
 ---
 
 ## Telo
+
+Hello 
 
 I have ported the NiceRF LoRa2021F33-2G4 to MeshCore, on a Seeed XIAO nRF52840, and have
 been testing it as a repeater in a live mesh for a few weeks. Happy to share whatever is
