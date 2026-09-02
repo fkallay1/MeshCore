@@ -1672,6 +1672,8 @@ extern void fk_ce_cycle(uint32_t off_ms);
 //sk: pocitadlo z nasho RadioLib patchu - kolko odpovedi bolo treba vyzdvihnut znova.
 //sk: Existuje len pri builde proti zaplatanemu RadioLibu, preto ten flag.
 extern volatile uint32_t lrxxxx_stale_reads;
+extern volatile bool lrxxxx_busy_wait;
+extern volatile bool lrxxxx_read_retry;
 #endif
 
   if (memcmp(arg, "guard", 5) == 0) {
@@ -1916,6 +1918,28 @@ extern volatile uint32_t lrxxxx_stale_reads;
 
   //en: A/B the post-read state rule without a rebuild - see _fk_lenstate in the wrapper.
   //sk: A/B pravidla pre stav po citani bez prekladu - pozri _fk_lenstate vo wrapperi.
+  //en: runtime A/B of the two library-level mechanisms, so one episode can be measured
+  //en: across all four arms without reflashing. Both default to on.
+  //en:   fk rlwait  on|off - the library wait for BUSY between opcode and reply frame
+  //en:   fk rlretry on|off - re-clocking a reply whose command status is not CMD_DAT
+  //sk: behove A/B dvoch mechanizmov v kniznici, aby sa jedna epizoda dala premerat vo
+  //sk: vsetkych styroch kombinaciach bez preflashovania. Oba su vychodzie zapnute.
+#ifdef FK_LRXXXX_STALE_COUNTER
+  if (memcmp(arg, "rlwait", 6) == 0 || memcmp(arg, "rlretry", 7) == 0) {
+    bool isWait = (memcmp(arg, "rlwait", 6) == 0);
+    const char* n = arg + (isWait ? 6 : 7);
+    while (*n == 0x20) n++;
+    if (*n) {
+      bool on = (memcmp(n, "on", 2) == 0);
+      if (isWait) lrxxxx_busy_wait = on; else lrxxxx_read_retry = on;
+    }
+    sprintf(reply, "rlwait=%s | rlretry=%s | stale=%lu",
+            lrxxxx_busy_wait ? "on" : "off", lrxxxx_read_retry ? "on" : "off",
+            (unsigned long)lrxxxx_stale_reads);
+    return true;
+  }
+#endif
+
   if (memcmp(arg, "lenstate", 8) == 0) {
     const char* n = arg + 8;
     while (*n == 0x20) n++;
