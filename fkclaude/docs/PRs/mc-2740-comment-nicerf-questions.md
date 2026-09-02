@@ -6,6 +6,12 @@ Odoslané s odsekmi spojenými do jedného riadku — GitHub vykresľuje mäkký
 riadku, takže natvrdo zalomený text by bol rozstrapkaný. Tu v súbore je zalomenie ponechané
 kvôli čitateľnosti; telo je inak znak za znak zhodné.
 
+**Upravené po odoslaní (3. 9.):** doplnená záverečná veta o podpore LR2021 v MeshCore
+(„works well for me these days"). Zámerne prítomný čas a „these days", nie „now" — to slovo
+je vo vete pred ňou a naznačuje posun oproti jeho júnovej výhrade. Formulácia hovorí
+„mne to funguje", nie „je to hotové", lebo v rádiovej obálke stále držíme tri nenahlásené
+nálezy (maska STATE_INT_READY, držaný STATE_RX, isChipResponding na SX1262).
+
 ## Kam to ide a prečo tam
 
 **Priamo napísať sa mu nedá** — GitHub nemá privátne správy a `carlhodder` nemá
@@ -139,4 +145,5 @@ outdoor units. If the plain module is on a plain crystal, that difference is wor
 for anyone choosing between the two.
 
 And on your first point, about waiting for the RadioLib implementation to settle: for what it
-is worth, it looks fine from here now. The episodes I mentioned above are a separate thing.
+is worth, it looks fine from here now. The episodes I mentioned above are a separate thing. The LR2021 support in MeshCore
+itself works well for me these days.
