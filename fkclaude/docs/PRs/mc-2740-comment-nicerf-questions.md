@@ -76,6 +76,10 @@ Pravidlá: žiadna zmienka o AI, žiadne odkazy s mriežkou.
   „just last night the main branch patched", takže hlásiť mu, že sme ju nevideli, by
   bolo zbytočné
 * fotka **rozšírená na obe verzie** modulu
+* **skrátený záver** — pôvodne končil na „and they are intermittent". Že sú epizódy
+  občasné, je v tele povedané už dvakrát („not constant, episodes that come and go over
+  hours" a „hours of nothing, then episodes"), takže tretie zopakovanie inými slovami
+  nič nepridávalo. Nosné je **„a separate thing"** — teda že to s RadioLibom nesúvisí.
 
 ### Ako je vyriešená otázka na cievku
 
@@ -129,4 +133,4 @@ outdoor units. If the plain module is on a plain crystal, that difference is wor
 for anyone choosing between the two.
 
 And on your first point, about waiting for the RadioLib implementation to settle: for what it
-is worth, it looks fine from here now. The episodes I mentioned above are a separate thing and they are intermittent.
+is worth, it looks fine from here now. The episodes I mentioned above are a separate thing.
