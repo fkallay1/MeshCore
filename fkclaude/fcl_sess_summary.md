@@ -11,6 +11,37 @@ sám podčiarkne ako neplatný odkaz.
 
 ---
 
+## 48 Kontrola PRs
+
+*(2026-09-03, vetva `test/lr2021-runtime-ab`)*
+
+- **„Fail" na PR 2978** — nie padnutý build: neschválený run po presne 30 dňoch expiruje na `failure`, 0 jobov, nič sa nepreložilo
+  - ↳ [docs/PRs/README.md § Červený krížik po 30 dňoch](docs/PRs/README.md#červený-krížik-po-30-dňoch-nie-je-padnutý-build)
+- **Ako sa stav CI vôbec dá prečítať** — `gh pr checks` a `statusCheckRollup` na našich PR nezobrazia nič, len `gh api actions/runs`
+  - ↳ [docs/PRs/README.md § gh pr checks nikdy nič nezobrazí](docs/PRs/README.md#gh-pr-checks-na-našich-pr-nikdy-nič-nezobrazí)
+- **`gh issue view --json comments` vrátil staré dáta** — 3 komentáre namiesto 7, chýbala jgromesova kritika; komentáre čítať cez REST
+  - ↳ [docs/PRs/README.md § gh issue view vie vrátiť staré dáta](docs/PRs/README.md#gh-issue-view---json-comments-vie-vrátiť-staré-dáta)
+- **Zlý upstream v príkaze** — `--repo ripplebiz/MeshCore` vráti prázdno bez chyby; správne je `meshcore-dev/MeshCore`, najistejšie `gh search prs`
+  - ↳ [docs/PRs/README.md § Kontrola stavu cez gh](docs/PRs/README.md#kontrola-stavu-cez-gh)
+- **Prehľad frontov** — 3218 mergnuté, 3261 bez review, 2978 v chvoste, bootloader 47–50 odložené na ďalší release, RadioLib 1857 živé
+  - ↳ [docs/PRs/README.md § Aktuálny obsah](docs/PRs/README.md#aktuálny-obsah)
+- **carlhodder odpovedal v issue 2740** — druhý človek s LR2021, má štyri dosky a prvá je identická s našou
+  - ↳ [fcl_readme_nicerf_lora2021.md § Jeho zostava](fcl_readme_nicerf_lora2021.md#jeho-zostava--tri-z-týchto-štyroch-bežia)
+- **SIMO erratum** — vraj sa treba nastaviť znova po `SetLoraModulationParams` / `SetRxPath`; my ho zapíname raz v `radio_init()`, čiže tiché vypadnutie do LDO
+  - ↳ [fcl_readme_nicerf_lora2021.md § SIMO sa stráca po zmene modulácie](fcl_readme_nicerf_lora2021.md#simo-sa-stráca-po-zmene-modulácie--neoverené)
+- **Náš mechanizmus potvrdený nezávisle** — vidí payload celý `05` a sám navrhol „CMD_OK status byte repeated"; u nás praská dĺžka, u neho payload
+  - ↳ [fcl_readme_nicerf_lora2021.md § Rovnaký príznak, iná cesta](fcl_readme_nicerf_lora2021.md#rovnaký-príznak-pokazených-paketov-iná-cesta)
+- **Otvorená otázka na nás** — či `SPIreadStream` pri `CMD_OK` vracal `ERR_NONE`; odpoveď je áno a je to dôkaz, prečo sa chyba nikde nehlási
+  - ↳ [fcl_readme_nicerf_lora2021.md § Otázka, ktorú nám položil](fcl_readme_nicerf_lora2021.md#otázka-ktorú-nám-položil--treba-odpovedať)
+- **Tip na „rádio ohluchne"** — generické `RADIOLIB_IRQ_*` sú počty posunov, nie masky; modulové konštanty maskou sú
+  - ↳ [fcl_readme_nicerf_lora2021.md § Jeho tipy](fcl_readme_nicerf_lora2021.md#jeho-tipy-na-rádio-ohluchne-po-vysielaní)
+- **A/B/A prehodnotené** — `rlwait` pravdepodobne prepínal redundantné čakanie, takže `stale=0` v oboch fázach nič nedokazuje
+  - ↳ [docs/lr2021-aba-rlwait-20260903.md § Doplnené 3. 9.](docs/lr2021-aba-rlwait-20260903.md#doplnené-3-9-rlwait-pravdepodobne-neprepínal-nič)
+- **Kontrolór odkazov** — `fkclaude/tools/check_doc_links.py` overí súbor + kotvu v celom `fkclaude/`; našiel 10 rozbitých odkazov z čias renamu OTA→FOTA, opravené
+  - ↳ bez projektovej dokumentácie — nástroj sám má hlavičku s použitím
+
+**Otvorené na ďalej:** odpovedať carlhodderovi (otázka na `ERR_NONE`, náš `fk stale` recept) · zmerať odber pred/po prepnutí SF, či SIMO erratum platí · overiť, či `waitForGpio` je nastavené na ceste `getPacketLength()` · dva neposlané drafty pre 1857 čakajú na schválenie · reprodukcia na nezmenenej knižnici, ktorú jgromes žiada, stále nie je · na PR 2978 sa mesiac nič nedeje
+
 ## 45 Merge upstream 1.17.1; Novy variant xiao_nrf42_nicerf_lora2021f33; Riesenie WatchDog radia; Nove cli prikazy fk xxx, pre testovanie, Repozitar na GB so zalohou globlaneho .claude
 
 *(2026-08-15 → 2026-08-17, vetva `features/nrf-fota`)*

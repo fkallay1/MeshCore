@@ -95,7 +95,7 @@ header → firmware ho zamietol). Tri zmeny v `fota_test_lora_repeater.py` (comm
 aby `baseline` + `run` prešli **bez manuálnych flagov**:
 
 1. **auto `--privkey`** = `test_nrf-fota/test_key.der`. Firmware vyžaduje podpísaný
-   HEADER (Ed25519 key_id=1, [FotaReceiver_signkey.cpp](examples/simple_repeater/nrffota/FotaReceiver_signkey.cpp));
+   HEADER (Ed25519 key_id=1, [FotaReceiver_signkey.cpp](../examples/simple_repeater/nrffota/FotaReceiver_signkey.cpp));
    bez kľúča → `CHYBA=0x6`, `total_chunks=0`, session sa nedokončí. (Toto bola príčina, prečo
    test „nešiel" po pridaní podpisu.)
    > ⚠️ **`test_key.der` je GITIGNORED** (`.gitignore`) — súkromný kľúč sa necommituje, takže na

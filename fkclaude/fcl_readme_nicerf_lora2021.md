@@ -812,6 +812,22 @@ stratu 1–3 dB citlivosti, to by ukázala až slabá linka.)
 `LR2021_PRAM_UPD`** — datasheet uvádza „DCDC (SIMO) impact on sensitivity" pre
 sub-GHz LoRa ako vec, ktorú patch opravuje.
 
+### SIMO sa stráca po zmene modulácie — NEOVERENÉ
+
+carlhodder (MeshCore issue 2740, 3. 9. 2026) hlási erratum: **SIMO/DC-DC treba
+nastaviť znova po každom volaní `SetLoraModulationParams` alebo `SetRxPath`.**
+Chystá sa naň PR do RadioLibu.
+
+Prečo je to pre nás dôležité: náš `-D NICERF_LORA2021F33_SIMO=1` zapína menič
+**raz, v `radio_init()`**. Ak erratum platí, prvé prepnutie SF/BW alebo cesty
+príjmu nás tichým spôsobom vráti do LDO a namerané ~41 % sa stratí — bez akejkoľvek
+chyby a bez zmeny v logu. Nameraných 16,0 mA v tabuľke vyššie bolo pri jednej
+modulácii nastavenej pri štarte, čiže tento prípad nepokrývajú.
+
+Čím sa to overí: zmerať odber v RX, potom z CLI prepnúť SF/BW a zmerať znova.
+Rozdiel ~4,5 mA = erratum platí a zapnutie SIMO treba presunúť za každú zmenu
+modulácie.
+
 ### Pôvodná analýza (prečo sme to museli merať)
 
 ⚠️ **Skoršie tvrdenie „VDCC1/VDCC2 nie sú vyvedené, takže SIMO sa nedá zapnúť"
@@ -870,6 +886,86 @@ prevádzka mimo medzných hodnôt (datasheet tab. 3-1: *„Stresses above the va
 listed below may cause permanent device failure"*) s rizikom latch-up.
 NiceRF preto pri CE dole žiada stiahnuť aj NSS a RESET.
 
+## Nezávislé pozorovania z issue 2740 (carlhodder, 3. 9. 2026)
+
+Druhý človek s LR2021 v MeshCore, odpovedal na naše otázky. Toto je jediný externý
+zdroj, ktorý má viac ako jednu dosku — čiže vie oddeliť „naša doska" od „čip".
+Jeho vlastná výhrada: *„I keep finding things that disprove my assumptions so don't
+take anything as fact."*
+
+### Jeho zostava — tri z týchto štyroch bežia
+
+| modul | MCU | TCXO / NTC |
+|---|---|---|
+| NiceRF LoRa2021F33-2G4 (1 W) | XIAO nRF52840 | TCXO, bez NTC |
+| NiceRF LoRa2021F33-2G4 (1 W) | ProMicro nRF52840 klon | TCXO, bez NTC |
+| Waveshare Core2021-XF | XIAO klon | **NTC osadený** |
+| NiceRF LoRa2021 (base, 160 mW) | XIAO klon | bez NTC — leží nepoužitý |
+
+Naša doska je prvý riadok, čiže **identická zostava**. Dôsledky:
+
+- **F33 (1 W) má TCXO**, potvrdené z druhej strany — sedí s naším nastavením.
+- **Base LoRa2021 (160 mW) nemá NTC**, preto ho odložil. Teplotná kompenzácia sa
+  na ňom nedá robiť.
+- **Waveshare Core2021-XF NTC má** a beží s kompenzáciou. Výrobca potvrdil 100 kΩ,
+  ale **nie beta koeficient** — carlhodder predpokladá 4250 K (najčastejšie pre
+  0402/100 kΩ/1 %) a sám hovorí, že to treba doskúšať.
+- **SIMO cievka je osadená na oboch NiceRF variantoch** — pozrel pod tienenie
+  a vidí súčiastku medzi pinmi **14/16 (LXB/LXA)**. Zhoda s naším meraním odberu.
+  Na Waveshare ju predpokladá (príkaz neohlási chybu a odber je nižší než u F33).
+
+### Rovnaký príznak pokazených paketov, iná cesta
+
+Vidí *„very infrequent packet where the data clocks out as all `05`"*, pričom
+**IRQ príznaky sú platné a dĺžka paketu je správna**. Sám navrhol hypotézu, že by
+to mohol byť *„CMD_OK status byte repeated somehow"* — čo je presne náš mechanizmus
+zo sekcie [Zastaralá SPI odpoveď](#zastaralá-spi-odpoveď--komolená-dĺžka-paketu),
+len prečítaný z FIFO namiesto z dĺžky. Nezávisle na nás a bez toho, aby čítal našu
+analýzu.
+
+Rozdiel: u nás praská **dĺžka**, u neho **payload**. To je ten istý stav „odpoveď
+nie je pripravená", trafený v dvoch rôznych čítaniach.
+
+Ďalej hovorí, že chyby **klastrujú v čase, nie sú rovnomerné** — rovnaký profil ako
+naše epizódy — a že **možno častejšie pri advertoch / dlhých paketoch**, čo si však
+sám neoveril. Testuje sa mu to zle, lebo to vidí najviac na kopcových solárnych
+repeateroch bez rozumného debugu.
+
+### Otázka, ktorú nám položil — TREBA ODPOVEDAŤ
+
+*„When you are seeing the CMD_OK instead of CMD_DAT was the return status from the
+`SPIreadStream`/`SPIwriteStream` commands still `RADIOLIB_ERR_NONE`?"*
+
+Odpoveď z našej analýzy je **áno** a je to podstatné: `LRxxxx::SPIparseStatus()`
+odmieta len `CMD_FAIL` a `CMD_PERR`, takže `CMD_OK` prejde ako úspech. Preto sa
+chyba nikde nehlási. Stojí to v sekcii o zastaralej odpovedi, ale jemu to treba
+povedať priamo — je to odpoveď na jeho otázku a zároveň dôkaz, prečo je jeho
+`05` payload ten istý jav.
+
+### Jeho tipy na „rádio ohluchne po vysielaní"
+
+Tri veci, ktoré u neho spôsobili podobné správanie:
+
+1. **Generické `RADIOLIB_IRQ_*` konštanty sú počty bitových posunov, nie masky.**
+   Ako masku ich treba používať ako `(1 << RADIOLIB_IRQ_PREAMBLE_DETECTED)`.
+   Modulové konštanty (`RADIOLIB_LR2021_IRQ_PREAMBLE_DETECTED`) už maskou **sú**
+   (`0x01UL << 5`). Ľahko sa to zamení — a zámena oslepí na ostatné prerušenia.
+2. **Pridanie ďalších IRQ na DIO pin** (vlastný `setDioIrqConfig`, prepísaný
+   `startReceive`) má vedľajší účinok, že prestaneš vidieť ostatné prerušenia,
+   kým sa to nevyčistí.
+3. **Starý bug v RadioLibe**: nedokázal prijať paket väčší než ten posledný
+   vysielaný. Trafí len build proti starej vetve.
+
+Na nás sedí prvý bod — máme vlastnú prácu s IRQ v watchdogu a v ceste po TX.
+Viď [Watchdog rádia](#watchdog-rádia--flag-fkpr_radio_watchdog-nezávislý-od-typu-rádia)
+a `docs/lr2021-post-tx-rearm-bug.md`.
+
+### Zaseknuté prerušenia z júna sú v 1.17.1 vyriešené
+
+Jeho pôvodný problém (preamble valid a header valid ostanú nastavené bez RX done)
+pokrýva timeout prerušení pridaný v MeshCore **1.17.1** — to už máme zmergnuté.
+Podpora LR2021 v MeshCore je podľa neho *„stable now"*.
+
 ## Neoverené / otvorené
 
 - ~~Má modul cievku pre SIMO?~~ **VYRIEŠENÉ — má, DC-DC ušetrí ~41 %.**
@@ -887,6 +983,12 @@ NiceRF preto pri CE dole žiada stiahnuť aj NSS a RESET.
 - **Prepad VCC nad ~0,5 A** — nemeraný, treba ADC delič alebo CW nosnú.
   Pri `tx ≤ 15` netreba riešiť.
 - **PRAM sa nenahráva** — rozhodnutie odložené, viď sekciu vyššie.
+- **SIMO erratum** — treba ho vraj nastaviť znova po `SetLoraModulationParams`
+  a `SetRxPath`; my ho zapíname len raz v `radio_init()`. Merať odber pred a po
+  prepnutí SF/BW.
+- **Beta koeficient NTC na Waveshare Core2021-XF** — 4250 K je carlhodderov
+  predpoklad, nie údaj od výrobcu. Nás sa netýka (F33 NTC nemá), ale ak by sme
+  robili teplotnú kompenzáciu, je to prvé číslo na doskúšanie.
 - DIO7 riešime ako RF-switch pin HIGH vo všetkých režimoch (demo používa
   `GPIO_HIGH` funkciu). Ekvivalentné by to malo byť, ale netestované.
 - **CE (pin 5) nie je zapojený**, drží ho interný pull-up. Pre batériu ho

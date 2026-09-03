@@ -5,7 +5,7 @@
 
 Tento súbor je detailný záznam celej práce a najmä **debugovacej cesty** k sprevádzkovaniu
 OTA-over-LoRa na MeshCore repeateri. Technický popis systému je v
-[readme_tech_nrf-ota.md](readme_tech_nrf-ota.md), prehľad v [readme_nrf-ota.md](readme_nrf-ota.md).
+[readme_tech_nrf-ota.md](../fcl_readme_tech_nrf-fota.md), prehľad v [readme_nrf-ota.md](../fcl_readme_nrf-fota.md).
 
 ---
 
@@ -148,7 +148,7 @@ nie pri blokujúcom `ota_apply`) → odstránený, nahradený varovným komentá
 - **Pridané diagnostiky:** `rawrx` v heartbeate; `ota agc` (read-only).
 - **Automatický test `run` občas FAIL = timing** (skúsi flash pred VERIFIED; fire-and-forget
   príjem niekedy potrebuje viac cyklov). Manuálny flash s hotovou VERIFIED session vždy PASS.
-  → spevnenie VERIFIED-pollingu: [readme_verified_pooling.md](readme_verified_pooling.md).
+  → spevnenie VERIFIED-pollingu: [readme_verified_pooling.md](../fcl_readme_verified_pooling.md).
 
 ### Zmenené súbory
 **MeshCore (`features/nrf-ota`):**
@@ -180,7 +180,7 @@ nie pri blokujúcom `ota_apply`) → odstránený, nahradený varovným komentá
 - MeshCore `7cac5ce4`: spevnenie testu (nižšie).
 - Dokumenty: `readme_tech_nrf-ota.md`, `conv_claude_20260615.md`, `readme_verified_pooling.md`.
 
-**Spevnenie `ota_test_lora_repeater.py`** (detail: [readme_verified_pooling.md](readme_verified_pooling.md)):
+**Spevnenie `ota_test_lora_repeater.py`** (detail: [readme_verified_pooling.md](../fcl_readme_verified_pooling.md)):
 - **VERIFIED-polling**: `broadcast_until_verified()` — opakuje broadcast + poll `ota status` až
   do VERIFIED / `--verify-wait` (60 s), viac pollov/kolo, sleduje rast recv/total, settle po
   reboote. Nahradilo fixný `--cycles` loop, ktorý pri strate paketov na začiatku padol predčasne.

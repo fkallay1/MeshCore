@@ -16,7 +16,7 @@ z projektu **FK_lora-sniffer**. Toto je **iné** ako vstavané MeshCore „FOTA"
 | Build env | [variants/promicro/platformio.ini](../variants/promicro/platformio.ini), [variants/sensecap_solar/platformio.ini](../variants/sensecap_solar/platformio.ini), [variants/xiao_nrf52/platformio.ini](../variants/xiao_nrf52/platformio.ini), [variants/t1000-e/platformio.ini](../variants/t1000-e/platformio.ini), [variants/rak3401/platformio.ini](../variants/rak3401/platformio.ini), [variants/rak4631/platformio.ini](../variants/rak4631/platformio.ini) | `ProMicro_repeater_fota` (v6), `SenseCap_Solar_repeater_fota` (v7), `Xiao_nrf52_repeater_fota` (v7), `t1000e_repeater_fota` (v7, LR1110), `RAK_3401_repeater_fota` (v6, „RAK 1W"), `RAK_4631_repeater_fota` (v6) — extrafs.ld + `WITH_LORA_FOTA` + `FOTA_DEBUG` |
 | Test | [test_nrf-fota/](../test_nrf-fota/) | end-to-end LoRa test + nástroje z FK_lora |
 
-Detailný popis FOTA modulu samotného: [examples/simple_repeater/nrffota/README.md](examples/simple_repeater/nrffota/README.md).
+Detailný popis FOTA modulu samotného: [examples/simple_repeater/nrffota/README.md](../examples/simple_repeater/nrffota/README.md).
 
 **Súvisiace dokumenty:**
 - [fcl_readme_tech_nrf-fota.md](fcl_readme_tech_nrf-fota.md) — detailný technický popis (architektúra,

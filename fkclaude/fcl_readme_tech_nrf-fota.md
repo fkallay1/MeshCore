@@ -390,7 +390,7 @@ Symptóm: repeater po čase **prestal prijímať čokoľvek** (`rawrx=0`), dlhod
      POZOR: počítadlá `rawrx`/`rawtx` (čísla `#N` v riadkoch) sa inkrementujú aj pre
      odfiltrované rámce — diery v číslovaní = potlačené výpisy, nie strata paketov.
 2. `nf=-120` v hluchom stave = **clampnutá dolná hranica** noise floor
-   ([RadioLibWrappers.cpp:97](src/helpers/radiolib/RadioLibWrappers.cpp#L97)) → rádio JE v RX a
+   ([RadioLibWrappers.cpp:97](../src/helpers/radiolib/RadioLibWrappers.cpp#L97)) → rádio JE v RX a
    vzorkuje, kanál tichý.
 3. **Kontrolný test s pôvodným FK_lora snifferom** na tých istých doskách/anténe/bridge:
    `fota_test_lora.py` PREŠIEL (#115→#116) → **HW v poriadku** (RSSI -23, SNR +11).
@@ -405,7 +405,7 @@ Symptóm: repeater po čase **prestal prijímať čokoľvek** (`rawrx=0`), dlhod
   medzitým resetol zaseknuté rádio. **Repeater radio config sme NEMENILI → plná kompatibilita
   s inými MeshCore zariadeniami.**
 - **Trvalá hluchota = jednorazový zaseknutý receiver** ("stuck noise floor", self-reinforcing,
-  [RadioLibWrappers.cpp:78](src/helpers/radiolib/RadioLibWrappers.cpp#L78)). MeshCore má naň
+  [RadioLibWrappers.cpp:78](../src/helpers/radiolib/RadioLibWrappers.cpp#L78)). MeshCore má naň
   recovery `resetAGC()` (sleep+calibrate, `SX126xReset.h`), ale volá sa len periodicky cez
   `getAGCResetInterval()`, ktorý je **default 0 (vypnuté)**. Zaseknutý stav vyčistí
   power-cycle / DFU reflash.
@@ -460,7 +460,7 @@ DIO1 / SysTick prerušenie → skok cez VTOR do app handlera (SD už disabled, F
 → fault/hang.
 
 **Fix:** po `sd_softdevice_disable()` pridané `__disable_irq()` PRED `ensure_flasher_written()`
-([FotaPatcher.cpp](examples/simple_repeater/nrffota/FotaPatcher.cpp), commit `d24c6792`).
+([FotaPatcher.cpp](../examples/simple_repeater/nrffota/FotaPatcher.cpp), commit `d24c6792`).
 `sd_disable` ostáva s IRQ povolenými (SVC sa dokončí); chránime kritické NVMC okno + skok.
 **Overené na HW: 2 čisté flash cykly (#101→#102, #102→#103, neskôr #104→#105).** Toto je
 pravdepodobne aj príčina §8.4 (agc sleep+calibrate = rádio v zlom stave → DIO ISR rozbije flash).
@@ -468,7 +468,7 @@ pravdepodobne aj príčina §8.4 (agc sleep+calibrate = rádio v zlom stave → 
 ### 8.7 CAD / LBT a FOTA — držať vypnuté (default)
 MeshCore má pred TX „listen-before-talk" gate v `Dispatcher::checkSend()` cez
 `_radio->isReceiving()`. Tá vetví na dve úrovne v `RadioLibWrapper::isChannelActive()`
-([RadioLibWrappers.cpp:207](src/helpers/radiolib/RadioLibWrappers.cpp#L207)):
+([RadioLibWrappers.cpp:207](../src/helpers/radiolib/RadioLibWrappers.cpp#L207)):
 1. **RSSI prah** voči noise floor (`_threshold`) — lacné, rádio **neopúšťa RX**.
 2. **Hardvérové CAD** (`_cad_enabled`) — synchrónne `_radio->scanChannel()` (na SX1262
    blokujúce CAD: RX→CAD→RX prepnutie + čakanie na CAD-done DIO). Po scane si vetva sama
