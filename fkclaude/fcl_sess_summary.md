@@ -42,6 +42,41 @@ sám podčiarkne ako neplatný odkaz.
 
 **Otvorené na ďalej:** odpovedať carlhodderovi (otázka na `ERR_NONE`, náš `fk stale` recept) · zmerať odber pred/po prepnutí SF, či SIMO erratum platí · overiť, či `waitForGpio` je nastavené na ceste `getPacketLength()` · dva neposlané drafty pre 1857 čakajú na schválenie · reprodukcia na nezmenenej knižnici, ktorú jgromes žiada, stále nie je · na PR 2978 sa mesiac nič nedeje
 
+## 46 Problem na NicRF2021 - ze RAW RX paekty sa komolili - zla dlzka avypisany obsah v Serial logging - problem casovania SPI - PR do meshocore, Issue do RadioLib
+
+*(2026-08-19 → 2026-09-03, vetva `features/nrf-fota`)*
+
+- **Príznak `len=4` v RAW logu** — nie chyba výpisu: druhé SPI čítanie prišlo priskoro, vrátilo default stream a ako dĺžka sa čítala horná polovica IRQ slova
+  - ↳ [fcl_readme_nicerf_lora2021.md § Zastaralá SPI odpoveď](fcl_readme_nicerf_lora2021.md#zastaralá-spi-odpoveď--komolená-dĺžka-paketu)
+- **Mechanizmus dokázaný injekciou** — preskočené čakanie na BUSY vyrobí chybu na požiadanie: 32/32 predčasných čítaní hlásilo `CMD_OK`, všetky poriadne `CMD_DAT`
+  - ↳ [fcl_readme_nicerf_lora2021.md § Odmerané na železe](fcl_readme_nicerf_lora2021.md#odmerané-na-železe--fk-stale)
+- **Guard v MeshCore pre oba čipy** — `CustomLR2021` aj `CustomLR1110` veria dĺžke len pri `CMD_DAT`; koreň je v RadioLibe, náš override je obchvat, nie oprava
+  - ↳ [fcl_readme_nicerf_lora2021.md § Kde je koreň](fcl_readme_nicerf_lora2021.md#kde-je-koreň)
+- **Issue do RadioLib a PR do MeshCore** — 1857 a 3261 odoslané; bez zmienky o AI a bez `#čísla` či URL v commitoch (kvôli krížovým referenciám do upstreamu)
+  - ↳ [docs/PRs/rl-1857-issue-stale-spi-reply.md](docs/PRs/rl-1857-issue-stale-spi-reply.md) · [docs/PRs/mc-3261-pr-lr-stale-spi-reply.md](docs/PRs/mc-3261-pr-lr-stale-spi-reply.md)
+- **Vyvrátené vlastné tvrdenie** — prvá verzia PR tvrdila, že nulová dĺžka na LR11x0 nenastáva; železo ukázalo 25 núl za 3 minúty, PR prepísaný a omyl priznaný komentárom
+  - ↳ [docs/PRs/mc-3261-comment-radiolib-status.md](docs/PRs/mc-3261-comment-radiolib-status.md)
+- **`rule=FP` je falošný poplach** — 400+ udalostí na T1000-E bola len zhoda nuly so sebou, ani jedna `rule=CMD`; to ukázalo, že chyba je na našej strane čítania
+  - ↳ [fcl_readme_nicerf_lora2021.md § Ako čítať spifix](fcl_readme_nicerf_lora2021.md#ako-čítať-spifix--rulefp-je-falošný-poplach) · [docs/lr20xx-spi-read-protocol.md § Rámcovanie čítacieho príkazu](docs/lr20xx-spi-read-protocol.md#rámcovanie-čítacieho-príkazu)
+- **`fk pretype on` bez efektu** — extra `getPacketType()` pred čítaním dĺžky nezmenil nič na žiadnej doske; hypotéza časovacieho zákmitu tým nepotvrdená
+  - ↳ bez projektovej dokumentácie — vetva zanikla, čísla vysvetlila až oprava offsetu
+- **Premenovanie modulu podľa datasheetu** — `NiceRF_LoRa2021F33` všade (header, flagy, variant, JSON, doky), s poznámkou NiceRF = G-NiceRF, aby to nebudilo dojem klonu
+  - ↳ [fcl_readme_nicerf_lora2021.md § Datasheet modulu](fcl_readme_nicerf_lora2021.md#datasheet-modulu--v12-2026-08-stiahnuté-2026-08-20)
+- **Konvencia flagov `FK_` / `FKPR_`** — testovacie vs. kandidáti na PR; pred každým PR musí `grep -c "FK"` na diffe vrátiť 0
+  - ↳ [fcl_readme_nicerf_lora2021.md § Kam patria naše flagy](fcl_readme_nicerf_lora2021.md#kam-patria-naše-flagy)
+- **Watchdog overený na železe** — detektor (`spread=0` v troch oknách po sebe pri zamrznutom `rawrx`) aj zotavenie (`fk ce off/on` + re-init) na LR2021
+  - ↳ [fcl_readme_nicerf_lora2021.md § Watchdog rádia](fcl_readme_nicerf_lora2021.md#watchdog-rádia--flag-fkpr_radio_watchdog-nezávislý-od-typu-rádia)
+- **Zaseknutý príjem na LR2021 reprodukovaný** — `irq=0x40111`, DIO trvalo HIGH, bez samozotavenia; dva moje pokusy o opravu zlyhali, dosku zachránilo UF2 cez bootloader
+  - ↳ [docs/lr2021-post-tx-rearm-bug.md § Symptóm](docs/lr2021-post-tx-rearm-bug.md#symptóm)
+- **T1000-E pribudol ako tretia doska** — prepísaný na repeater FOTA FW, apka COM22 / bootloader COM23; dva rôzne COM sú zámer, aby sa stav dal rozlíšiť podľa portu
+  - ↳ bez projektovej dokumentácie — zariadenia sú v `test_nrf-fota/fota_devices.json`
+- **`--rebuild` flashoval starý archív** — `resolve_zip()` bral najnovší zip z `builds/` namiesto `.pio/build/<env>/firmware.zip`; T1000-E dostal build o 106 starší, opravené
+  - ↳ bez projektovej dokumentácie — oprava v `test_nrf-fota/fota_remote_e2e.py`
+- **Handoff pre PR 2978** — rebase odovzdaný samostatnej session vrátane varovania neflashovať dosky, aby si nezhodila bežiace pasívne meranie
+  - ↳ [docs/handoff-pr2978-rebase.md § Prečo naň nikdy nebežalo CI](docs/handoff-pr2978-rebase.md#prečo-naň-nikdy-nebežalo-ci)
+
+**Otvorené na ďalej:** T1000-E beží od 21. 8. RX-only (`set repeat off`, oba advert intervaly 0, vidno ako `rawtx=1`) — pozostatok môjho merania, vrátiť dvoma príkazmi, ak to nedrží bežiace A/B · meranie „TX si sám ruší príjem" sa už netreba dokončiť, príčinu núl vysvetlila oprava offsetu
+
 ## 45 Merge upstream 1.17.1; Novy variant xiao_nrf42_nicerf_lora2021f33; Riesenie WatchDog radia; Nove cli prikazy fk xxx, pre testovanie, Repozitar na GB so zalohou globlaneho .claude
 
 *(2026-08-15 → 2026-08-17, vetva `features/nrf-fota`)*

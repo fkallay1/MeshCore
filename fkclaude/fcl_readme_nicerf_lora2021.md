@@ -335,6 +335,36 @@ vyplývajú dve veci:
 Fingerprint bol v teste 0, lebo IRQ slovo už vyčistil predchádzajúci `readData()`.
 Pri živej chybe je `RX_DONE` ešte nastavený a odtiaľ pochádza hodnota 4.
 
+### Ako čítať `spifix` — `rule=FP` je falošný poplach
+
+Číslo `spifix=` v AALIVE je **súčet dvoch pravidiel** a samo o sebe nehovorí nič.
+Rozhodne až výpis kruhového buffra (`fk spifix`), kde má každá udalosť `rule`:
+
+* `rule=CMD` — status nehlásil `CMD_DAT`, teda naozaj zastaralá odpoveď;
+* `rule=FP` — zhoda dĺžky s fingerprintom (horný bajt IRQ slova). Pri **nule sa
+  zhoduje sama so sebou**, takže každá nulová dĺžka pri nastavenom `RX_DONE` sa
+  označí, aj keď je odpoveď platná.
+
+Ako to vyzeralo na T1000-E (build #490): počítadlo narástlo na 400+, ale všetkých
+osem zaznamenaných udalostí bolo rovnakých —
+
+```
+fp=0 first=0 final=0 irq=0x38 stat=0x7 cmd=3 tries=1 rule=FP (falosny)
+```
+
+`cmd=3` je `CMD_DAT`, čiže čip hlásil odpoveď ako platnú, `tries=1` znamená, že
+sa nič neopakovalo, a sonda po nule urobila ďalšie tri čítania bez výsledku.
+Ani jedna udalosť `rule=CMD` — teda **žiadna preteka**, hoci počítadlo bežalo.
+Presne toto ukázalo, že chyba je na našej strane čítania, a nie v čipe: dĺžka sa
+brala z `buff[2]`, kde je pri jednom status bajte **offset v RX FIFO** (na
+začiatku buffra 0), nie dĺžka — viď [docs/lr20xx-spi-read-protocol.md § Rámcovanie
+čítacieho príkazu](docs/lr20xx-spi-read-protocol.md#rámcovanie-čítacieho-príkazu).
+Po oprave je na T1000-E `spifix=0` a `miss=0` (build #504, 5550 rámcov).
+
+Pravidlo do budúcna: **nikdy neinterpretuj `spifix` z AALIVE bez výpisu ringu.**
+Vysoké číslo môže byť len `rule=FP`, a naopak nula na doske, ktorá nič neprijíma,
+nie je dôkaz o ničom.
+
 ### Kde je koreň
 
 V upstream RadioLibe 7.7.1 (pinnutý upstreamom MeshCore na `6d89348`), nie
