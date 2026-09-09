@@ -82,8 +82,57 @@ Odhad **~550 riadkov v 4 súboroch**:
   vezme ako držané stlačenie a repeater sa ~1 s po boote sám vypne. **Samostatný
   kandidát** — dopísať do `meshcore-nenahlasene-nalezy.md`.
 
+## Čo sa medzitým udialo v upstream/dev — zohľadniť
+
+Stav zistený **9. 9. 2026**. Naša vetva `test/lr2021-runtime-ab` obsahuje upstream po
+`65aa1138` (1. 9. 2026, merge PR 3319), odvtedy v `upstream/dev` pribudli **štyri**
+commity. Jeden z nich je pre nás dôležitý:
+
+### LR2021 startReceive - upstream opravil zle makro (8. 9.)
+
+`974f00de` (oltaco, PR 3379) v `src/helpers/radiolib/CustomLR2021.h`:
+
+```
+-  RADIOLIB_IRQ_RX_DEFAULT_FLAGS | (1UL << RADIOLIB_LR2021_IRQ_PREAMBLE_DETECTED)
++  RADIOLIB_IRQ_RX_DEFAULT_FLAGS | (1UL << RADIOLIB_IRQ_PREAMBLE_DETECTED)
+```
+
+`RADIOLIB_LR2021_IRQ_PREAMBLE_DETECTED` je **maska** (`0x01UL << 5`, teda 32), nie číslo
+bitu — `1UL << 32` je nedefinovaný posun. Správne je generické
+`RADIOLIB_IRQ_PREAMBLE_DETECTED` (= 2).
+
+**Naša kópia `CustomLR2021.h` má ten starý riadok** (r. 96). Z toho vyplývajú tri veci:
+
+1. **Pre čistú vetvu to je nulová práca** — náš `CustomLR2021.h` do PR nejde, berieme
+   upstream súbor a ten je už opravený. Len sa treba vetviť z **aktuálneho**
+   `upstream/dev`, nie z merge-base.
+2. **Na testovacej vetve to pretiahnuť do našej kópie.** Preamble bit sa
+   nedostal do reportovaných flagov, takže vetva na preambulu v `isReceiving()` bola
+   podľa všetkého mŕtva — a **všetky naše LR2021 čísla** (rxerr 4,34 % na xiao-nicerf,
+   obe A/B/A série, šesť okien po 30 min) sú namerané s tým rozbitým posunom. Dotýka sa
+   to aj toho, čo hlásime do RadioLib 1857 a do 2740.
+3. **Nevydávať to za dokázanú príčinu, kým sa nezmeria.** Je to hypotéza s jasným
+   mechanizmom, nie výsledok. Kto to bude merať, nech si prečíta
+   `aba_single_switch_misleads` — jedno striedanie tu už raz klamalo.
+
+Zvyšné tri commity nás netýkajú (companion CLI fix `5d82ed35` / PR 3366 a dva merge
+commity). **Pin RadioLibu sa nezmenil** — v `platformio.ini` od 1. 9. nie je ani jeden
+commit, stále beží `6d8934836` z 11. 7.
+
+### Otvorené upstream PR, ktoré treba sledovať
+
+| PR | kto | čo | prečo nás zaujíma |
+|---|---|---|---|
+| **2739** | c03rad0r | NiceRF LoRa2021 (plain, ESP32-C3), 7 súborov / +553, naposledy 4. 9. | náš PR má byť nadstavba, nie konkurencia; poslať po ňom |
+| **3074** | omegaconjecture | Lierda AM36 Pico, ESP32-S3 + LR2021, 5 súborov, od 9. 8. bez pohybu | **precedens** — ako upstream posudzuje LR2021 variant; prečítať review skôr, než napíšeme svoj |
+| **3331** | strasharo | `xiao_nrf52` repeater: preskočiť I2C probing RTC/senzorov pri boote | **týka sa nás** — náš variant ťahá `-I variants/xiao_nrf52` a náš `target.cpp` je z neho odvodený; ak to padne, zvážiť to isté u nás |
+| **3191** | jpmartineau | `companion_radio_serial` env pre XIAO | len aby sme sa nezrazili v tom istom súbore |
+
 ## Postup
 
+0. **Najprv znovu prejsť upstream** — `git fetch upstream && git log --oneline
+   65aa1138..upstream/dev` a pozrieť `src/helpers/radiolib`, `variants`, `platformio.ini`.
+   Sekcia vyššie je stav k 9. 9.; ak medzitým pribudlo niečo k LR2021, patrí to sem.
 1. **Vetva z upstreamu, vo worktree** — nie prepnutím hlavného repa, na
    `test/lr2021-runtime-ab` beží meranie:
    ```
@@ -120,6 +169,9 @@ Odhad **~550 riadkov v 4 súboroch**:
   je to zásadné, pre nás nie.)
 * **2,4 GHz blok** (r. 110–112, zakomentovaný) — nechať v PR ako komentovanú možnosť,
   alebo vyhodiť?
+* **Kedy pretiahnuť `974f00de` (preamble makro) na testovaciu vetvu?** Súvisí s bodom
+  o flashi: buď hneď, a tým sa zavrie porovnávacie okno, alebo až po dobehnutí merania —
+  ale potom ďalšie hodiny logov ležia na známej chybe.
 
 ## Pasce
 
