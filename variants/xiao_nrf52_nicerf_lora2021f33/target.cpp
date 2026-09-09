@@ -27,18 +27,25 @@ bool radio_init() {
   rtc_clock.begin(Wire);
 
 #ifdef PIN_LORA_CE
-  // CE (module pin 5) enables the module's own LDO. It has an internal
-  // pull-up, so the module powers up even unconnected, but driving it makes
-  // the state deterministic and gives us a real power-down for battery use.
-  // NiceRF: when CE is low, NSS and RESET must be low too or current leaks
-  // in through the ESD diodes.
-  pinMode(PIN_LORA_CE, OUTPUT);
-  digitalWrite(PIN_LORA_CE, HIGH);
-  delay(5);   // let the module LDO settle before the first SPI transaction
+  // Always start from a cold module. Without this the LR2021 survives an MCU
+  // reset in a state findChip() cannot reach and init fails with -2 on every
+  // boot that is not a fresh power-up - see nicerf_lora2021f33_power_cycle().
+  nicerf_lora2021f33_power_cycle();
 #endif
 
   nicerf_lora2021f33_pre_init(radio);        // PA table must be set before begin() applies TX power
-  if (!radio.std_init(&SPI)) return false;
+  bool radio_ok = radio.std_init(&SPI);
+#ifdef PIN_LORA_CE
+  // And retry if it still failed. The chip is not always freed by one cycle:
+  // on this board it has stayed unreachable across three in a row and then come
+  // back later on its own, so a retry is worth the boot time.
+  for (int attempt = 1; attempt <= 2 && !radio_ok; attempt++) {
+    Serial.printf("[LR2021] init failed, power-cycling the module (%d/2)\r\n", attempt);
+    nicerf_lora2021f33_power_cycle();
+    radio_ok = radio.std_init(&SPI);
+  }
+#endif
+  if (!radio_ok) return false;
   nicerf_lora2021f33_post_init(radio);       // front-end RF switch: needs an initialised chip
 
 #if defined(LR2021_PRAM_UPD) && defined(RADIOLIB_GODMODE)
