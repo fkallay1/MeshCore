@@ -148,6 +148,34 @@ static inline void nicerf_lora2021f33_build_pa_table() {
 #endif  // NICERF_LORA2021F33_STOCK_PA_TABLE
 
 
+#ifdef PIN_LORA_CE
+/* Take the module's supply away and bring it back, leaving the LR2021 in the
+   state it has after a cold start.
+
+   This is not optional on a board that wires CE (module pin 5, the LDO enable):
+   CE has an internal pull-up, so the module stays powered across an MCU reset,
+   and the LR2021 can be left in a state that RadioLib's own reset inside
+   findChip() does not recover from - begin() then returns CHIP_NOT_FOUND (-2) on
+   every boot that is not a cold power-up. Only removing the supply clears it.
+
+   NiceRF warn that with CE low the module must not be fed through an IO pin, or
+   current leaks in through the ESD diodes and the supply never really goes away.
+   So every line we drive goes low first, and the module's own outputs are left
+   as inputs so they cannot source current either. */
+static inline void nicerf_lora2021f33_power_cycle(uint32_t off_ms = 300) {
+  const uint8_t drive_low[4] = { P_LORA_NSS, P_LORA_SCLK, P_LORA_MOSI, P_LORA_RESET };
+  const uint8_t as_input[3]  = { P_LORA_MISO, P_LORA_BUSY, P_LORA_DIO_1 };
+  for (int i = 0; i < 3; i++) pinMode(as_input[i], INPUT);
+  for (int i = 0; i < 4; i++) { pinMode(drive_low[i], OUTPUT); digitalWrite(drive_low[i], LOW); }
+  pinMode(PIN_LORA_CE, OUTPUT); digitalWrite(PIN_LORA_CE, LOW);
+  delay(off_ms);
+  digitalWrite(PIN_LORA_CE, HIGH);
+  delay(500);  // let the module LDO and the crystal settle before the first SPI
+               // transaction. Deliberately generous: the sequence that works
+               // reliably here leaves about this long before the first command.
+}
+#endif
+
 /* Call BEFORE std_init(): begin() already applies LORA_TX_POWER, so the table has
    to be in place by then. Pure setter, no SPI traffic. */
 template <class T> static inline void nicerf_lora2021f33_pre_init(T& radio) {
