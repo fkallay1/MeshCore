@@ -35,7 +35,9 @@ for _s in (sys.stdout, sys.stderr):
 
 
 def now_ts():
-    return datetime.now().strftime("%H:%M:%S.%f")[:-3]
+    # den v pecatke je zamerne: pri behoch cez polnoc sa inak ten isty cas
+    # v logu opakuje a hladanie podla casu trafi iny den (stalo sa)
+    return datetime.now().strftime("%d-%H:%M:%S.%f")[:-3]
 
 
 class Hub:
