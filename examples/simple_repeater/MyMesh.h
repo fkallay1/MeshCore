@@ -83,6 +83,26 @@ class MyMesh : public mesh::Mesh, public CommonCLICallbacks {
   uint32_t last_millis;
   uint64_t uptime_millis;
   unsigned long next_local_advert, next_flood_advert;
+#ifdef FKPR_RADIO_WATCHDOG
+  unsigned long next_radio_check = 0;
+  bool radio_wd_armed = false;   //en: skip the very first check - see radioWatchdogLoop()
+  uint8_t radio_dead_count = 0;
+  void radioWatchdogLoop();
+  //en: full radio recovery, shared by the watchdog and the re-arm guard below
+  //sk: plne zotavenie radia, zdielane watchdogom aj strazcom nahodenia nizsie
+  bool radioRecover(const char* why);
+  //en: the chip can reset itself mid-run (brown-out): it keeps answering on SPI but
+  //en: refuses SetRx forever. Nothing else notices - the RSSI sampler still returns
+  //en: plausible numbers - so watch for a sustained run of refusals instead.
+  //sk: cip sa vie resetovat za behu (podpatie): na SPI dalej odpoveda, ale SetRx uz
+  //sk: navzdy odmieta. Nic ine si to nevsimne - vzorkovac RSSI stale vracia
+  //sk: hodnoverne cisla - preto sledujeme dlhsiu seriu odmietnuti.
+  void radioRearmGuard();
+  uint32_t radio_rearm_since = 0;
+  uint32_t radio_last_recover = 0;
+  void radioSampleRssi(int n, int* out_min, int* out_max);
+  bool radioDiagCliCommand(char* command, char* reply);
+#endif
   bool _logging;
   NodePrefs _prefs;
   ClientACL  acl;
