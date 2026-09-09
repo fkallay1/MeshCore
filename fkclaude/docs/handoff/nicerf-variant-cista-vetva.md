@@ -1,5 +1,26 @@
 # Zadanie: NiceRF LoRa2021F33 variant von — čistá vetva
 
+> **STAV k 9. 9. 2026 — vetvy hotové, komentár do 2740 nie.** Výsledok, dôkazy a
+> pasce sú v `fkclaude/docs/nicerf-cista-vetva-20260909.md`. Skratka:
+>
+> * `feat/nicerf-lora2021f33-xiao` je na `origin` — 5 nových súborov, 652 riadkov,
+>   žiadny upstream súbor nezmenený, `grep` na FK aj `//sk:` vracia 0. Základňa
+>   `017fd096`, teda aj s opravou `974f00de`. Envy `…_repeater` a `…_repeater_simo`.
+> * PRAM tam **ostáva zapnutá** (Fedorovo rozhodnutie) a na pinnutom RadioLibe sa
+>   naozaj nahrá: `pram load: rc=0 -> loaded=YES version=0x0313`. Overené na doske.
+> * `test/nicerf-lora2021f33-hw` nad ňou nesie `fk …` CLI, watchdog a env
+>   `…_repeater_diag`. Publikovaný firmvér ale stavaj z `feat/` — binárky sa líšia.
+> * **Zásadné zistenie:** čistý variant na upstreame nenabootuje. Inicializácia
+>   rádia padá na `-2` a upstream `main.cpp` robí `halt()`; doteraz to zakrývala FK
+>   smyčka v našom `main.cpp`, ktorá modulu odoberie napájanie cez CE. Fix je teraz
+>   vo variante (`nicerf_lora2021f33_power_cycle()`), nie v upstream súbore.
+> * `974f00de` je pretiahnuté aj do našej kópie `CustomLR2021.h` na
+>   `test/lr2021-runtime-ab` (`a067e5f2`). 133-hodinové okno je zavreté, finálne
+>   čísla sú zapísané.
+>
+> Otvorené otázky nižšie sú **vybavené**, okrem toho, čo ide von: komentár do 2740
+> a PR do upstreamu (až po c03rad0rovom 2739).
+
 **Cieľ:** vypublikovať náš variant **XIAO nRF52840 + NiceRF LoRa2021F33-2G4** na čistej
 vetve z `upstream/dev` — tak, aby si ho vedeli vziať dvaja ľudia, ktorí si o to napísali,
 a aby z toho mohol vzniknúť PR do `meshcore-dev/MeshCore`.
