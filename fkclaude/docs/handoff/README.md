@@ -1,6 +1,6 @@
 # Nedoriešené veci — vstupné info pre nové session
 
-Stav k **3. 9. 2026**. Každý súbor je samostatné zadanie: nová session nepotrebuje nič
+Stav k **9. 9. 2026**. Každý súbor je samostatné zadanie: nová session nepotrebuje nič
 z predchádzajúcej konverzácie, všetko podstatné je v ňom.
 
 ## Odporúčané poradie
@@ -8,15 +8,16 @@ z predchádzajúcej konverzácie, všetko podstatné je v ňom.
 | # | zadanie | prečo v tomto poradí |
 |---|---|---|
 | 1 | [docs-commity-na-zlej-vetve](docs-commity-na-zlej-vetve.md) | osem docs commitov visí na testovacej vetve, časť nepushnutá — najprv ich zachrániť |
-| 2 | [promicro-ozivenie-swd](promicro-ozivenie-swd.md) | doska je mimo prevádzky; zip je pripravený, treba len sondu |
-| 3 | [jgromes-komentar-1857](jgromes-komentar-1857.md) | dlžíme odpoveď, issue je živé a označené `bug` |
-| 4 | [zephcorews-compilecommands-regresia](zephcorews-compilecommands-regresia.md) | denne zdržuje prácu, oprava je jeden riadok |
-| 5 | [fkclaude-samostatne-repo](fkclaude-samostatne-repo.md) | rozhodnutie; spraviť **po** bode 1 |
-| 6 | [meshcore-pr-3261](meshcore-pr-3261.md) | závisí od bodu 3 |
-| 7 | [pram-pr-do-radiolib](pram-pr-do-radiolib.md) | hotové, čaká na napísanie PR |
-| 8 | [meshcore-nenahlasene-nalezy](meshcore-nenahlasene-nalezy.md) | nič nehorí |
-| 9 | [promicro-hang-po-prvom-tx](promicro-hang-po-prvom-tx.md) | vyrieši sa možno sám pri bode 2 |
-| 10 | [worktree-upratanie](worktree-upratanie.md) | kozmetika |
+| 2 | [nicerf-variant-cista-vetva](nicerf-variant-cista-vetva.md) | dvaja ľudia si o variant napísali menovite; čisto technické, bez rizika tónu |
+| 3 | [promicro-ozivenie-swd](promicro-ozivenie-swd.md) | doska je mimo prevádzky; zip je pripravený, treba len sondu |
+| 4 | [jgromes-komentar-1857](jgromes-komentar-1857.md) | dlžíme odpoveď, issue je živé a označené `bug` |
+| 5 | [zephcorews-compilecommands-regresia](zephcorews-compilecommands-regresia.md) | denne zdržuje prácu, oprava je jeden riadok |
+| 6 | [fkclaude-samostatne-repo](fkclaude-samostatne-repo.md) | rozhodnutie; spraviť **po** bode 1 |
+| 7 | [meshcore-pr-3261](meshcore-pr-3261.md) | závisí od bodu 4; CI runy z 20. 8. expirujú na červený krížik ~19. 9. |
+| 8 | [pram-pr-do-radiolib](pram-pr-do-radiolib.md) | hotové, čaká na napísanie PR |
+| 9 | [meshcore-nenahlasene-nalezy](meshcore-nenahlasene-nalezy.md) | nič nehorí |
+| 10 | [promicro-hang-po-prvom-tx](promicro-hang-po-prvom-tx.md) | vyrieši sa možno sám pri bode 3 |
+| 11 | [worktree-upratanie](worktree-upratanie.md) | kozmetika |
 
 ## Čo je naopak hotové
 
