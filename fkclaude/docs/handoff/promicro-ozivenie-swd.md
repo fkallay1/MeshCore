@@ -1,5 +1,22 @@
 # Zadanie: oživiť ProMicro cez SWD
 
+> **VYRIEŠENÉ 3. 9. 2026 večer — bez SWD.** Doska sa medzitým dostala do UF2
+> bootloadera. Serial DFU (`adafruit-nrfutil`) na nej zlyháva deterministicky
+> (start + init packet prejdú, prvý dátový paket skončí na
+> `WriteFile failed (PermissionError(13, ...))`, opakovanie nepomôže), ale
+> bootloader vystavuje removable disk **`F:` / label `PROMICRO`**. Skopírovanie
+> `test_nrf-fota/builds/promicro.fw_500.uf2` na `F:\` prešlo na prvý pokus.
+>
+> Po nábehu: build **#500** odpovedá cez hub 7455 (`clock`, `ver`), AALIVE riadky
+> pribúdajú v `test_nrf-fota/logs/promicro-local.log`, hodiny nastavené.
+>
+> Rádio nabehlo mŕtve (`rssi-window n=960 min=-127 max=-127 spread=0`), ale
+> `FKPR_RADIO_WATCHDOG` ho po 3 oknách sám reinicializoval
+> (`radio re-initialised OK`, nf=-105) a pakety odvtedy tečú — ďalší dôkaz, že
+> zotavenie funguje na železe. `promicro.fw_500.zip` už netreba.
+>
+> Poznatok uložený v pamäti ako `promicro-uf2-recovery`.
+
 **Cieľ:** dostať na ProMicro (COM5) späť funkčný firmware. Doska je zaseknutá a
 softvérovo sa do DFU nedostane.
 
