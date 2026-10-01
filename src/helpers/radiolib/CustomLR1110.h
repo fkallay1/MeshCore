@@ -23,6 +23,16 @@ class CustomLR1110 : public LR1110 {
   public:
     CustomLR1110(Module *mod) : LR1110(mod) { }
 
+    int16_t begin(float freq = 434.0, float bw = 125.0, uint8_t sf = 9, uint8_t cr = 7,
+                  uint8_t syncWord = RADIOLIB_LR11X0_LORA_SYNC_WORD_PRIVATE, int8_t power = 10,
+                  uint16_t preambleLength = 8, float tcxoVoltage = 1.6) {
+      int16_t state = LR1110::begin(freq, bw, sf, cr, syncWord, power, preambleLength,
+                                    tcxoVoltage);
+      // RadioLib begin() defaults to LDO; use the LR1110 DC/DC regulator.
+      if (state == RADIOLIB_ERR_NONE) state = setRegulatorDCDC();
+      return state;
+    }
+
     //en: Read the receive buffer status ourselves, keeping the status word. Mirrors
     //en: CustomLR2021::readRxPktLenWithStatus - see the reasoning there, but NOT its byte
     //en: offsets: LR11x0 uses a ONE byte status (spiConfig BITS_8, LR11x0.cpp), where
