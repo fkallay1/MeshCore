@@ -109,6 +109,10 @@ Stav overený 3. 9. 2026.
 | `mc-3261-pr-lr-stale-spi-reply.md` | telo PR 3261 (zastaralá SPI odpoveď ako dĺžka) | odoslané 20. 8., bez review |
 | `mc-3261-comment-radiolib-status.md` | odpoveď oltacovi + doplnenie odkazu do tela | odoslané 21. 8. |
 | `mc-draft-pr-fota-upstream.md` | telo PR pre FOTA (LoRa delta-patch OTA) | **neodoslané** |
+| `mc-2978-comment-superseded.md` | zatvorenie PR 2978, nahradené upstream #3395 | **neodoslané** |
+| `mc-3261-comment-lr2021-only.md` | rebase PR 3261 + vypustenie LR11x0 (zlý bajt), nový titulok, telo, komentár | **neodoslané**, vetva lokálne |
+| `mc-3512-comment-fifo-check.md` | komentár k #3512 (FIFO check dopĺňa náš guard) | **neodoslané**, až po 3261 |
+| `mc-draft-pr-nicerf-lora2021f33.md` | telo PR pre XIAO + NiceRF LoRa2021F33 | **neodoslané** |
 | `rl-1857-issue-stale-spi-reply.md` | telo RadioLib issue 1857 | odoslané 20. 8. |
 | `rl-1857-comment-lr11x0-measurements.md` | doplnenie po meraní na LR11x0 | odoslané 20. 8. |
 | `rl-1857-comment-test-offer.md` | prisľúbenie testu vetvy `1857-lrxxxx-read-busy` | odoslané 21. 8. |
