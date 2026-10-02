@@ -512,7 +512,78 @@ void MyMesh::logRxRaw(float snr, float rssi, const uint8_t raw[], int len) {
 #endif
 }
 
+#ifdef FK_VDD_PROBE
+//en: 'fk vdd' - supply probe for the "TX never completes above 10 dBm" fault seen on a
+//en: ProMicro (2026-10-02). The nRF52840 SAADC samples its own VDD (the 3V3 rail the
+//en: radio module hangs on) and VDDH/5 (the USB input in high-voltage mode). A tight
+//en: burst right after a frame is handed to the radio catches the PA ramp, then one
+//en: sample per loop pass for the rest of the airtime. Rx baseline every 100 ms.
+//sk: 'fk vdd' - sonda napajania pre poruchu "TX nad 10 dBm nikdy nedobehne" na
+//sk: ProMicre (2026-10-02). SAADC nRF52840 meria vlastne VDD (3V3 vetvu, na ktorej
+//sk: visi radiovy modul) a VDDH/5 (USB vstup v high-voltage rezime). Husta davka hned
+//sk: po odovzdani ramca radiu zachyti nabeh PA, potom jedna vzorka za priechod
+//sk: slucky do konca vysielania. Zakladna uroven v Rx kazdych 100 ms.
+static uint16_t s_vdd_min_rx = 0xFFFF, s_vdd_min_tx = 0xFFFF, s_vdd_max = 0;
+static uint16_t s_vddh_min_rx = 0xFFFF, s_vddh_min_tx = 0xFFFF;
+static uint32_t s_vdd_n_rx = 0, s_vdd_n_tx = 0, s_vdd_tx_events = 0;
+static uint32_t s_vdd_tx_until = 0, s_vdd_next_rx = 0;
+
+static uint16_t fkVddMv() {    //en: gain 1/6, ref 0.6 V -> 3.6 V full scale
+  analogReadResolution(12);
+  return (uint16_t)((analogReadVDD() * 3600UL) / 4096UL);
+}
+static uint16_t fkVddhMv() {   //en: VDDH divided by 5 inside the chip
+  analogReadResolution(12);
+  return (uint16_t)((analogReadVDDHDIV5() * 3600UL * 5UL) / 4096UL);
+}
+static void fkVddSample(bool tx) {
+  uint16_t v = fkVddMv(), h = fkVddhMv();
+  if (v > s_vdd_max) s_vdd_max = v;
+  if (tx) { if (v < s_vdd_min_tx) s_vdd_min_tx = v; if (h < s_vddh_min_tx) s_vddh_min_tx = h; s_vdd_n_tx++; }
+  else    { if (v < s_vdd_min_rx) s_vdd_min_rx = v; if (h < s_vddh_min_rx) s_vddh_min_rx = h; s_vdd_n_rx++; }
+}
+#ifdef USE_SX1262
+//en: SX1262 state snapshot: chip mode and command status from GetStatus, the IRQ word,
+//en: GetDeviceErrors (bit 8 = PA_RAMP_ERR) and the packet type. A type of 0 (GFSK)
+//en: where we configured LoRa means the chip has been through a reset since init.
+//sk: Snimka stavu SX1262: rezim cipu a stav prikazu z GetStatus, IRQ slovo,
+//sk: GetDeviceErrors (bit 8 = PA_RAMP_ERR) a typ paketu. Typ 0 (GFSK) tam, kde sme
+//sk: nastavili LoRa, znamena, ze cip od initu presiel resetom.
+extern RADIO_CLASS radio;
+static uint32_t s_sx_snap_at = 0;
+static void fkSxSnapshot(const char* tag) {
+  uint8_t  st  = radio.getStatus();
+  uint32_t irq = radio.getIrqFlags();
+  uint16_t err = radio.getDeviceErrors();
+  uint8_t  pt  = radio.getPacketType();
+  Serial.printf("[FK] sx %s: mode=%u cmd=%u irq=0x%04lX err=0x%04X ptype=%u vdd=%u\r\n",
+                tag, (unsigned)((st >> 4) & 7), (unsigned)((st >> 1) & 7),
+                (unsigned long)irq, (unsigned)err, (unsigned)pt, (unsigned)fkVddMv());
+}
+#endif
+static void fkVddTxStart() {
+  s_vdd_tx_events++;
+  s_vdd_tx_until = millis() + 800;               //en: > airtime of a full frame at SF7/62.5
+  for (int i = 0; i < 200; i++) fkVddSample(true);  //en: ~10 ms burst over the PA ramp
+#ifdef USE_SX1262
+  s_sx_snap_at = millis() + 60;                  //en: mid-transmission snapshot
+  if (s_sx_snap_at == 0) s_sx_snap_at = 1;
+#endif
+}
+static void fkVddLoop() {
+  uint32_t now = millis();
+#ifdef USE_SX1262
+  if (s_sx_snap_at && (int32_t)(now - s_sx_snap_at) >= 0) { s_sx_snap_at = 0; fkSxSnapshot("tx+60ms"); }
+#endif
+  if ((int32_t)(s_vdd_tx_until - now) > 0) { fkVddSample(true); return; }
+  if ((int32_t)(now - s_vdd_next_rx) >= 0) { fkVddSample(false); s_vdd_next_rx = now + 100; }
+}
+#endif
+
 void MyMesh::logTxRaw(const uint8_t raw[], int len) {
+#ifdef FK_VDD_PROBE
+  fkVddTxStart();
+#endif
 #ifdef WITH_LORA_FOTA
   fotaLogTxRaw(raw, len);   //en: TX RAW diagnostics + FOTA tag (nrffota/FotaMyMesh.cpp)
 #endif
@@ -571,6 +642,9 @@ void MyMesh::logTx(mesh::Packet *pkt, int len) {
 }
 
 void MyMesh::logTxFail(mesh::Packet *pkt, int len) {
+#if defined(FK_VDD_PROBE) && defined(USE_SX1262)
+  fkSxSnapshot("txfail");   //en: Dispatcher gave up waiting for TX_DONE
+#endif
   if (_logging) {
     File f = openAppend(PACKET_LOG_FILE);
     if (f) {
@@ -1566,6 +1640,8 @@ void MyMesh::radioSampleRssi(int n, int* out_min, int* out_max) {
                      recover it - only sitting in the bootloader did. Use it to
                      reproduce that state deliberately.
     fk reinit      - run the full recovery by hand
+    fk vdd         - supply minima (VDD, VDDH) in Rx and during TX, then reset (FK_VDD_PROBE)
+    fk sx          - SX1262 status/IRQ/device errors/packet type snapshot (FK_VDD_PROBE)
   Module-specific commands (simo/ce/pram) are left to the variant handler.
 */
 //en: the raw RadioLib object - the SPI diagnostics below talk to the chip directly
@@ -1575,6 +1651,28 @@ extern RADIO_CLASS radio;
 bool MyMesh::radioDiagCliCommand(char* command, char* reply) {
   if (memcmp(command, "fk ", 3) != 0) return false;
   const char* arg = command + 3;
+
+#ifdef FK_VDD_PROBE
+  //en: 'fk vdd' - report the supply minima since the last read, then reset them
+  //sk: 'fk vdd' - vypis minim napajania od posledneho citania a ich vynulovanie
+  if (memcmp(arg, "vdd", 3) == 0) {
+    sprintf(reply, "vdd now=%u max=%u rxmin=%u(n%lu) txmin=%u(n%lu tx%lu) | vddh rxmin=%u txmin=%u",
+            (unsigned)fkVddMv(), (unsigned)s_vdd_max,
+            (unsigned)s_vdd_min_rx, (unsigned long)s_vdd_n_rx,
+            (unsigned)s_vdd_min_tx, (unsigned long)s_vdd_n_tx, (unsigned long)s_vdd_tx_events,
+            (unsigned)s_vddh_min_rx, (unsigned)s_vddh_min_tx);
+    s_vdd_min_rx = s_vdd_min_tx = s_vddh_min_rx = s_vddh_min_tx = 0xFFFF;
+    s_vdd_max = 0; s_vdd_n_rx = s_vdd_n_tx = s_vdd_tx_events = 0;
+    return true;
+  }
+#ifdef USE_SX1262
+  if (memcmp(arg, "sx", 2) == 0) {   //en: 'fk sx' - chip state snapshot on demand
+    fkSxSnapshot("cli");
+    strcpy(reply, "sx snapshot printed");
+    return true;
+  }
+#endif
+#endif
 
 #ifdef FK_RADIO_SPI_DIAG
   //en: 'fk zero <n>' - make every n-th length read return 0 (0 = off), which sends
@@ -2201,6 +2299,10 @@ void MyMesh::loop() {
 #endif
 
   mesh::Mesh::loop();
+
+#ifdef FK_VDD_PROBE
+  fkVddLoop();
+#endif
 
 #ifdef FKPR_RADIO_WATCHDOG
   radioWatchdogLoop();
