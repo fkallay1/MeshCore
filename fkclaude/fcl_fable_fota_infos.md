@@ -125,6 +125,8 @@ Používateľ schválil „urob všetko" z §4 + zadal navyše FOTA_DEBUG makrá
   návratu vozíka). Newline sa do formátov nedáva ručne — riadok vždy končí cez PRINTLN.
   CLI reply cesta cez Serial je ako v pôvodnom kóde: reply plní sprintf, tlačí ho
   upstream `main.cpp` (`  -> reply`) — **nezávislé od FOTA_DEBUG**.
+- **Pasca makra:** `FOTA_DEBUG_PRINTLN(buf)` s premennou sa **nepreloží** (makro lepí newline
+  literál k formátu) → vždy `FOTA_DEBUG_PRINTLN("%s", buf)`.
 
 ### 5b. Presun FOTA kódu z MyMesh do nrffota (minimalizácia diffu vs upstream)
 - **`nrffota/FotaMyMesh.cpp`** (nový) — telá VŠETKÝCH FOTA metód MyMesh + lokálne

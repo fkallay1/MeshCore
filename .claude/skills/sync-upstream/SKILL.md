@@ -52,24 +52,20 @@ git push origin features/nrf-fota dev
   kvôli NoBuild task rozšíreniam) sa riešil RAZ „keep ours" (`b9ce15c1`); ďalšie merge
   už nekonfliktujú.
 - **Prepnutie medzi vlastnými vetvami zablokuje `build_number.txt`** („would be overwritten
-  by checkout") — vetvy majú v repe rôzne hodnoty (nrf-fota 310, lr2021 vetvy 300). Postup:
+  by checkout") — vetvy majú v repe rôzne hodnoty (fkclaude/docs/fork-vetvy-a-sync-upstream.md#build_numbertxt--hodnoty-v-repe). Postup:
   `cp $F ../bn_save.txt; git update-index --no-skip-worktree $F; git checkout -- $F;
   git checkout <vetva>; cp ../bn_save.txt $F; git update-index --skip-worktree $F`.
-- **Ďalšie vlastné vetvy** (2026-10-02): reťaz `features/nrf-fota` → `features/fota_lr2021_testing`
-  → `test/lr2021-runtime-ab`; do nich merge `features/nrf-fota` (nie dev) a build
-  `Xiao_nrf52_nicerf_lora2021f33_repeater[_fota]` + `t1000e_repeater_fota`. **Nemergovať** dev do
-  PR vetiev (`fix/*`, `feat/nicerf-*`) — tie sa prípadne rebasujú.
+- **Ďalšie vlastné vetvy** (inventár a reťaz: fkclaude/docs/fork-vetvy-a-sync-upstream.md#vetvy-forku): do LR2021 vetiev
+  merguj `features/nrf-fota` (nie dev) a buildni aj `Xiao_nrf52_nicerf_lora2021f33_repeater[_fota]`
+  + `t1000e_repeater_fota`. **Nemergovať** dev do PR vetiev (`fix/*`, `feat/nicerf-*`) — tie sa
+  prípadne rebasujú.
 - Upstream ide ~20–30 commitov/deň — „behind X commits" na GitHube deň po syncu je
   normálne. Syncovať pri reálnej potrebe, nie denne.
 
-## Známe konfliktné miesta (rástie s každým syncom)
+## Známe konfliktné miesta
 
-| Súbor | Čo sa deje | Riešenie |
-|---|---|---|
-| `examples/simple_repeater/MyMesh.cpp` `onAnonDataRecv()` | Upstream (v1.17.1) prešiel na `mesh::chooseReplyRoute()` (`src/helpers/RoutingPolicy.h`), pribudol `REPLY_ROUTE_DIRECT_OUT_PATH`, sentinel `reply_path_len` `-1` → `0xFF` (typ `uint8_t`) | Vziať upstream štruktúru, navrstviť naše: `FK_FLOOD_RESP_DELAY` vo flood vetvách + `fkAnonFallbackArm()` v `REPLY_ROUTE_PATH_RETURN`. Pozor na mŕtve `reply_path_len < 0`. |
-| `variants/xiao_nrf52/target.{cpp,h}` | **Tichý zlý auto-merge**: upstream pridal `MomentaryButton user_btn(PIN_USER_BTN,1000,true,true)` do `#ifdef DISPLAY_CLASS`, my máme inertnú `(-1,1000,true)` (commit `7b651a41`) v `#ifdef PIN_USER_BTN` | Jedna deklarácia v upstream bloku `DISPLAY_CLASS` s **našimi** parametrami (pin −1 = žiadny fantómový power-off), duplicitný `extern` v `target.h` preč. |
-| `examples/simple_*/main.cpp` serial CLI plný buffer | Upstream #3395 (2026-09-11) opravil rovnako ako náš PR #2978 (`sizeof-2`) + drží NUL | Vziať upstream (vyriešené `fb318e9d`, ďalej nekonfliktuje). |
-| `src/helpers/radiolib/CustomLR1110.h` | Upstream pridal `begin()` s `setRegulatorDCDC()`, my máme stale-SPI guard | Oboje; `begin()` hneď za konštruktor, aby náš komentár ostal nad `getPacketLength()`. |
+Zoznam súborov, čo sa v nich deje a overené riešenia: fkclaude/docs/fork-vetvy-a-sync-upstream.md#známe-konfliktné-miesta-pri-merge-upstreamu
+— pri každom syncu ho doplň (rastie). História syncov: fkclaude/docs/fork-vetvy-a-sync-upstream.md#história-syncov.
 
 Po merge vždy skontrolovať, či upstream nesiahol na FOTA háky —
 `onGroupDataRecv`, `searchChannelsByHash`, `allowPacketForward`, `logRxRaw`
@@ -83,5 +79,5 @@ a **čo zostalo rozpracované** (stashe, nepushnuté vetvy vo worktree).
 ## Súvisiace
 
 - Build/flash zariadení = skill `build-flash`, FOTA cez LoRa = skill `remote-e2e`.
-- `test_nrf-fota/build_number.txt` je `skip-worktree` (v repe neutrál 300) — po novom
-  klone flag nastaviť znova: `git update-index --skip-worktree test_nrf-fota/build_number.txt`.
+- `test_nrf-fota/build_number.txt` je `skip-worktree` (v repe neutrálna hodnota, per vetva viď doc
+  vyššie) — po novom klone flag nastaviť znova: `git update-index --skip-worktree test_nrf-fota/build_number.txt`.

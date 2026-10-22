@@ -56,6 +56,24 @@ fungujú aj bez neho. Komentáre v FOTA zdrojákoch sú dvojjazyčné `//en:`+`/
 
 ---
 
+### UF2 a extra_scripts
+
+PlatformIO `extra_scripts` sa pri `extends` **nemerguje** — env s vlastným zoznamom prepíše zdedený
+`create-uf2.py` z `[nrf52_base]` a zmizne target `create_uf2`; preto ho FOTA envy uvádzajú
+explicitne (`create-uf2.py` + 3× `gen_*`). `.uf2` nevzniká pri obyčajnom `pio run` do `.pio/` —
+FOTA hook ho archivuje do `test_nrf-fota/builds/<dev>.fw_<N>.uf2`; inak `pio run -e <env> -t create_uf2`
+alebo `python bin/uf2conv/uf2conv.py <hex> -c -o <uf2> -f 0xADA52840` (pio python, nie Store python3).
+Staré buildy na porovnanie regresie berieš z `builds/*.uf2` (UF2 disk = oživenie bez serial DFU).
+
+### Veľkosť patchu — čo je normálne
+
+Zmena len build# (trailer) = patch ~0,5 kB (overené #133→#135 = 547 B). **Akákoľvek zmena kódu**
+(aj 1 riadok, aj prepnutie `FK_DEBUG`) = niekoľko kB (~8–10 kB; #128→#135 = 10 073 B), lebo posun
+adries relinknutej binárky zasiahne veľa miest (hdiffpatch inplace + deflate). Auto-hook robí
+posledné dva buildy — ak medzi nimi prepneš flag, dostaneš veľký „mätúci" patch; nie je to chyba
+generátora. Degenerát na ~celý FW (stovky kB) je iná vec — rast FW nad extraSafe, viď
+[fcl_readme_fota_extrasafe.md](fcl_readme_fota_extrasafe.md).
+
 ## 2. Ručné generovanie otapkg (ľubovoľný pár buildov)
 
 Keď chceš iný pár než „posledné dva" (napr. base build NIE je posledný v archíve):
@@ -103,7 +121,7 @@ Používaj **penv python** (`gen_fotapkg.py` importuje `fota_export_pkg`/`fota_s
 ## 3. Push do telefónu
 
 **DÔLEŽITÉ: rob to cez PowerShell, NIE Git Bash** — Git Bash mangle-uje `/sdcard/...` na
-`C:/Program Files/Git/...` a push zlyhá. ([[fotapkg_push_to_phone]])
+`C:/Program Files/Git/...` a push zlyhá.
 
 ```powershell
 $adb = "D:\FkDev\00_Downloads\scrcpy-win64-v4.0\adb.exe"; if (-not (Test-Path $adb)) { $adb = "adb" }

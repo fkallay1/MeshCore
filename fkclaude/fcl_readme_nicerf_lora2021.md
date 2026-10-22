@@ -408,6 +408,15 @@ len to nie je odskúšané na železe.
 `custom_fota_device` je nutné — hook odvodzuje meno zariadenia z `PIOENV.split("_")[0]`,
 čo by dalo `xiao` a miešalo by sa to s archívom SX1262 XIAO.
 
+### Názvoslovie a limity mena uzla
+
+Rozhodnuté 2026-08-20 podľa datasheetu V1.2: modul `LoRa2021F33-2G4`, výrobca NiceRF
+(= G-NiceRF). Header `src/helpers/radiolib/NiceRF_LoRa2021F33.h`, makrá `NICERF_LORA2021F33_*`,
+variant `xiao_nrf52_nicerf_lora2021f33`, envy `Xiao_nrf52_nicerf_lora2021f33_repeater[_fota]`,
+meno uzla `Xiao LoRa2021F33 Repeater [FOTA]`. FOTA device `xiao-nicerf` a prefix archívu
+`xiaonicerf` sa **nemenia**. Limity: `node_name[32]` v `CommonCLI.h` je tvrdý strop mena uzla
+(30 znakov sa vojde, s výrobcom v mene nie); MAX_PATH je v pohode (cesta 166 z 260).
+
 ### Kam patria naše flagy
 
 ⚠️ V zdieľanom bloku `[Xiao_nrf52_nicerf_lora2021f33]` smie
@@ -550,6 +559,16 @@ Nechať zapnutý, kým sa zasahovacia vetva neoverí proti skutočnej poruche �
 tri predchádzajúce pokusy o detekciu stáli na predpokladoch a všetky tri boli
 zlé, takže tu platí: najprv merať, potom veriť.
 
+### Pozorovanie na ProMicro #500 — periodické zotavenia (2026-10-02)
+
+ProMicro (SX1262, build #500, beží od 3. 9. 2026): 18 zotavení watchdogom za mesiac; od 15. 9. do
+29. 9. **pravidelne každých 47 h 17 min ± 40 s** (RSSI konštantne −127, 3/3 okná → reinit OK).
+Očakávaný zásah 1. 10. ~14:29 neprišiel (žiadne `spread=0` 1.–2. 10.). Periodicita ukazuje na
+časovač/pretečenie, nie na RF — porovnať s pretečením `next_tx_time` po 24,86 dňa (2^31 ms)
+v dispatcheri. Čistý build NiceRF (bez watchdogu) od 20. 9. 14:59 zmizol z ciest paketov, USB
+žije — bez watchdogu sa nezotaví (viď
+[docs/nicerf-cista-vetva-20260909.md](docs/nicerf-cista-vetva-20260909.md#stav-k-2-10-2026)).
+
 ## Testovacie CLI (`fk …`) — flag `FK_NICERF_LORA2021F33_TEST`
 
 Aby sa dal modul skúšať bez neustáleho preflashovania. Vyžaduje aj
@@ -657,6 +676,24 @@ Pri CE dole čip **neodpovedá** — vracia nezmysel. Čiže prúd tečúci cez 
 diódy zo SPI pinov ho neudrží funkčný a CE je skutočný vypínač. (Ten včerajší
 jav, keď čip bez VCC raz odpovedal na `getVersion`, bol hraničný a nereprodukovateľný.)
 Pozor: NiceRF žiada pri CE dole stiahnuť aj NSS a RESET, inak tečie leakage.
+
+### ProMicro: SX1262 sa pri vysielaní resetuje (2026-10-02, neuzavreté)
+
+Testovací ProMicro (COM5, hub 7455): TX dobehne deterministicky len pri `set tx` ≤ 10 (3/3); pri
+11, 12, 14, 17, 22 `TX_DONE` nepríde, rádio prestane merať (RSSI −127) a zotaví ho až watchdog.
+Za mesiac na `tx 22`: 15 pokusov, 0 úspešných. V kóde nič nie je naviazané na 10/11 dBm → tvrdý
+strop napájania pri odbere PA. Doska nechaná na **tx 10**; neskôr ani to nebolo spoľahlivé (1/4).
+Meranie (build #346, `FK_VDD_PROBE`, `test/lr2021-runtime-ab` a8a44863): nRF VDD (3V3) pri TX
+klesne max ~5 mV, VDDH (USB) ~50 mV — hlavná vetva nepadá. Ale SX1262 sa do 60 ms po štarte TX
+**resetne**: `fk sx` → `ptype=0` (GFSK, výrobný default; zdravý = 1 LoRa) a `err=0x0020`
+XOSC_START_ERR (po resete nie je TCXO cez DIO3 nastavené). `getStatus()` cez RadioLib vracia 0 aj
+zdravému čipu — ignorovať. Podozrenie: napájanie modulu za spínačom EXT_VCC (P0.13 =
+`SX126X_POWER_EN`) alebo RF väzba do NRESET (pin 10) — MCU to nezmeria, treba osciloskop/multimeter
+na VCC a NRESET modulu, kondenzátor pri module, anténa. Hodiny ProMicra idú ~0,63 % pomaly.
+Flash ProMicra: 1200 bps touch 2× poslal dosku do sériového DFU bez UF2 disku a sériový DFU
+(`tool-adafruit-nrfutil` cez PYTHONPATH) prešiel. Hypotéza parazitného napájania cez J-Link
+(sekcia vyššie, A/B 2026-08-16: 8 cyklov bez poruchy) ostáva nerozhodnutá — rozhodne multimeter na
+3V3 pri odpojenom USB a pripojenom J-Linku; pri „vypnutí" odpájať aj SWD konektor.
 
 ## PRAM (firmvérový patch čipu) — OVERENÉ NA HW 2026-08-15
 
@@ -797,7 +834,7 @@ konfigurácii. Či to čipu prekáža, treba overiť na železe. Plus by bolo tr
 
 **Pozor:** MeshCore `resetAGC()` robí `_radio->sleep()`. Ak by to bol spánok bez
 retencie, patch sa stratí. U nás zatiaľ nehrozí (`agc_reset=0`, viď
-[[agc_keep_standard]]), ale pri zapnutí AGC resetu to overiť.
+`fcl_readme_tech_nrf-fota.md` §8.4), ale pri zapnutí AGC resetu to overiť.
 
 ## DC-DC (SIMO) — prečo ho nemáme a nepotrebujeme
 
@@ -998,6 +1035,10 @@ Podpora LR2021 v MeshCore je podľa neho *„stable now"*.
 
 ## Neoverené / otvorené
 
+- **RadioLib 7.8.0/7.8.1 (27.–28. 9. 2026) má natívny LR2021 DC-DC (#1864)** — náš GODMODE SIMO
+  zápis má prejsť na API, až MeshCore bumpne pin (k 2026-10-02 drží `6d893483`, 7.7.1+ z 11. 7.).
+  jgromes 23. 9. zavrel RadioLib issue 1857 aj PR 1858 („HW problém", bez zmeny drivera) — stav
+  upstreamu k stale-SPI je v `docs/PRs/mc-3261-comment-lr2021-only.md`.
 - ~~Má modul cievku pre SIMO?~~ **VYRIEŠENÉ — má, DC-DC ušetrí ~41 %.**
 - **VBAT: 3312 mV pri boote vs 2454 mV po tom, čo rádio bežalo v RX** — príčina
   neznáma, PRAM/SIMO/standby vylúčené meraním. Nič nie je pokazené, ale to číslo
@@ -1043,7 +1084,7 @@ LoRa2021F33-2G4**.
 
 **TCXO modul MÁ.** Vlastnosť z prvej strany: *„Industrial-grade TCXO Crystal
 Oscillator 0.5PPM"*. Potvrdzuje to našich 3,3 V a boot výpis `tcxo=3.30 V`
-(fallback na 0.0 sa nepoužil). Viď [[Zastaralá SPI odpoveď]] — upstream PR pre ten
+(fallback na 0.0 sa nepoužil). Viď § Zastaralá SPI odpoveď vyššie — upstream PR pre ten
 istý modul na ESP32-C3 tvrdí *„Crystal oscillator (XTAL), not TCXO"* a nastavuje 0.
 
 **DIO front-endu sa programovať MUSIA.** Datasheet to hovorí priamo pri tabuľke

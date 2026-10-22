@@ -41,9 +41,9 @@ zariadenie najprv doplň do configu (kind → env/prefix mapa je tamtiež).
 - **Interpretácia logu**: `MAC fail (foreign/corrupt)` = poškodenie pri nízkom SNR
   (nie kľúče); `DEDUP (seen)` = duplicitná kópia; `pool empty` = preťaženie; RAW bez
   CHUNK pri route=2 = tranzitná direct kópia (nespracúva sa — normálne).
-- **Mŕtve CLI** (žiadne echo na príkazy, RX RAW ale beží): na buildoch <356 to je
-  buffer-lockup bug (šípky v tmux mimo copy-mode!) — jediná záchrana je reboot cez
-  `flash-dfu`. Od #356 je fix (overflow sa spracuje ako unknown command).
+- **Mŕtve CLI** (žiadne echo na príkazy, RX RAW ale beží): serial buffer-lockup bug (šípky
+  v tmux mimo copy-mode idú do zariadenia!) — jediná záchrana je reboot cez `flash-dfu`
+  (1200 bps touch beží mimo CLI). Ktoré buildy ho majú opravený: fkclaude/fcl_remote_e2e_rpi.md#cli-lockup--história-verzií.
 - **Po FOTA flashi** spadne picocom aj tmux na RPi — skript session obnovuje sám;
   ručne: `ensure` logika je v `setup`.
 - **Časy**: lokálne logy `test_nrf-fota/logs/<dev>.log` (čas PC), RPi `<log>.ts.log`
@@ -56,4 +56,4 @@ zariadenie najprv doplň do configu (kind → env/prefix mapa je tamtiež).
 - FOTA systém: `fkclaude/fcl_readme_nrf-fota.md`, tech detaily `fcl_readme_tech_nrf-fota.md`.
 - Sender (volá ho skript): `test_nrf-fota/fota_sender_mcpy.py` (companion na COM3,
   CMD_SEND_CHANNEL_DATA, `--chunks` formát z `fota missall`).
-- Po dokončenej práci aktualizuj `fcl_remote_e2e_rpi.md` (stav zariadení, build#).
+- Po dokončenej práci aktualizuj fkclaude/fcl_remote_e2e_rpi.md#7-stav-zariadení-posledná-známa-hodnota (build#, dátum, ako).

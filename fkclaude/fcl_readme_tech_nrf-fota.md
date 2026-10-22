@@ -156,6 +156,58 @@ re-armne rádio do RX. Dôvod: FS zápis priamo v recv callbacku oneskoroval re-
 - **FS**: `CustomLFS` (oltaco, existujúca dep) — dedikovaný región @ 0xD4000, **oddelený** od
   MeshCore InternalFS (identity/prefs/ACL).
 
+### 4.1 CustomLFS — ako zapisuje a na čo si dať pozor
+`CustomLFS` (lib `oltaco/CustomLFS#0.2.2` z `[nrf52_base]` lib_deps, aktivácia `-D EXTRAFS=1`) je
+wrapper okolo `Adafruit_LittleFS` s konfigurovateľným regiónom (`CustomLFS(flash_addr, size, block_size)`),
+rovnaký engine ako InternalFS. `CustomLFS.h` sám ťahá `using namespace Adafruit_LittleFS_Namespace`.
+- **littlefs v1** (`read_size=prog_size=block_size=128`), engine je COW/log-structured: nič sa
+  neprepisuje na mieste, zmena bloku = nový blok + atomický commit metadát → power-loss safe.
+- **Zápis do flash nie je okamžitý:** file cache 128 B + `flash_nrf5x` 4 KB page-cache v RAM;
+  reálny NVMC erase+program až pri flushi stránky / `close()` (= sync). `_flash_erase` nerobí
+  page-erase, zapisuje 0xFF do page-cache. `FILE_O_WRITE` = RDWR|CREAT + seek na koniec (append).
+- **Random zápis do súboru je drahý** (COW bloku + prepis CTZ reťazca) → FOTA stavia na append-logu
+  `recv.log`, nie na zápise chunkov na offset.
+- **Pri zapnutom SoftDevice** ide `flash_nrf5x` cez SD flash API (`sd_flash_write`, async okolo
+  rádia) → LittleFS zápisy fungujú počas príjmu. Raw NVMC so zapnutým SD nejde → flasher robí
+  `sd_disable` a má vlastné `nvmc_*`.
+- **Nikdy 2 inštancie LittleFS nad tým istým regiónom** — stav (alokátor, cache, metadáta) je
+  per-inštancia → druhá má stale pohľad → alokuje tie isté bloky → korupcia. Ani jedna inštancia
+  nie je reentrantná (multi-task prístup = mutex).
+
+### 4.2 RAM layout nRF52840 (Adafruit core + FreeRTOS)
+```
+0x20000000  SoftDevice static RAM (24 kB; RAM ORIGIN = 0x20006000)
+0x20006000  .data → .bss → .heap (rastie nahor)
+0x2003F800  MSP stack 2 kB — len ISR + SoftDevice
+0x20040000  __StackTop
+```
+`setup()/loop()` aj FOTA bežia ako **FreeRTOS task so stackom malloc-nutým z heapu** — loop-task
+stack = `LOOP_STACK_SZ = 256*4` slov = **4 KB** (xTaskCreate hĺbka je v slovách). `const`
+globály a literály sú v `.rodata` (flash, bez RAM). Lokálne pole `uint8_t buf[4096]` pretečie
+loop-stack; Cortex-M4 nemá HW stack-limit (MSPLIM až M33) → tichá korupcia susednej RAM, žiadny
+trap (FreeRTOS to chytí len watermarkom pri context-switchi). Pravidlo: veľké buffery `static`,
+`malloc` alebo globál — nikdy na stack (`s_log_data_offset[1024]` je static, patch buffer malloc).
+Dôsledok pre deštruktívny assemble do 0x20000000 (neimplementovaný Tier-2): podrezal by vlastný
+task-stack v heape → musel by bežať s vlastným vysokým SP v flasher kontexte. Viď §8.9.
+
+### 4.3 Veľkosť bežiaceho obrazu a FwId trailer (linker symboly)
+Veľkosť FW image za behu bez zmeny ld scriptu: `nrf52_common.ld` exportuje `__etext`,
+`__data_start__`, `__data_end__`, `__flash_arduino_start` (= ORIGIN(FLASH), 0x26000 v6 / 0x27000 v7),
+`__flash_arduino_end` (0xD4000). Koniec flash image = `__etext + SIZEOF(.data)`;
+`fw_image_size() = (__etext + (__data_end__ − __data_start__)) − __flash_arduino_start`.
+Overené: == `firmware.bin` z DFU zipu == PIO flash report (444664 B, 2026-06-18) == `old_fw_size`
+od sendera → lacná brána pred SHA256 pri base-FW kontrole (CHUNK aj HEADER). Linker symboly nie sú
+compile-time konštanty (relokácia) — vždy brať `&symbol`, nedajú sa do `static const`/`#define`/
+array-size. **Base FW SHA počítať tiež od linker symbolu**, nie od makra `APP_FLASH_START` — na v7
+(SenseCap, 0x27000) makro 0x26000 dalo hash z inej oblasti a patch sa zamietal (2026-06-25).
+
+`FwIdTrailer` (`nrffota/FwId.{h,cpp}`): magic `FKFWID01`, image_size, build_number, sha256 (48 B)
+v `.rodata.fwid`; `__attribute__((used))` **nestačí** proti `--gc-sections` (GCC 7.2.1 nemá
+`retain`) → `-Wl,-u,fw_id_trailer` v build_flags, inak magic v hexe nie je. `gen_fw_trailer.py`
+(POST-build, čistý Python bez intelhex) nájde magic, vyplní `image_size` a `sha256`
+(= SHA256 obrazu so sha-poľom = 0) a re-emituje hex **pred** PackageDfu (genpkg počíta CRC16 z binu).
+Čítanie traileru pri boote / self-integrity check je uvažované, neimplementované.
+
 ---
 
 ## 5. Flash mapa (extrafs.ld — app končí 0xD4000)
@@ -325,6 +377,18 @@ len sa neutralizujú.
 
 ---
 
+### 7.2 `fota flash` cez LoRa — ACK pred rebootom (build ≥ 192)
+`fota flash` sa už nespúšťa priamo vo `fota_handle_command` (`fota_apply` pri úspechu nevráti →
+ACK by nikdy neodišiel). Ak je session VERIFIED → reply `FOTA flash accepted` + `fota_request_apply()`;
+skutočný `fota_apply()` spustí `MyMesh::loop()` až keď `_mgr->getOutboundTotal()==0` (ACK reálne
+odišiel) alebo po 6 s safety-net (`_fota_apply_deadline`). Bez VERIFIED → „FOTA flash: nie je
+VERIFIED". `fota miss`/`missall` sémantika (tokeny, rozsahy, H/S, `+N`, `N-??`) je v
+[fcl_readme_nrf-fota.md](fcl_readme_nrf-fota.md) §4; strop `FOTA_MISS_OUTTOKENS 20` (override `-D`),
+`missall` = limit 0. `chunk_idx` je `uint16_t`; `total_chunks` sa v chunku zámerne neposiela
+(odvodí sa z podpísaného `patch_size`, nastaví sa až po overení podpisu).
+
+---
+
 ## 8. Vyriešené problémy (technický rozbor pre budúcnosť)
 
 ### 8.1 Build / integrácia
@@ -362,6 +426,19 @@ len sa neutralizujú.
 - **Reboot-resilient session** — bitmap sa ukladá každých 8 chunkov / pri complete; CustomLFS
   session prežije aj DFU reflash app flashu (overené).
 - **`fota_apply` stav pri zlyhaní** — pri base-mismatch obnoví predošlý status (neostane APPLYING).
+- **Out-of-order session (od 04a95a8d, 2026-06-18)** — chunky pred HEADER sa bufferujú do partial
+  session (`total_chunks=0`), HEADER ich „promuje" (zachová log + bitmap, `recv_count` z
+  `bitmap_popcount`). Lekcia: HEADER nenesie `old_fw_size` → `handle_chunk` ho musí doplniť z chunku,
+  inak guard zahodí všetky chunky po HEADER (0/4, odhalené e2e). Posledný chunk sa pred HEADER
+  neuloží (CRC bez známej presnej dĺžky), príde v ďalšom kole. Sender `--packetorder
+  {normal,hbegin,hmiddle,hend}` určuje pozíciu HEADER; `hend` (chunky prvé) pomáha pri slabom RF,
+  lebo HEADER/META prežíva reboot, chunky < 8 nie.
+- **recv.log → patch (RAM-assembly, 5d4f23df)** — `/ota/recv.log` je append-žurnál
+  `[idx 2B][len 2B][data]` (reboot-odolný, znesie duplicity, dedup cez bitmap). Pri COMPLETE
+  `verify_log_sha()` streamuje SHA256 z logu; patch sa pri dry-rune aj flashi zostaví
+  `fota_acquire_patch_ram()` (malloc, offset tabuľka sa prebuduje pri každom acquire, caller `free()`).
+  `-D USE_PATCHBIN_FILE` = stará cesta cez `patch.bin` (+ zmaže recv.log). Deštruktívny assemble
+  do 0x20000000 (Tier-2) nie je implementovaný (§4.2).
 - **`ota verify` (dry-run) PRED `ota flash` → heap hardfault** (historicky pred `5d4f23df`) —
   `fota_patch_to_file` robil `malloc` + streaming rekonštrukciu celého ~442 kB FW; následný
   `fota_apply` hardfaultol na `malloc(patch_size)` (flasher sa zastavil po `[FLASHER] Komprimovany
@@ -481,12 +558,104 @@ runtime pref `_prefs.cad_enabled = 0` (`MyMesh.cpp:1103`, prepínateľné `set c
 **Pre FOTA: nechaj CAD vypnuté (default).** Kód sám je korektný (upratanie IRQ + re-arm je
 nutné), ale CAD beží len na **TX ceste** (re-flood chunku, STATUS/NACK, CLI reply) a zapnuté
 pridáva RX→CAD→RX mode-churn. SX1262 buffruje ~1 paket; naše tiché straty boli práve
-„rádio/CPU zaneprázdnené → zhltne back-to-back chunk" (§8.6, [[fota_apply_resend_dispatch_20260624]]).
+„rádio/CPU zaneprázdnené → zhltne back-to-back chunk" (§8.6, §8.8).
 Ďalšie okno mimo RX = vyššie riziko straty chunku, plus blokujúci scan stalluje `loop()`, kde
 robíme odložené NVMC zápisy. Kolíznu ochranu z veľkej časti dáva už RSSI-prah (vetva 1), ktorá
-RX neopúšťa. Konzistentné s [[agc_keep_standard]]: drž MeshCore defaulty.
+RX neopúšťa. Konzistentné s §8.4 (AGC reset ostáva vypnutý): drž MeshCore defaulty.
 Ak by si chcel agresívnejšiu ochranu, `set cad on` je runtime (bez rebuildu) — A/B meraj
 `getPacketsRecvErrors()` / RAW counter pred a po.
+
+---
+
+### 8.8 Strata SIG/APPLY pri re-sende — `save_meta()` flash zápis v RX ceste (VYRIEŠENÉ 2026-06-25)
+Symptóm (2026-06-24, build #128, env `ProMicro_repeater_ota`): „APPLY na už-VERIFIED session sa
+ignoruje". Z RAW logu: pri SF8 chýbal rámec APPLY, pri SF7 s krátkym delay chýbal SIG → session
+ostala `total_chunks=0/st=0x1` a „APPLY: nie je verifikované" bolo korektné.
+
+**Mechanizmus:** `handle_meta` aj `handle_sig` volali `save_meta()` (CustomLFS flash zápis) pri
+KAŽDOM prijatí, aj na identickom re-sende. nRF52 NVMC pri erase/write zastaví CPU na desiatky ms;
+RadioLib nečíta paket v prerušení (ISR len nastaví flag, čítanie je v `loop()` cez `recvRaw`),
+SX1262 má RX buffer na **1 paket** a žiadny overflow IRQ ani príznak → paket, ktorý priletí počas
+zápisu predošlého, sa ticho prepíše (nestúpne `rawrx` ani `rxerr`). Obeťou bol vždy paket hneď za
+META (SIG) alebo za SIG (APPLY) — podľa SF a delay to vyzeralo rôzne.
+
+**Fix (build #130+, HW overené #135):** deDUP — `handle_meta`: `dup_meta` (meta_recv && rovnaký
+patch_size+sha, počítané PRED clear/prepisom) → `if(!dup_meta) save_meta()`; `handle_sig`:
+`dup_sig` (sig_recv && rovnaký key_id+hdr_sig) → `if(!dup_sig) save_meta()`. Re-send
+identického META/SIG už nerobí flash zápis → konverguje za ~2 dávky. `hasSeen`/dispatch sa
+nemenili (sú OK). Redundancia APPLY v appke by nič neriešila.
+
+**Diagnostika pod `FK_DEBUG`:** ISR counter v `setFlag` → AALIVE `isr=` a `miss = isr−sent−recv−recverr`
+(odhad zahodených; rastie pri strate = FIFO prepis/stall, `miss=0` a paket chýba = strata na
+vzduchu); `[RADIO] readData ERR (CRC_MISMATCH)` = paket dorazil poškodený (RF), nie stall.
+Pri ladení pomohol SF7 log: APPLY dorazil vždy (RAW len=53), chýbal SIG.
+
+**Vedľajší nález:** `logRxRaw` tlačil `type=raw[0]&0x0F` (zavádzajúce — route + časť typu); reálny
+payload type je `(raw[0]>>2)&0x0F` (`Packet.h`). Opravené, pridaný `route=`. Pravidlo odloženého
+spracovania (§3) je kritické: akýkoľvek dlhý blocking v RX ceste = riziko tichej straty.
+
+### 8.9 `fota verify` cez LoRa CLI zhodil rádio — pretečenie 4 KB loop stacku (VYRIEŠENÉ 2026-06-27)
+Symptóm (2026-06-26): `fota verify` cez **vzdialené LoRa CLI** spoľahlivo zhodil rádio, ale Serial
+bežal ďalej (CPU žije, nie HardFault); cez Serial bol `fota verify` OK. Padlo aj bez patchu.
+
+**Root cause = tichý stack overflow loop-tasku.** Loop-task stack je presne 4096 B (`LOOP_STACK_SZ`,
+viď §4.2). LoRa CLI vchádza do `handleCommand` hlboko v RX ceste (`Dispatcher::loop → Mesh::onRecvPacket`
+(`data[184]`+`secret[32]`) `→ onPeerDataRecv` (`temp[166]`) `→ handleCommand`) = ~600–900 B navyše
+oproti Serial ceste; `fota_patch_to_file()` mal `cache[2048]` NA STACKU (pol stacku). FreeRTOS
+task stacky sú z heapu → pretečenie prepísalo susedný heap = stav RadioLib/SX1262 → rádio mŕtve.
+`configCHECK_FOR_STACK_OVERFLOW=1` je príliš slabé (kontrola SP len pri context-switchi).
+Aj iné LoRa CLI príkazy sú na hrane (4 KB je systémovo málo).
+
+**Fix (commit 27d5374b, 3 časti):**
+1. **Všetky LoRa FOTA CLI príkazy odložené z RX hooku do `loop()`** — `fota_args_of(cmd)` detektor,
+   `struct FotaCliDefer` (~178 B snapshot klienta) zaparkovaný v zdieľanom `FotaBuffer`;
+   `onPeerDataRecv` → `deferFotaCli()` + okamžité „spracúvam…" (ak pending → „zaneprázdnené");
+   `loop()` → `runFotaCli()` + `sendDeferredCliReply()`. Serial cesta beží inline (plytký stack).
+2. **`nrffota/FotaBuffer.{h,cpp}`** — jeden static `s_fota_buf[512]` v .bss, borrow/release
+   (`fota_get_buffer`/`fota_put_buffer`, guard proti dvojitej výpožičke); `fota_patch_to_file`
+   používa scratch namiesto `cache[2048]` (hpatch min. cache = 2 B, 512 B stačí; flasher to už robil
+   správne staticky). Reuse flasherovho buffra nejde (samostatný relokovateľný blob).
+3. **Heartbeat `stackfree=<N>B/4096`** = `uxTaskGetStackHighWaterMark` → historické minimum voľného
+   stacku od bootu (FreeRTOS plní stack vzorom), odhalí najhlbší bod aj z plytkého heartbeatu;
+   pri reálnom pretečení sa zasekne ~0.
+
+**HW meranie (2026-06-27, ProMicro #178):** min. voľný stack 1860 B po boote, 728 B hneď po prvom
+ADVERTe = Ed25519 verify prichádzajúceho advertu (~1,1 kB, inherentné MeshCore). Odložený verify
+ostáva pod týmto floorom → fix OK, rezerva 728 B. `fota verify` reply odvtedy nesie dôvod
+(`set_err`, texty `FOTA_TXT_VFY_*`).
+
+**Ako vyhodiť dočasné meranie:** stack kód je pod `#ifdef FK_DEBUG_STACKTRACE` (helper
+`loop_stack_used_now`, `<task.h>`, výpisy `stk_minfree`/`nowused`); build flagy
+`-D FK_DEBUG_STACKTRACE=1` a `-D INCLUDE_pxTaskGetStackStart=1` (promicro + sensecap fota env).
+Vyhodiť = odstrániť flagy + guardované bloky. Toto nie je NVMC-IRQ problém z §8.6 (verify nič
+nezapisuje).
+
+### 8.10 FOTA CLI odpoveď cez LoRa sa v kľude nezobrazila — kolízia timestampu (VYRIEŠENÉ 2026-06-28)
+`ota status` a iné FOTA CLI cez LoRa sa vracali oveľa menej často než `ver`/`get radio` (1 hop,
+kľud). Príčina: deferovaná FOTA cesta (`sendDeferredCliReply`) nemala workaround inline cesty
+(`if (timestamp == sender_timestamp) timestamp++`); idle repeater odpovedal v tej istej epoch
+sekunde → `reply_ts == sender_ts` → companion/appka odpoveď zahodila ako duplikát (seen-table
+podľa ts, §11). Pomalé príkazy (`verify`) prekročili sekundu, preto chodili; iná CLI aktivita
+posunie `last_unique` → bez kolízie. `is_retry` gate (rovnaký ts) to zosilnil — retry neodpovie.
+**Fix (3037cd90):** `sender_timestamp` ide cez snapshot `FotaCliDefer`; v `sendDeferredCliReply`
+`if (timestamp <= sender_timestamp) timestamp = sender_timestamp + 1;` (pokrýva kolíziu aj zlý
+čas). Overené: v kľude `ota status` chodí ako `ver` (#197 ProMicro, #198 SenseCap).
+Fakty okolo času: repeater si čas cez LoRa nastaví LEN explicitným `clock sync`/`time`
+(`CommonCLI.cpp`, admin-only — guest nespustí žiaden CLI); ProMicro/SenseCap nemajú HW RTC
+(`VolatileRTCClock`, po reboote 15. 5. 2024; zlý čas odpoveď neskryje, len ju companion zoradí do
+minulosti); MeshCore zámerne nesyncuje čas z ľubovoľného paketu (replay ochrana). Dva CLI príkazy
+tesne za sebou: prehodený starší padne na replay guard; FOTA defer je single-slot („zaneprázdnené").
+Otvorené: voliteľný auto-sync hodín z autentifikovaného FOTA admin príkazu (len dopredu).
+
+### 8.11 Demux companion formátu — `MACThenDecrypt` vracia AES-padovanú dĺžku (2026-06-23)
+Pri zjednotení formátu bridge/companion (`[FOTA_MAGIC 2B][len 1B][ts 4B][payload]`, companion
+`sendGroupData` pridáva `[data_type][len]`, jadro dáva `onGroupDataRecv` celý plaintext) zlyhal
+demux: `Mesh::MACThenDecrypt` vracia dĺžku zaokrúhlenú na 16 B blok, nie pravú dĺžku plaintextu.
+Porovnanie `data[2] == len-3` preto zahodilo KAŽDÝ paket (symptóm: `rawrx++`, type=10, hash 0xA4,
+ale `ota status` 0/0). Správne: `inner = data[2]` (companion data_len) je autoritatívna vnútorná
+dĺžka → `data += 3; len = inner`. MAC používa 32 B secret (`[16 derived][16 zero]`) — companion
+`CMD_SET_CHANNEL` aj receiver `fota_build_channel` zerujú `[16:32]` zhodne. `CMD_SEND_RAW_PACKET`
+(65) sa nepoužíva — volá `sendPacket`, nie `sendFloodScoped` (flood/region cez repeatre nefunguje).
 
 ---
 

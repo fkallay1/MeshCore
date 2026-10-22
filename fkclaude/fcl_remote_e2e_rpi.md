@@ -9,7 +9,7 @@
 | **T1000-E repeater** (cieľ testu) | vzdialené stanovište ~200 km | beží **build #352** (diag build; flashnutý DFU cez RPi 2026-07-17; predtým tam bol #348 — FOTA upgrade 347→348 sa teda DOKONČIL) |
 | **RPi (WPSD hotspot `wpsd1ba`)** | pri vzdialenom repeateri | **10.21.0.103** cez WireGuard (Wg1; NIE .104!), user `pi-star`; SSH kľúč nainštalovaný → z tohto PC funguje `ssh rpi` bez hesla; Fedor naň chodí cez **PuTTY (SSH)** |
 | **Telefón + companion** (vysielač) | lokálne u Fedora | Flutter appka (meshcore-open fork), adb funguje z tohto PC |
-| **Kontrolný ProMicro repeater** | lokálne u Fedora (2 m od vysielača) | **build #334** (spred 0x514 fixu — latentný USB-freeze bug, pri USB napájaní sa neprejaví; časom povýšiť) |
+| **Kontrolný ProMicro repeater** | lokálne u Fedora (2 m od vysielača) | v čase zápisu **#334** (spred 0x514 fixu); 2026-07-18 povýšený na #363, od 3. 9. 2026 beží **#500** — aktuálny stav v §7 |
 | RDP transfer `\\tsclient\D\10_RDP_Transfer` | — | **ku koncu session nefunkčný** (Access denied) — flash builds na vzdialené PC cezeň |
 
 ## 2. Otvorené problémy (kde sme skončili)
@@ -241,5 +241,28 @@ odchod `q`) — tam šípky ostávajú lokálne.
    ≈ 12 min → 44/44 → `fota verify` OK → **`fota flash` cez CLI** → AALIVE #358.
    POZOR: FOTA flash (USB re-enumerácia) zhodí picocom aj tmux server — po flashi
    session založiť nanovo (§4).
-6. Po validácii: FK flagy zapnúť aj pre ostatné FOTA envy + zvážiť ZC mirror; povýšiť
-   kontrolný ProMicro (#334 → aktuál).
+6. Po validácii: FK flagy zapnúť aj pre ostatné FOTA envy + zvážiť ZC mirror. ~~Povýšiť
+   kontrolný ProMicro~~ HOTOVO 2026-07-18 (#363, `flash-dfu --rebuild`); 3. 9. 2026 #500 cez UF2 (§7).
+
+## 7. Stav zariadení (posledná známa hodnota)
+
+Aktualizovať po každej práci so zariadeniami (skilly `remote-e2e` a `build-flash` sem odkazujú).
+
+| Zariadenie | Build / stav | Kedy, ako |
+|---|---|---|
+| T1000-E 200 km (`t1000e`, RPi pi-star 10.21.0.103) | **#358** — prvý kompletný 200 km e2e (355→358, 44/44 direct po `632139779C`, verify, `fota flash` cez CLI) | 2026-07-18 |
+| `xiao-5km` (RPi wpsd 192.168.91.32) | **#362** — e2e PASS za 163 s, direct 1 hop cez `21` (5/5); #263→#361 šlo DFU (starý 4 KB flasher by 24 KB extraSafe odmietol) | 2026-07-18 |
+| Kontrolný ProMicro (COM5, hub 7455) | **#500** — po zamrznutí #318 oživený cez UF2 disk `F:\PROMICRO` (serial DFU zlyhával); watchdog rádio po štarte sám reinicializoval | 3. 9. 2026; 2. 10. CLI cez hub OK, `set tx 10` — viď `fcl_readme_nicerf_lora2021.md` § ProMicro: SX1262 sa pri vysielaní resetuje |
+| XIAO NiceRF LoRa2021 (čistý build v1.17.1, hub 7421) | beží od 9. 9., rádio hluché od 20. 9. | `docs/nicerf-cista-vetva-20260909.md` § Stav k 2. 10. 2026 |
+
+Kde sa to overuje: `fota_remote_e2e.py status -d <dev>` (build# z AALIVE / `fota id`), lokálny
+ProMicro cez hub `localhost:7455`, build archív `test_nrf-fota/builds/` (čísla LR2021 vetiev bežia
+od 300, `features/nrf-fota` od 310 — viď `docs/fork-vetvy-a-sync-upstream.md`).
+
+### CLI lockup — história verzií
+
+Serial CLI buffer-lockup (≥159 znakov bez `\r`, §5b): buildy **< #356** sa zasekli do rebootu
+(jediná záchrana = reboot cez `flash-dfu`, 1200 bps touch beží mimo CLI); **od #356** (eb0dffd5)
+sa pretečenie spracuje ako unknown command; upstream to opravil rovnako v #3395 (2026-09-11), náš
+PR 2978 je prekonaný. Všetky zariadenia v tabuľke sú nad #356. Pasca „šípky v attachnutom tmux
+mimo copy-mode idú do zariadenia" platí ďalej.

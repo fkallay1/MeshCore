@@ -169,3 +169,18 @@ skladaj z `chr(92)`, alebo to doplň ručne.
    spomenieme v 2740 ako známu závislosť.
 4. **Dlhý beh čistého envu** — teraz beží 8 minút. Kým z toho nie sú hodiny, „overené"
    znamená len „nabootuje, prijíma a preposiela".
+
+## Stav k 2. 10. 2026
+
+- Čistá vetva `feat/nicerf-lora2021f33-xiao` rebasnutá na upstream dev `fad0ffb7` (`17a9de5b`,
+  force-push, buildy OK). **PR ešte neposlaný.** Konkurenčný upstream PR 2739 (c03rad0r) je iná
+  doska: plain LoRa2021 bez PA na ESP32-C3, bez RF switch/PA tabuľky/PRAM/power-cyklu, s vlastným
+  `EspIdfHal` — náš variant je nadstavba, nie kolízia.
+- Upstream dev drží RadioLib pin `6d893483` (7.7.1+); RadioLib 7.8.0/7.8.1 má natívny LR2021 DC-DC
+  (#1864) → GODMODE SIMO prejde na API, až MeshCore bumpne. RadioLib #1857/#1858 jgromes zavrel
+  23. 9. (podľa neho HW problém), #1858 nezmergnutý.
+- **Stav dosky (CLI cez hub 7421, bez zásahu):** čistý build v1.17.1 beží od 9. 9. 10:52 (uptime
+  23 d), CLI odpovedá, ale **rádio hluché od 20. 9. ~14:35**: počítadlá stoja (`recv=129657`,
+  `sent=31055`), `last_rssi=-169`, `nf=-120`, posledný sused 20. 9. 14:34. `get tx` = 7 (nie default
+  14), `repeat on`, hodiny nesynchronizované (2024). Čistý build nemá watchdog → nezotaví sa sám
+  (bod 3 vyššie v praxi). Klient na huby: skript `hubq.py` v session scratchpade (socket, príkaz + `\r`).

@@ -42,7 +42,8 @@ rieši config. Po flashi repeatra skript sám overí build# cez `fota id`.
 - **ESP32 (Heltec)**: kind s `"method": "pio-upload"` — flash cez `pio run -t upload
   --upload-port COMx`, len lokálne. nRF52 ide serial DFU (`--touch 1200`, netreba tlačidlo).
 - Nové zariadenie/typ: pridaj do `fota_devices.json` (devices + kinds env mapa).
-- Kontrolný ProMicro (COM5) beží starý #334 — pri najbližšom flashi ho povýš na aktuál.
+- Aktuálne buildy na zariadeniach drží fkclaude/fcl_remote_e2e_rpi.md#7-stav-zariadení-posledná-známa-hodnota
+  — po flashi tam build# zapíš.
 
 ## Súvisiace
 

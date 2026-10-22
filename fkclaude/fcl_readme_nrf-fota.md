@@ -128,7 +128,7 @@ pio run -e ProMicro_repeater_fota
   poradie repeater→klient) sa najprv uloží do ACL `out_path` → odpoveď aj všetky ďalšie
   CLI odpovede idú `sendDirect` namiesto floodu
 - `fota getpath` / `fota setpath <cesta>` (len LoRa — viažu sa na ACL záznam volajúceho) =
-  vypíš / ulož spätnú cestu klienta. Rieši [[fota_reverse_path_never_established]] („repeater
+  vypíš / ulož spätnú cestu klienta. Rieši [docs/fota-repeater-return-path-handoff.md](docs/fota-repeater-return-path-handoff.md) („repeater
   floodí odpovede, reverzná cesta sa nezaloží"). POZOR: flood login ACL cestu MAŽE — treba ju
   poslať znova (Flutter appka ju pridáva do missall automaticky, ťupka „Poslať cestu v dopyte")
 - Serial debug varianty (gated `#if FOTA_DEBUG`): `fota getacl` (výpis ACL s cestami),

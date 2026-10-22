@@ -2,7 +2,7 @@
 
 > Meta (SK): Draft popisu pre Pull Request do `meshcore-dev/MeshCore`. Text nižšie je
 > pripravený na priame vloženie do GitHub PR (telo od „---" po koniec). Pred odoslaním
-> PR: strip `//sk:` komentárov na špeciálnej vetve (viď [[fota_rename]] konvencie),
+> PR: strip `//sk:` komentárov na špeciálnej vetve (viď `fota-rename-handoff.md`),
 > over linky a čísla buildov. Inšpirované štruktúrou upstream PR #2864.
 
 Suggested PR title:
