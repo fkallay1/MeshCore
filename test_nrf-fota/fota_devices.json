@@ -39,7 +39,7 @@
       "role": "target",
       "transport": "rpi",
       "host": "192.168.91.32",
-      "_todo": "path_to zistiť flood sondou (2 hopy)",
+      "_todo": "path_to zistiť flood sondou (2 hopy); host 192.168.91.32 je spred prečíslovania ZABL (10.22.91.0/24?) — 2026-10-22 bez odozvy, doplniť novú adresu",
       "user": "pi-star",
       "serial": "/dev/ttyACM0",
       "tmux": "rptr",

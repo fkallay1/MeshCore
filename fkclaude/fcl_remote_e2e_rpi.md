@@ -250,10 +250,11 @@ Aktualizovať po každej práci so zariadeniami (skilly `remote-e2e` a `build-fl
 
 | Zariadenie | Build / stav | Kedy, ako |
 |---|---|---|
-| T1000-E 200 km (`t1000e`, RPi pi-star 10.21.0.103) | **#358** — prvý kompletný 200 km e2e (355→358, 44/44 direct po `632139779C`, verify, `fota flash` cez CLI) | 2026-07-18 |
-| `xiao-5km` (RPi wpsd 192.168.91.32) | **#362** — e2e PASS za 163 s, direct 1 hop cez `21` (5/5); #263→#361 šlo DFU (starý 4 KB flasher by 24 KB extraSafe odmietol) | 2026-07-18 |
-| Kontrolný ProMicro (COM5, hub 7455) | **#500** — po zamrznutí #318 oživený cez UF2 disk `F:\PROMICRO` (serial DFU zlyhával); watchdog rádio po štarte sám reinicializoval | 3. 9. 2026; 2. 10. CLI cez hub OK, `set tx 10` — viď `fcl_readme_nicerf_lora2021.md` § ProMicro: SX1262 sa pri vysielaní resetuje |
-| XIAO NiceRF LoRa2021 (čistý build v1.17.1, hub 7421) | beží od 9. 9., rádio hluché od 20. 9. | `docs/nicerf-cista-vetva-20260909.md` § Stav k 2. 10. 2026 |
+| T1000-E 200 km (`t1000e-200km`, RPi pi-star 10.21.0.103) | **#358** — prvý kompletný 200 km e2e (355→358, 44/44 direct po `632139779C`, verify, `fota flash` cez CLI); **2026-10-22 RPi pi-star nedostupný** (ping aj SSH timeout cez WG), build neoverený | 2026-07-18; 2026-10-22 pokus `status` |
+| `xiao-5km` (RPi wpsd, v `fota_devices.json` ešte `192.168.91.32` — adresa spred prečíslovania ZABL) | **#362** — e2e PASS za 163 s, direct 1 hop cez `21` (5/5) | 2026-07-18; 2026-10-22 stará aj `10.22.91.32` bez odozvy — doplniť novú adresu |
+| Kontrolný ProMicro (`promicro-local`, COM5, hub 7455) | **#346** (`fota id` cez hub 2026-10-22, image 431812 B, sha 16A07B2A) — **nie #500**, ako tu stálo od 3. 9.; je to build **pod #356** (CLI lockup fix), šípky v tmux/terminal ho zaseknú | 2026-10-22 overené |
+| `t1000e-local` (COM22, hub 7422) | **#504** (`fota id` 2026-10-22, image 378276 B, sha E5B387D9) | 2026-10-22 overené |
+| XIAO NiceRF LoRa2021 (`xiao-nicerf`, COM21, hub 7421, čistý build v1.17.1) | beží od 9. 9., rádio hluché od 20. 9.; **2026-10-22 CLI neodpovedá na `fota id`** (hub beží, port otvorený) | `docs/nicerf-cista-vetva-20260909.md` § Stav k 2. 10. 2026 |
 
 Kde sa to overuje: `fota_remote_e2e.py status -d <dev>` (build# z AALIVE / `fota id`), lokálny
 ProMicro cez hub `localhost:7455`, build archív `test_nrf-fota/builds/` (čísla LR2021 vetiev bežia
