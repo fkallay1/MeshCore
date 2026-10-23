@@ -27,6 +27,9 @@
     },
     "t1000e-local": { "role": "target", "transport": "com", "port": "COM22", "dfu_port": "COM23",
                       "hub_port": 7422, "kind": "t1000e" },
+    "companion-t1000e": { "role": "sender", "transport": "com", "port": "COM22", "dfu_port": "COM23",
+                          "kind": "t1000e-companion",
+                          "_comment": "ten istý T1000-E ako t1000e-local, nahraný ako USB companion (2026-10-23); e2e --sender companion-t1000e; hub t1000e-local musí byť vypnutý" },
     "xiao-nicerf": {
       "role": "target",
       "transport": "com",
@@ -55,11 +58,14 @@
     "delay": 5.0,
     "scope": "direct",
     "max_rounds": 12,
-    "privkey": "test_nrf-fota/test_key.der"
+    "privkey": "test_nrf-fota/test_key.der",
+    "freq": 869.618, "bw": 62.5, "sf": 7, "cr": 5,
+    "sender_python": "D:/FkDev/FkProj/VSC/ZephCore/.venv/Scripts/python.exe"
   },
   "kinds": {
     "_comment": "prefix = archív builds/<prefix>.fw_N.*; pio_zip=true = bez archívu, flashuje sa .pio/build/<env>/firmware.zip; method=pio-upload = ESP32 (pio run -t upload), inak nRF serial DFU",
     "xiao-companion": { "env": "Xiao_nrf52_companion_radio_usb", "pio_zip": true },
+    "t1000e-companion": { "env": "t1000e_companion_radio_usb", "pio_zip": true },
     "t1000e":   { "env": "t1000e_repeater_fota",        "prefix": "t1000e" },
     "promicro": { "env": "ProMicro_repeater_fota",      "prefix": "promicro" },
     "xiao":     { "env": "Xiao_nrf52_repeater_fota",    "prefix": "xiao" },

@@ -321,12 +321,14 @@ def fota_missall(con):
 # ────────────────────────── buildy / artefakty ──────────────────────────
 
 def newest_build(prefix, ext):
+    #sk: najnovsi = naposledy POSTAVENY (mtime), nie najvyssie cislo: vetvy maju vlastne
+    #sk: pocitadla a archiv mixuje vetvy (2026-10-23 sa po builde #372 vzal stary #507)
     builds = HERE / "builds"
-    best, best_n = None, -1
+    best, best_n, best_t = None, -1, -1.0
     for f in builds.glob(f"{prefix}.fw_*{ext}"):
         m = re.match(rf"{prefix}\.fw_(\d+)", f.name)
-        if m and int(m.group(1)) > best_n:
-            best_n, best = int(m.group(1)), f
+        if m and f.stat().st_mtime > best_t:
+            best_t, best_n, best = f.stat().st_mtime, int(m.group(1)), f
     return best_n, best
 
 
@@ -681,12 +683,18 @@ def run_sender(cfg, dev, old_bin, new_bin, chunks=None, scope=None, delay=None, 
     sender = get_device(cfg, cfg["defaults"]["sender"])
     d = cfg["defaults"]
     scope = scope or d.get("scope", "direct")
-    args = [sys.executable, str(HERE / "fota_sender_mcpy.py"),
+    #sk: sender potrebuje balík meshcore (meshcore_py) — penv ho nemá, preto vlastný python z configu
+    args = [d.get("sender_python") or sys.executable, str(HERE / "fota_sender_mcpy.py"),
             "--old", str(old_bin), "--new", str(new_bin),
             "--port", sender["port"], "--delay", str(delay or d.get("delay", 5)),
             "--scope", scope,
             "--privkey", str(ROOT / d["privkey"]),
             "--patch", str(LOGS / "patch_last.bin")]
+    #sk: sender companion prepne rádio na tieto parametre — musia sedieť so sieťou
+    #sk: (default sendera je SF8, sieť beží SF7 → bez tohto sa nedoručí nič, 2026-10-23)
+    for k in ("freq", "bw", "sf", "cr"):
+        if d.get(k) is not None:
+            args += [f"--{k}", str(d[k])]
     if scope == "direct":
         if not dev.get("path_to"):
             sys.exit(f"[CHYBA] scope=direct, ale '{dev['name']}' nemá path_to v configu")
@@ -952,9 +960,13 @@ def main():
         p.add_argument("--delay", type=float, help="s medzi paketmi (default z configu; živá sieť = 5)")
         p.add_argument("--max-rounds", type=int)
         p.add_argument("--monitor", help="meno monitor zariadenia (počty RAW/CHUNK počas behu)")
+        p.add_argument("--sender", help="meno companion zariadenia-vysielača (default: defaults.sender)")
 
     args = ap.parse_args()
     cfg = load_cfg(args.config)
+    if getattr(args, "sender", None):
+        get_device(cfg, args.sender)   #sk: overí, že meno existuje
+        cfg["defaults"]["sender"] = args.sender
     {"setup": cmd_setup, "status": cmd_status, "cmd": cmd_cmd, "log": cmd_log,
      "hub": cmd_hub, "build": cmd_build, "flash-dfu": cmd_flash_dfu,
      "probe-path": cmd_probe_path, "send": cmd_send, "e2e": cmd_e2e}[args.op](cfg, args)
